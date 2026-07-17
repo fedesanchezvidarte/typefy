@@ -13,3 +13,7 @@ Default canonical triage labels (`needs-triage`, `needs-info`, `ready-for-agent`
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Spec-driven development
+
+Features start as a spec (GitHub issue, label `spec`) and end with a review against it. The `feature-orchestrator` agent (`.claude/agents/`) drives the loop; project skills live in `.claude/skills/`. See `docs/agents/spec-driven.md`.
