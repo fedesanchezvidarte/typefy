@@ -7,6 +7,8 @@ description: "SvelteKit conventions for Typefy: routes, load functions, form act
 
 > **Living document.** Written during bootstrapping from the agreed stack (ADR-0001, ADR-0002). Refine with concrete examples as routes land in Phase 0-2.
 
+> **Scope.** This skill covers Typefy-specific conventions (routing layout, data flow, Supabase SSR, the typing view). For core Svelte 5 syntax — runes, snippets, events, effects — defer to the vendored official skills `svelte-core-bestpractices` and `svelte-code-writer` (which also exposes `npx @sveltejs/mcp` for docs lookup and autofixing). Don't guess at runes here.
+
 ## Routing layout
 
 ```

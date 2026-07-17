@@ -7,6 +7,8 @@ description: "UI/UX conventions for Typefy: Svelte components, Tailwind + scoped
 
 > **Living document.** Written during bootstrapping from the agreed stack (ADR-0007, ADR-0008). Refine with concrete component examples as the UI lands.
 
+> **Scope.** This skill covers Typefy-specific UI conventions (styling, character-state rendering, i18n, a11y). For core Svelte 5 authoring — runes, snippets, events, scoped styles, `{@attach}` — defer to the vendored official skills `svelte-core-bestpractices` and `svelte-code-writer`. Don't guess at runes here.
+
 ## Styling (ADR-0008)
 
 - **Tailwind** for layout, spacing, typography, and general UI.
@@ -23,7 +25,7 @@ description: "UI/UX conventions for Typefy: Svelte components, Tailwind + scoped
 ## Component conventions
 
 - Components live in `src/lib/components/` (shared) or beside their route when route-specific.
-- Props typed explicitly; use Svelte 5 runes idioms once scaffolding lands (confirm at Phase 0 and update this skill).
+- Props typed explicitly with `$props()`; use Svelte 5 runes throughout (see the `svelte-core-bestpractices` skill for the idioms and legacy features to avoid).
 - Keep components presentational; state orchestration lives in the page/route layer or dedicated state modules.
 
 ## i18n with Paraglide (ADR-0007)

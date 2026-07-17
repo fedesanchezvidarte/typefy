@@ -28,6 +28,7 @@ The **feature-orchestrator** agent (`.claude/agents/feature-orchestrator.md`) dr
 | `qa` | `.claude/agents/` | Vitest + Playwright, a11y audits |
 | `spec` skill | `.claude/skills/spec/` | Spec template and lifecycle |
 | Pattern skills | `.claude/skills/` | `architecture`, `lib-patterns`, `sveltekit-patterns`, `ui-ux-patterns`, `testing-patterns`, `supabase`, `supabase-postgres-best-practices` |
+| Vendored Svelte skills | `.claude/skills/` | `svelte-core-bestpractices`, `svelte-code-writer` — official Svelte 5 guidance (see `.claude/skills/VENDORED.md`) |
 
 ## Grounding rules
 
