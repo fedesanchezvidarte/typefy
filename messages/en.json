@@ -1,0 +1,8 @@
+{
+	"$schema": "https://inlang.com/schema/inlang-message-format",
+	"app_name": "Typefy",
+	"tagline": "Read and type long texts at the same time.",
+	"language_switcher_label": "Language",
+	"lang_label_en": "English",
+	"lang_label_es": "Español"
+}

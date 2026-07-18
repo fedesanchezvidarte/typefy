@@ -1,0 +1,24 @@
+# Package Managers
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lock
+bun.lockb
+
+# Miscellaneous
+/static/
+
+# Paraglide (generated)
+/src/lib/paraglide/
+/project.inlang/
+
+# Playwright output
+test-results
+playwright-report
+
+# Vendored agent skills and docs tooling
+.claude/
+# Project prose docs (not code)
+docs/
+CONTEXT.md
+CLAUDE.md

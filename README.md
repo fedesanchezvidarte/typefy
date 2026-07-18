@@ -4,8 +4,9 @@ A typing web app whose core engagement is **writing and "reading" long texts at 
 type through real books, seeing live feedback on every keystroke, and your progress is saved and synced
 across devices.
 
-> **Status:** Bootstrapping. The stack and roadmap are locked in (see [`CONTEXT.md`](CONTEXT.md) and the
-> [ADRs](docs/adr/)); application code is being built phase by phase. No runnable app yet.
+> **Status:** Phase 0 in progress — project scaffold, baseline EN/ES i18n, testing harnesses, CI and
+> Vercel deploy. The stack and roadmap are locked in (see [`CONTEXT.md`](CONTEXT.md) and the
+> [ADRs](docs/adr/)); the typing engine (Phase 1) is next.
 
 ## Concept
 
@@ -32,14 +33,14 @@ and keyboard-layout selection._
 
 ## Tech stack
 
-| Layer | Choice |
-|---|---|
-| Framework | SvelteKit + TypeScript |
-| Backend / Auth / DB | Supabase (Postgres + Google OAuth + Row Level Security) |
-| Hosting | Vercel |
-| i18n | Paraglide (EN/ES) |
-| Styling | Tailwind CSS (+ Svelte scoped CSS for the engine & animations) |
-| Testing | Vitest (unit / TDD) + Playwright (E2E) |
+| Layer               | Choice                                                         |
+| ------------------- | -------------------------------------------------------------- |
+| Framework           | SvelteKit + TypeScript                                         |
+| Backend / Auth / DB | Supabase (Postgres + Google OAuth + Row Level Security)        |
+| Hosting             | Vercel                                                         |
+| i18n                | Paraglide (EN/ES)                                              |
+| Styling             | Tailwind CSS (+ Svelte scoped CSS for the engine & animations) |
+| Testing             | Vitest (unit / TDD) + Playwright (E2E)                         |
 
 Every choice is documented with its context, trade-offs and alternatives in the
 [Architecture Decision Records](docs/adr/).
@@ -63,13 +64,45 @@ typing flows (keydown, backspace, correction, accents). See
 
 ## Roadmap
 
-| Phase | Goal |
-|---|---|
-| **0** | Scaffolding + baseline i18n, empty deploy to Vercel + CI |
-| **1** | Typing engine (TDD) over hardcoded text — the core |
+| Phase | Goal                                                          |
+| ----- | ------------------------------------------------------------- |
+| **0** | Scaffolding + baseline i18n, empty deploy to Vercel + CI      |
+| **1** | Typing engine (TDD) over hardcoded text — the core            |
 | **2** | Supabase + Auth + early progress sync against one seeded book |
-| **3** | Ingestion pipeline + catalog of 10-20 books |
-| **4** | Game modes + polish + E2E coverage |
+| **3** | Ingestion pipeline + catalog of 10-20 books                   |
+| **4** | Game modes + polish + E2E coverage                            |
+
+## Development
+
+Requires **Node 22** (see `engines` in `package.json`) and **npm**.
+
+```bash
+npm install
+npm run dev
+```
+
+| Command              | Purpose                               |
+| -------------------- | ------------------------------------- |
+| `npm run dev`        | Start the dev server                  |
+| `npm run build`      | Production build (`adapter-vercel`)   |
+| `npm run preview`    | Preview the production build          |
+| `npm run check`      | Type check with `svelte-check`        |
+| `npm run lint`       | Prettier check + ESLint               |
+| `npm run format`     | Format with Prettier                  |
+| `npm run test:unit`  | Vitest (node + browser-mode projects) |
+| `npm run test:e2e`   | Playwright end-to-end tests           |
+| `npm run check:i18n` | EN/ES message key parity check        |
+
+CI (GitHub Actions) runs the parity check, lint, type check, unit tests and E2E on every PR to
+`main` and push to `main`, on Node 22. Deploys go out via Vercel on push to `main`, with preview
+deployments per PR.
+
+### i18n
+
+The UI is bilingual (EN/ES) with Paraglide. The URL is authoritative: `/` serves English,
+`/es` serves Spanish. On a first visit to an unprefixed URL the server negotiates
+cookie > `Accept-Language` > English. The UI locale governs interface strings only — the
+language of typeable text content is data and fully independent of the UI language.
 
 ## Project documentation
 
