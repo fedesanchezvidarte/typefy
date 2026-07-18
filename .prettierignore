@@ -10,6 +10,7 @@ bun.lockb
 
 # Paraglide (generated)
 /src/lib/paraglide/
+/project.inlang/
 
 # Playwright output
 test-results
