@@ -32,8 +32,8 @@ Never write engine logic ahead of its test. The delicate cases are the point —
 
 - Accents and `ñ` (both hit and miss), dead keys, IME composition.
 - Backspace over `correct`, `incorrect`, and `corrected` characters.
-- The `corrected` rule: fixed characters turn yellow, still count as misses in raw accuracy.
-- Completion: a chunk with any non-`correct` character never completes.
+- The `corrected` rule: fixed characters render like `correct` ones (engine state stays `corrected`), still count as misses in raw accuracy.
+- Completion: a chunk with any `pending` or `incorrect` character never completes; `corrected` satisfies completion.
 - WPM/accuracy with injected timestamps — no real clocks in tests.
 - Zen mode: completion works, metrics absent.
 

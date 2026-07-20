@@ -13,7 +13,8 @@ typing with optional correction (Monkeytype style), or free typing with correcti
 **Free typing with correction required to complete the chunk**:
 
 - Each character has a state: `pending`, `correct`, `corrected`, `incorrect`.
-- An error is shown in **red**; fixing it with backspace turns it **yellow** (`corrected`).
+- An error is shown in **red**; fixing it with backspace marks it `corrected`. (Rendering of
+  `corrected` refined by the 2026-07-20 amendment below.)
 - You can advance with visible errors, but the **chunk does not complete** until everything is correct
   (consistent with the "writing the text" fantasy: a text with typos is not finished).
 - **Accuracy (raw)** = first-attempt correct characters / total characters. The `corrected` state counts
@@ -24,7 +25,7 @@ typing with optional correction (Monkeytype style), or free typing with correcti
 
 ## Consequences
 
-- Clean metrics and a simple per-character state model that supports the three colors.
+- Clean metrics and a simple per-character state model that drives the rendering.
 - Critical component to test thoroughly (dead keys, accents, `ñ`, IME) → prime candidate for TDD with
   Vitest ([ADR-0009](0009-vitest-playwright-testing.md)).
 - Interacts with the game modes: in **Zen** WPM/accuracy are not tracked, only progress %.
@@ -47,6 +48,11 @@ Two design decisions made during Phase 1 are folded in as part of the same model
   **first-attempt record** the first time a position is judged (retyping never rewrites it), and every
   metric is computed over a slice of the log (word / chunk / session). The state machine never imports
   the metrics module, so Zen mode later disables tracking with a flag, not a fork.
+- **`corrected` renders identically to `correct`** (user feedback after testing full sessions: a
+  lasting yellow mark on fixed errors felt demotivating). Only *current* mistakes are highlighted;
+  once fixed, a character carries no visual mark. The `corrected` state remains in the engine — it
+  caps raw accuracy, satisfies chunk completion, and enables future error-position features. An
+  opt-in "highlight corrections" setting is a candidate for the settings phase.
 
 ## Pending (post-MVP, already contemplated)
 

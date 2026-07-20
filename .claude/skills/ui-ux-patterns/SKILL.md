@@ -18,9 +18,9 @@ description: "UI/UX conventions for Typefy: Svelte components, Tailwind + scoped
 ## Character-state rendering (ADR-0004)
 
 - The typing surface renders each character as a span keyed to its engine state:
-  `pending` (dim) · `correct` (default/green) · `corrected` (**yellow**) · `incorrect` (**red**).
+  `pending` (dim) · `correct` (green) · `corrected` (rendered identically to `correct` — only current mistakes are highlighted; the state still exists in the engine) · `incorrect` (**red**).
 - Rendering is a pure function of engine state — components hold no typing logic of their own; they dispatch DOM events to the engine and render what it returns.
-- Input capture: hidden input + `keydown` — keep focus management airtight (clicking anywhere in the typing area refocuses the hidden input).
+- Input capture: hidden input reading text from `beforeinput`/`input`, `keydown` for control keys only (ADR-0004, as amended) — keep focus management airtight (clicking anywhere in the typing area refocuses the hidden input).
 
 ## Component conventions
 
@@ -40,7 +40,7 @@ A typing app lives on the keyboard — a11y is core, not a checkbox:
 
 - The whole typing flow must work keyboard-only (start, type, correct, advance, finish).
 - Never trap focus in a way the user can't escape; visible focus indicators everywhere else.
-- Color is never the only signal: `corrected`/`incorrect` states need a non-color cue (e.g. underline/strikethrough) for color-blind users.
+- Color is never the only signal: the `incorrect` state needs a non-color cue (e.g. underline + background tint) for color-blind users. (`corrected` deliberately renders identical to `correct`, so it needs no cue.)
 - Live metrics (WPM/accuracy) update politely (`aria-live="polite"` or equivalent) without drowning screen readers — in Zen mode, they're absent entirely.
 - Respect `prefers-reduced-motion` in engine animations.
 

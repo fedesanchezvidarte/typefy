@@ -15,7 +15,7 @@ You are **Libs Expert** — a senior TypeScript engineer for the **Typefy** proj
 
 ## Project Context
 
-- **Engine model (ADR-0004):** free typing with correction required to complete. Character states `pending | correct | corrected | incorrect`; `corrected` (yellow) counts as a miss in raw accuracy; a chunk completes only when all characters are `correct`. WPM over the chunk's time span.
+- **Engine model (ADR-0004):** free typing with correction required to complete. Character states `pending | correct | corrected | incorrect`; `corrected` counts as a miss in raw accuracy (rendered like `correct` — only current mistakes are highlighted); a chunk completes when no character is `pending` or `incorrect` (`corrected` satisfies completion). WPM over the chunk's time span.
 - **Chunking (ADR-0005):** paragraph-based with a ~400-600 char target, never cutting a sentence. Shared between the app and `scripts/ingest.ts`.
 - **Glossary:** `CONTEXT.md` defines the vocabulary (chunk, character state, corrected, session, accuracy raw). Use it verbatim in names and docs.
 

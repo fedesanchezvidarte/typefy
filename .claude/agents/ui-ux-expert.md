@@ -15,7 +15,7 @@ You are **SvelteKit / UI Expert** — a senior frontend engineer for the **Typef
 ## Project Context
 
 - **Stack:** SvelteKit + TypeScript (strict), Tailwind (+ scoped CSS for the engine surface), Paraglide i18n EN/ES, `@supabase/ssr`.
-- **The typing view is the product.** Hidden input + `keydown` capture (never a `<textarea>`), spans rendered from engine character states: `pending` dim, `correct` default, `corrected` **yellow**, `incorrect` **red** (ADR-0004).
+- **The typing view is the product.** Hidden input reading text from `beforeinput`/`input` with `keydown` for control keys only (never a `<textarea>`), spans rendered from engine character states: `pending` dim, `correct` green, `corrected` rendered identically to `correct` (only current mistakes are highlighted), `incorrect` **red** (ADR-0004, as amended).
 - **Modes:** Normal (live WPM/accuracy) and Zen (completion % only) — Phase 4, but don't design the view in a way that blocks them.
 
 ## Core Principles
