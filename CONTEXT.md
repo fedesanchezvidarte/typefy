@@ -8,12 +8,14 @@ Portfolio project, free, following professional industry standards.
 
 ## Status
 
-Bootstrapping phase. Stack and phases agreed (see ADRs). No application code yet.
+In active development. Phase 0 is complete (spec #3): SvelteKit + TS scaffold, Tailwind v4,
+Vitest/Playwright harnesses, Paraglide EN/ES (`/` = EN, `/es` = ES), CI, and production deploy on
+Vercel. Phase 1 (spec #5) delivers the typing engine over hardcoded fixture texts.
 
 Phased roadmap:
 
-- **Phase 0** — Scaffolding + baseline i18n: SvelteKit+TS, Tailwind, Vitest/Playwright, ESLint/Prettier,
-  Paraglide EN/ES wired from the start, empty deploy to Vercel + CI.
+- **Phase 0** — ✅ Scaffolding + baseline i18n: SvelteKit+TS, Tailwind, Vitest/Playwright,
+  ESLint/Prettier, Paraglide EN/ES wired from the start, empty deploy to Vercel + CI.
 - **Phase 1** — Typing engine (TDD) over hardcoded text. The core of the product.
 - **Phase 2** — Supabase + Auth + early progress sync, against 1 manually seeded book.
 - **Phase 3** — Ingestion pipeline + catalog of 10-20 books read from the database.
@@ -35,9 +37,16 @@ Use these terms as defined here; do not drift to synonyms.
   `incorrect`.
 - **Corrected (yellow)** — A character that was mistyped and then fixed with backspace. Visually
   resolved, but **counts as an error** in accuracy.
-- **Completed chunk** — A chunk is only marked completed when all its characters are correct. You can
-  advance with visible errors (red), but not complete.
-- **WPM** — Words per minute, measured over the chunk's time.
+- **Completed chunk** — A chunk completes the instant no character is `pending` or `incorrect`: the
+  `corrected` state satisfies completion (it is visually resolved) while still counting as a miss in
+  accuracy. You can advance with visible errors (red), but not complete.
+- **First-attempt record** — The outcome (hit/miss) of the first time a character position is judged.
+  Immutable once set: backspacing and retyping never rewrite it. Drives Accuracy (raw).
+- **Keystroke log** — Ordered record of every keystroke (typed character or backspace) with its
+  timestamp. The single source of truth for metrics: every metric is computable over an arbitrary
+  slice of the log (word / chunk / session).
+- **WPM** — Words per minute, measured over the chunk's time. Gross WPM = (typed characters ÷ 5) ÷
+  elapsed minutes; backspaces do not count as typed characters. Always displayed alongside accuracy.
 - **Accuracy (raw)** — First-attempt correct characters / total characters. The `corrected` state counts
   as a miss even though it is visually resolved.
 - **Normal mode** — Tracks WPM + accuracy, with live metrics (update granularity configurable by
@@ -47,7 +56,9 @@ Use these terms as defined here; do not drift to synonyms.
   in one sitting.
 - **Ingestion** — Offline process that downloads a public-domain text, cleans the source header/footer,
   normalizes, splits into paragraphs → chunks and seeds the database. Reusable to add new books without a
-  redeploy.
+  redeploy. The paragraph-grouping chunker is built here (Phase 3), TDD from its day one (ADR-0009's
+  "chunking TDD from day one" reads as day one of that module); Phase 1 fixture texts are chunked by
+  hand.
 - **Progress / sync** — Per-user progress state (completed chunks, WPM, accuracy). Persisted in the
   database and protected with Row Level Security; each user sees only their own.
 
