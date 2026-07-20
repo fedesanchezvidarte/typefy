@@ -20,7 +20,7 @@ When invoked by the **Feature Orchestrator**, derive test cases from the spec's 
 - **Unit/component:** Vitest + Testing Library; co-located `*.test.ts` under `src/lib/`.
 - **Services:** mocked `SupabaseClient` via shared helper — a real DB call must never reach a unit test.
 - **E2E:** Playwright in `tests/e2e/`, simulating real typing (`keyboard.press` sequences with mistakes, backspace, correction).
-- **Engine cases that matter most (ADR-0004):** accents, `ñ`, dead keys, IME, backspace across states, `corrected`-counts-as-miss, completion requires all-`correct`, Zen mode metric absence.
+- **Engine cases that matter most (ADR-0004):** accents, `ñ`, dead keys, IME, backspace across states, `corrected`-counts-as-miss, completion requires no `pending`/`incorrect` (`corrected` satisfies it), Zen mode metric absence.
 - **i18n:** EN and ES both covered; locators use roles/test-ids, not translated text.
 
 ## Core Principles

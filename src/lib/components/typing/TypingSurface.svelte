@@ -109,8 +109,11 @@
 	/*
 	 * Engine-surface rendering lives in scoped CSS (ADR-0008); colors come from the
 	 * shared character-state tokens defined in the app theme (layout.css).
-	 * Color is never the only signal: corrected/incorrect also get an underline,
-	 * and incorrect gets a background tint (visible even on spaces).
+	 * Color is never the only signal: incorrect also gets an underline and a
+	 * background tint (visible even on spaces).
+	 * `corrected` deliberately renders the same as `correct`: only *current*
+	 * mistakes are highlighted, so a fixed error carries no lasting mark. The
+	 * engine still tracks the state (accuracy, completion, future features).
 	 */
 	.surface {
 		position: relative;
@@ -126,14 +129,9 @@
 		color: var(--color-char-pending);
 	}
 
-	.char[data-state='correct'] {
-		color: var(--color-char-correct);
-	}
-
+	.char[data-state='correct'],
 	.char[data-state='corrected'] {
-		color: var(--color-char-corrected);
-		text-decoration: underline;
-		text-decoration-thickness: 2px;
+		color: var(--color-char-correct);
 	}
 
 	.char[data-state='incorrect'] {

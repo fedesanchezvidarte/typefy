@@ -29,7 +29,7 @@ Routes call services; services call pure modules; pure modules call nothing abov
 
 - Character states: `'pending' | 'correct' | 'corrected' | 'incorrect'` — use these exact names, mirroring the glossary.
 - The state machine is **event-driven**: it consumes typed events (`keypress`, `backspace`) and returns new state. Rendering (spans, colors) lives in the UI layer, never in the engine.
-- A chunk completes only when **every** character is `correct`. `corrected` (yellow) is visually resolved but still blocks nothing — it just counts as a miss in raw accuracy.
+- A chunk completes when no character is `pending` or `incorrect` — `corrected` satisfies completion. It renders like `correct` in the UI but still counts as a miss in raw accuracy.
 - **Accuracy (raw)** = first-attempt correct / total. **WPM** over the chunk's time span (injected timestamps).
 - Watch the delicate cases from day one: accents, `ñ`, dead keys, IME input, backspace across corrected characters.
 - Zen mode: the engine still tracks character states (completion needs them) but WPM/accuracy computation is skipped/ignored.
