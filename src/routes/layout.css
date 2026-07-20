@@ -1,1 +1,15 @@
 @import 'tailwindcss';
+
+@theme {
+	/*
+	 * Character-state design tokens (ADR-0004 states, ADR-0008 shared tokens).
+	 * Exposed as CSS variables so the typing surface's scoped CSS and Tailwind
+	 * utilities draw from the same palette.
+	 */
+	--color-char-pending: #a1a1aa; /* zinc-400 — dim */
+	--color-char-correct: #16a34a; /* green-600 */
+	--color-char-corrected: #d97706; /* amber-600 — yellow */
+	--color-char-incorrect: #dc2626; /* red-600 */
+	--color-char-incorrect-bg: #fee2e2; /* red-100 — makes wrong spaces visible */
+	--color-caret: #18181b; /* zinc-900 */
+}

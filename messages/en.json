@@ -4,5 +4,22 @@
 	"tagline": "Read and type long texts at the same time.",
 	"language_switcher_label": "Language",
 	"lang_label_en": "English",
-	"lang_label_es": "Español"
+	"lang_label_es": "Español",
+	"landing_start_typing": "Start typing",
+	"typing_page_title": "Type",
+	"picker_heading": "Choose a text",
+	"picker_chunk_count": "{count} chunks",
+	"typing_input_label": "Typing input",
+	"typing_restart_chunk": "Restart chunk (Esc)",
+	"typing_restart_session": "Restart session",
+	"metrics_wpm_label": "WPM",
+	"metrics_accuracy_label": "Accuracy",
+	"metrics_chunk_progress": "Chunk {current} of {total}",
+	"metrics_last_chunk_label": "Last chunk",
+	"summary_heading": "Session complete",
+	"summary_average_wpm": "Average WPM",
+	"summary_overall_accuracy": "Overall accuracy",
+	"summary_chunks_completed": "Chunks completed",
+	"summary_total_time": "Total active time",
+	"summary_pick_another": "Choose another text"
 }

@@ -4,5 +4,22 @@
 	"tagline": "Lee y escribe textos largos al mismo tiempo.",
 	"language_switcher_label": "Idioma",
 	"lang_label_en": "English",
-	"lang_label_es": "Español"
+	"lang_label_es": "Español",
+	"landing_start_typing": "Empieza a escribir",
+	"typing_page_title": "Escribir",
+	"picker_heading": "Elige un texto",
+	"picker_chunk_count": "{count} fragmentos",
+	"typing_input_label": "Entrada de escritura",
+	"typing_restart_chunk": "Reiniciar fragmento (Esc)",
+	"typing_restart_session": "Reiniciar sesión",
+	"metrics_wpm_label": "PPM",
+	"metrics_accuracy_label": "Precisión",
+	"metrics_chunk_progress": "Fragmento {current} de {total}",
+	"metrics_last_chunk_label": "Último fragmento",
+	"summary_heading": "Sesión completada",
+	"summary_average_wpm": "PPM promedio",
+	"summary_overall_accuracy": "Precisión general",
+	"summary_chunks_completed": "Fragmentos completados",
+	"summary_total_time": "Tiempo activo total",
+	"summary_pick_another": "Elige otro texto"
 }
