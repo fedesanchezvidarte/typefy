@@ -100,7 +100,8 @@ test.describe('character states (spec criterion path)', () => {
 		await expect(chars(page).nth(2)).toHaveAttribute('data-state', 'pending');
 		await expect(chars(page).nth(2)).toHaveClass(/caret/);
 
-		// Retyping correctly shows corrected (yellow) — never plain correct again.
+		// Retyping correctly marks the state 'corrected' — never plain 'correct'
+		// again (engine state; visually it renders the same as 'correct').
 		await type(page, ' ');
 		await expect(chars(page).nth(2)).toHaveAttribute('data-state', 'corrected');
 

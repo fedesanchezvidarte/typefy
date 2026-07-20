@@ -7,8 +7,7 @@
 	 * utilities draw from the same palette.
 	 */
 	--color-char-pending: #a1a1aa; /* zinc-400 — dim */
-	--color-char-correct: #16a34a; /* green-600 */
-	--color-char-corrected: #d97706; /* amber-600 — yellow */
+	--color-char-correct: #16a34a; /* green-600 — also used for `corrected` (fixed errors carry no lasting mark) */
 	--color-char-incorrect: #dc2626; /* red-600 */
 	--color-char-incorrect-bg: #fee2e2; /* red-100 — makes wrong spaces visible */
 	--color-caret: #18181b; /* zinc-900 */
