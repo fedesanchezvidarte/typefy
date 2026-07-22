@@ -16,6 +16,9 @@ bun.lockb
 test-results
 playwright-report
 
+# Supabase local-only state (machine-specific; ignored by supabase/.gitignore too)
+/supabase/.temp/
+
 # Vendored agent skills and docs tooling
 .claude/
 # Project prose docs (not code)
