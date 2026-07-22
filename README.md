@@ -4,9 +4,10 @@ A typing web app whose core engagement is **writing and "reading" long texts at 
 type through real books, seeing live feedback on every keystroke, and your progress is saved and synced
 across devices.
 
-> **Status:** Phase 0 in progress — project scaffold, baseline EN/ES i18n, testing harnesses, CI and
-> Vercel deploy. The stack and roadmap are locked in (see [`CONTEXT.md`](CONTEXT.md) and the
-> [ADRs](docs/adr/)); the typing engine (Phase 1) is next.
+> **Status:** Phases 0–1 complete; Phase 2a in progress. The scaffold, baseline EN/ES i18n, testing
+> harnesses, CI/Vercel deploy, and the typing engine are in place; the Supabase backend foundation
+> (schema, RLS, seeded books) has landed, with auth and content-from-database underway. See
+> [`CONTEXT.md`](CONTEXT.md) and the [ADRs](docs/adr/).
 
 ## Concept
 
@@ -52,8 +53,10 @@ Every choice is documented with its context, trade-offs and alternatives in the
 - **Ingestion** — an offline script (`scripts/ingest.ts`) downloads a public-domain text, strips source
   headers/footers, normalizes it, splits it into paragraph chunks, and seeds the database. Adding a book
   is a script run, not a redeploy.
-- **Typing engine** — a hidden input + `keydown` listener rendering per-character spans (not a
-  `<textarea>`). This is the core of the product and the most heavily tested part.
+- **Typing engine** — a hidden input rendering per-character spans (not a `<textarea>`). Text is read
+  from `beforeinput`/`input` events (so dead-key/IME composition yields the final composed character),
+  with `keydown` for control keys only ([ADR-0004](docs/adr/0004-typing-engine-model.md)). This is the
+  core of the product and the most heavily tested part.
 
 ## Testing
 
