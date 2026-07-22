@@ -67,13 +67,13 @@ typing flows (keydown, backspace, correction, accents). See
 
 ## Roadmap
 
-| Phase | Goal                                                          |
-| ----- | ------------------------------------------------------------- |
-| **0** | Scaffolding + baseline i18n, empty deploy to Vercel + CI      |
-| **1** | Typing engine (TDD) over hardcoded text — the core            |
-| **2** | Supabase + Auth + early progress sync against seeded books    |
-| **3** | Ingestion pipeline + catalog of 10-20 books                   |
-| **4** | Game modes + polish + E2E coverage                            |
+| Phase | Goal                                                       |
+| ----- | ---------------------------------------------------------- |
+| **0** | Scaffolding + baseline i18n, empty deploy to Vercel + CI   |
+| **1** | Typing engine (TDD) over hardcoded text — the core         |
+| **2** | Supabase + Auth + early progress sync against seeded books |
+| **3** | Ingestion pipeline + catalog of 10-20 books                |
+| **4** | Game modes + polish + E2E coverage                         |
 
 ## Development
 
