@@ -71,7 +71,7 @@ typing flows (keydown, backspace, correction, accents). See
 | ----- | ------------------------------------------------------------- |
 | **0** | Scaffolding + baseline i18n, empty deploy to Vercel + CI      |
 | **1** | Typing engine (TDD) over hardcoded text — the core            |
-| **2** | Supabase + Auth + early progress sync against one seeded book |
+| **2** | Supabase + Auth + early progress sync against seeded books    |
 | **3** | Ingestion pipeline + catalog of 10-20 books                   |
 | **4** | Game modes + polish + E2E coverage                            |
 
@@ -162,6 +162,26 @@ client (in Google Cloud Console) must list **both** callback URLs as authorized 
 
 After changing any provider values in `.env` or `config.toml`, run `npm run db:stop && npm run db:start`
 for the change to take effect.
+
+#### Schema changes: migrations, seed, and types
+
+The committed migrations are the **single source of truth** for the schema. Never change the schema in
+the hosted dashboard — that causes local/hosted drift.
+
+1. `npx supabase migration new <name>` scaffolds a timestamped file in `supabase/migrations/`.
+2. Write the SQL (always include explicit `enable row level security` + policies for new tables).
+3. `npm run db:reset` — apply and test locally.
+4. Commit the migration.
+5. `npm run db:push` — apply to the hosted project (prompts for the database password).
+
+| Command                    | Purpose                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| `npm run db:seed:generate` | Regenerate the seed migration from `src/lib/fixtures/` (keeps fixtures the single source). |
+| `npm run db:types`         | Regenerate `src/lib/database.types.ts` from the local schema. Run after any schema change. |
+
+After DDL changes, check the Supabase security advisors (zero issues expected). Every `db push` prints a
+cosmetic `pg-delta` "failed to cache migrations catalog" warning — it is unrelated to whether the
+migration applied; ignore it.
 
 #### Troubleshooting
 
