@@ -73,8 +73,11 @@ const handleLocaleNegotiation: Handle = ({ event, resolve }) => {
 		(request.headers.get('sec-fetch-dest') === 'document' ||
 			(request.headers.get('accept') ?? '').includes('text/html'));
 	const hasLocalePrefix = /^\/es(?:\/|$)/.test(url.pathname);
+	// /auth/* must never be locale-rewritten: the OAuth callback is a document GET, and a
+	// 302 to /es/auth/callback would break the redirect chain / PKCE exchange (spec #7).
+	const isAuthRoute = url.pathname.startsWith('/auth/');
 
-	if (isDocumentRequest && !hasLocalePrefix) {
+	if (isDocumentRequest && !hasLocalePrefix && !isAuthRoute) {
 		const cookieLocale = event.cookies.get(cookieName);
 		const locale = isLocale(cookieLocale)
 			? cookieLocale
