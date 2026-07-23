@@ -6,9 +6,12 @@
 		summary: SessionSummary;
 		onRestartSession: () => void;
 		onPickAnother: () => void;
+		/** Guests see a prompt to sign in and save progress (spec #7); `next` returns them here. */
+		signedIn: boolean;
+		next: string;
 	}
 
-	let { summary, onRestartSession, onPickAnother }: Props = $props();
+	let { summary, onRestartSession, onPickAnother, signedIn, next }: Props = $props();
 
 	function formatAccuracy(accuracy: number): string {
 		return `${(accuracy * 100).toFixed(1)}%`;
@@ -83,4 +86,20 @@
 			{m.summary_pick_another()}
 		</button>
 	</div>
+
+	{#if !signedIn}
+		<!-- Guests only: the one place progress-saving is surfaced (the typing surface stays clean). -->
+		<form
+			method="POST"
+			action="/auth/signin"
+			data-testid="summary-sign-in-prompt"
+			class="flex flex-wrap items-center gap-3 border-t border-zinc-200 pt-4"
+		>
+			<input type="hidden" name="next" value={next} />
+			<span class="text-sm text-zinc-600">{m.summary_sign_in_prompt()}</span>
+			<button type="submit" class={buttonClasses} data-testid="summary-sign-in">
+				{m.auth_sign_in_google()}
+			</button>
+		</form>
+	{/if}
 </section>

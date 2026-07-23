@@ -3,6 +3,7 @@
 	import type { Pathname } from '$app/types';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import { applySessionEvent, createSession, sessionSummary } from '$lib/engine/session';
 	import type { SessionEvent, SessionState } from '$lib/engine/session';
@@ -82,6 +83,8 @@
 			summary={sessionSummary(session)}
 			onRestartSession={restartSession}
 			onPickAnother={pickAnother}
+			signedIn={!!page.data.user}
+			next={page.url.pathname + page.url.search}
 		/>
 	{:else}
 		<MetricsBar

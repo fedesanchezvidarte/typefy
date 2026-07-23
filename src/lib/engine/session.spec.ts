@@ -129,6 +129,22 @@ describe('applySessionEvent — restart semantics', () => {
 		const state = applySessionEvent(midSecondChunk, { type: 'restart-session' });
 		expect(state).toEqual(createSession(text));
 	});
+
+	it('restart-chunk after the session finished clears finished and yields a typeable chunk', () => {
+		const finished = run(createSession(makeText(['ab'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'char', char: 'b', timestamp: 1000 }
+		]);
+		expect(finished.finished).toBe(true);
+
+		const restarted = applySessionEvent(finished, { type: 'restart-chunk' });
+		expect(restarted.finished).toBe(false);
+		expect(restarted.activeChunk).toEqual(createChunk('ab'));
+
+		// A keystroke is no longer ignored — the reset chunk accepts input again.
+		const typed = applySessionEvent(restarted, { type: 'char', char: 'a', timestamp: 5000 });
+		expect(typed.activeChunk.cursor).toBe(1);
+	});
 });
 
 describe('sessionSummary', () => {
