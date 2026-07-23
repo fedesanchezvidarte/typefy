@@ -1,5 +1,7 @@
 import type { Handle } from '@sveltejs/kit';
 import { sequence } from '@sveltejs/kit/hooks';
+import { createServerClient } from '@supabase/ssr';
+import { PUBLIC_SUPABASE_PUBLISHABLE_KEY, PUBLIC_SUPABASE_URL } from '$env/static/public';
 import {
 	cookieName,
 	extractLocaleFromHeader,
@@ -8,6 +10,50 @@ import {
 	localizeUrl
 } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
+
+/**
+ * Request-scoped Supabase client (@supabase/ssr), bound to the request cookies so a
+ * session (once auth lands) survives across requests. Runs first in the sequence: the
+ * locale negotiation below will, from Phase 2a's auth work on, read a signed-in user's
+ * profile locale, which needs the session this handle establishes.
+ *
+ * `safeGetSession` validates the JWT with getUser() and never trusts getSession() alone.
+ */
+const handleSupabase: Handle = async ({ event, resolve }) => {
+	event.locals.supabase = createServerClient(PUBLIC_SUPABASE_URL, PUBLIC_SUPABASE_PUBLISHABLE_KEY, {
+		cookies: {
+			getAll: () => event.cookies.getAll(),
+			setAll: (cookiesToSet) => {
+				for (const { name, value, options } of cookiesToSet) {
+					event.cookies.set(name, value, { ...options, path: '/' });
+				}
+			}
+		}
+	});
+
+	event.locals.safeGetSession = async () => {
+		const {
+			data: { session }
+		} = await event.locals.supabase.auth.getSession();
+		if (!session) {
+			return { session: null, user: null };
+		}
+		const {
+			data: { user },
+			error
+		} = await event.locals.supabase.auth.getUser();
+		if (error) {
+			return { session: null, user: null }; // JWT failed validation
+		}
+		return { session, user };
+	};
+
+	return resolve(event, {
+		// @supabase/ssr needs these response headers preserved through SvelteKit.
+		filterSerializedResponseHeaders: (name) =>
+			name === 'content-range' || name === 'x-supabase-api-version'
+	});
+};
 
 /**
  * First-visit UI language negotiation (spec #3).
@@ -60,4 +106,4 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 		});
 	});
 
-export const handle: Handle = sequence(handleLocaleNegotiation, handleParaglide);
+export const handle: Handle = sequence(handleSupabase, handleLocaleNegotiation, handleParaglide);
