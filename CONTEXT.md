@@ -38,7 +38,10 @@ Use these terms as defined here; do not drift to synonyms.
   or another in Spanish). Has metadata (title, author, language, cover).
 - **Chunk** — Atomic unit of a typeable text and of progress. A text is split into chunks **by paragraphs
   with a size target** (~400-600 characters, never cutting a sentence). Book progress = completed chunks
-  / total.
+  / total. Presented to users as a **passage**.
+- **Passage** — The user-facing name for a chunk (`pasaje` in the ES UI). `chunk` stays the term in
+  code, schema, engine and tests; the UI never says "chunk" — and never "page", which would be a false
+  claim about the book's real pagination. Paraglide keys use `passage_*`.
 - **Character state** — Each character in a chunk is in one of: `pending`, `correct`, `corrected`,
   `incorrect`.
 - **Corrected (yellow)** — A character that was mistyped and then fixed with backspace. Visually
@@ -80,6 +83,16 @@ Use these terms as defined here; do not drift to synonyms.
 - **Profile** — A signed-in user's identity row (display name, avatar, optional locale preference),
   created automatically on first sign-in and readable/editable only by that user. A null `locale` means
   "no explicit preference", leaving the cookie > `Accept-Language` > EN detection to apply.
+- **Palette** — One axis of the two-axis theming model (ADR-0011): a pure colour-token record (bg,
+  sheet, fg, dim, muted, border, accent, error, errorTint, caret + light/dark scheme) that never
+  assumes a typeface. Launch set: warm-light (default), cool-light, soft-dark, near-black. Defined in
+  `src/lib/theme/palettes.ts`, painted by `src/routes/layout.css`.
+- **Font family** — The other theming axis: type and only type (sans / serif / mono — IBM Plex,
+  self-hosted), never assuming a background. Optically matched by the superfamily's shared metrics, so
+  switching family never reflows the passage.
+- **Sheet** — The typing surface's own page region: `sheet` background one step off `bg`, minimal
+  border, generous padding. The passage renders on it **tonally**: pending = dim, correct/corrected =
+  full foreground, incorrect = the only chromatic event (error + tint + wavy underline). No green.
 - **Guest** — A visitor who is not signed in. Types fully (content is world-readable) but no progress is
   saved, and there is no anonymous account. Signing in is optional and only unlocks progress persistence.
 
@@ -95,3 +108,4 @@ Use these terms as defined here; do not drift to synonyms.
 - [ADR-0008](docs/adr/0008-tailwind-styling.md) — Tailwind CSS for styling
 - [ADR-0009](docs/adr/0009-vitest-playwright-testing.md) — Vitest + Playwright, TDD on the engine
 - [ADR-0010](docs/adr/0010-progress-data-model.md) — Progress data model: append-only attempts + rollups
+- [ADR-0011](docs/adr/0011-two-axis-theming.md) — Two-axis theming: palettes as data, fonts as data

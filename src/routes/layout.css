@@ -1,14 +1,161 @@
 @import 'tailwindcss';
 
-@theme {
-	/*
-	 * Character-state design tokens (ADR-0004 states, ADR-0008 shared tokens).
-	 * Exposed as CSS variables so the typing surface's scoped CSS and Tailwind
-	 * utilities draw from the same palette.
-	 */
-	--color-char-pending: #a1a1aa; /* zinc-400 — dim */
-	--color-char-correct: #16a34a; /* green-600 — also used for `corrected` (fixed errors carry no lasting mark) */
-	--color-char-incorrect: #dc2626; /* red-600 */
-	--color-char-incorrect-bg: #fee2e2; /* red-100 — makes wrong spaces visible */
-	--color-caret: #18181b; /* zinc-900 */
+/*
+ * Self-hosted IBM Plex (spec #9, brief ask #1): sans/serif/mono at 400/500/600
+ * (mono 400/500). Fontsource serves them from our own origin — no external
+ * font requests. The three faces are one superfamily with shared metrics,
+ * which is what keeps the passage from reflowing when the family switches.
+ */
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-serif/400.css';
+@import '@fontsource/ibm-plex-serif/500.css';
+@import '@fontsource/ibm-plex-serif/600.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+/*
+ * Two-axis theme contract (spec #9, ADR-0011). The palette records in
+ * src/lib/theme/palettes.ts are the source of truth; theme.spec.ts asserts
+ * this file stays in parity with them.
+ *
+ * Selection model:
+ *   - no data-palette on <html> (no cookie): warm-light, or soft-dark when the
+ *     system prefers dark — system preference only picks this initial default;
+ *   - data-palette set (cookie): that palette wins outright.
+ * The font axis is independent: data-font picks the stack, defaulting to sans.
+ */
+:root {
+	--bg: #f3ede2;
+	--sheet: #fbf7ef;
+	--fg: #2a251e;
+	--dim: #beb29c;
+	--muted: #8c7f6a;
+	--border: #e5dcc9;
+	--accent: #b06b2e;
+	--error: #b23a2e;
+	--error-tint: #f1dad3;
+	--caret: #2a251e;
+	color-scheme: light;
+
+	--font-stack: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-palette]) {
+		--bg: #23262b;
+		--sheet: #2c3037;
+		--fg: #e5e2db;
+		--dim: #6c737e;
+		--muted: #98a0a9;
+		--border: #3a3f47;
+		--accent: #c89b6a;
+		--error: #e5776a;
+		--error-tint: #3a2724;
+		--caret: #e5e2db;
+		color-scheme: dark;
+	}
+}
+
+:root[data-palette='warm-light'] {
+	--bg: #f3ede2;
+	--sheet: #fbf7ef;
+	--fg: #2a251e;
+	--dim: #beb29c;
+	--muted: #8c7f6a;
+	--border: #e5dcc9;
+	--accent: #b06b2e;
+	--error: #b23a2e;
+	--error-tint: #f1dad3;
+	--caret: #2a251e;
+	color-scheme: light;
+}
+
+:root[data-palette='cool-light'] {
+	--bg: #edf0f3;
+	--sheet: #fbfcfd;
+	--fg: #1e2830;
+	--dim: #aab4be;
+	--muted: #68737f;
+	--border: #dbe1e7;
+	--accent: #3f6da3;
+	--error: #c23c2e;
+	--error-tint: #f5dad5;
+	--caret: #1e2830;
+	color-scheme: light;
+}
+
+:root[data-palette='soft-dark'] {
+	--bg: #23262b;
+	--sheet: #2c3037;
+	--fg: #e5e2db;
+	--dim: #6c737e;
+	--muted: #98a0a9;
+	--border: #3a3f47;
+	--accent: #c89b6a;
+	--error: #e5776a;
+	--error-tint: #3a2724;
+	--caret: #e5e2db;
+	color-scheme: dark;
+}
+
+:root[data-palette='near-black'] {
+	--bg: #0e0f12;
+	--sheet: #17181c;
+	--fg: #f2f1ec;
+	--dim: #555a63;
+	--muted: #8a9099;
+	--border: #262a31;
+	--accent: #6ba5e8;
+	--error: #f0655a;
+	--error-tint: #331f1d;
+	--caret: #f2f1ec;
+	color-scheme: dark;
+}
+
+:root[data-font='sans'] {
+	--font-stack: 'IBM Plex Sans', system-ui, sans-serif;
+}
+
+:root[data-font='serif'] {
+	--font-stack: 'IBM Plex Serif', Georgia, serif;
+}
+
+:root[data-font='mono'] {
+	--font-stack: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/*
+ * Map the runtime tokens into Tailwind v4 utilities (bg-sheet, text-muted,
+ * border-border, text-error, bg-error-tint, font-app, …). `inline` keeps the
+ * var() reference live, so utilities restyle instantly on palette switch.
+ */
+@theme inline {
+	--color-bg: var(--bg);
+	--color-sheet: var(--sheet);
+	--color-fg: var(--fg);
+	--color-dim: var(--dim);
+	--color-muted: var(--muted);
+	--color-border: var(--border);
+	--color-accent: var(--accent);
+	--color-error: var(--error);
+	--color-error-tint: var(--error-tint);
+	--color-caret: var(--caret);
+	--font-app: var(--font-stack);
+}
+
+body {
+	background-color: var(--bg);
+	color: var(--fg);
+	font-family: var(--font-stack);
+	transition:
+		background-color 0.25s ease,
+		color 0.25s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	body {
+		transition: none;
+	}
 }

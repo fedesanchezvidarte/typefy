@@ -9,9 +9,11 @@
 
 	let { signedIn = false }: Props = $props();
 
+	// Compact EN/ES segments (spec #9 header); the accessible name stays the
+	// full language name via aria-label.
 	const labels = {
-		en: m.lang_label_en,
-		es: m.lang_label_es
+		en: { short: m.lang_short_en, full: m.lang_label_en },
+		es: { short: m.lang_short_es, full: m.lang_label_es }
 	};
 
 	/**
@@ -36,21 +38,20 @@
 </script>
 
 <nav aria-label={m.language_switcher_label()}>
-	<ul class="flex gap-2">
+	<ul class="flex gap-0.5">
 		{#each locales as locale (locale)}
 			<li>
 				<button
 					type="button"
 					class={[
-						'rounded-md border px-3 py-1.5 text-sm transition-colors',
-						getLocale() === locale
-							? 'border-zinc-900 bg-zinc-900 font-semibold text-white'
-							: 'border-zinc-300 hover:border-zinc-500'
+						'rounded-md px-2 py-1 text-xs tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+						getLocale() === locale ? 'bg-fg font-semibold text-bg' : 'text-muted hover:text-fg'
 					]}
+					aria-label={labels[locale].full()}
 					aria-current={getLocale() === locale ? 'true' : undefined}
 					onclick={() => chooseLocale(locale)}
 				>
-					{labels[locale]()}
+					{labels[locale].short()}
 				</button>
 			</li>
 		{/each}

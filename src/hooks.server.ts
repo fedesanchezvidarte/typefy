@@ -10,6 +10,13 @@ import {
 	localizeUrl
 } from '$lib/paraglide/runtime';
 import { paraglideMiddleware } from '$lib/paraglide/server';
+import {
+	FONT_COOKIE,
+	PALETTE_COOKIE,
+	parseFont,
+	parsePalette,
+	themeHtmlAttributes
+} from '$lib/theme/theme';
 
 /**
  * Request-scoped Supabase client (@supabase/ssr), bound to the request cookies so a
@@ -121,11 +128,20 @@ const handleParaglide: Handle = ({ event, resolve }) =>
 	paraglideMiddleware(event.request, ({ request, locale }) => {
 		event.request = request;
 
+		// Theme axes (spec #9): stamp validated cookie choices onto <html> before
+		// paint, so a chosen palette/font never flashes the default. No cookie →
+		// empty replacement → CSS prefers-color-scheme picks the initial default.
+		const themeAttributes = themeHtmlAttributes(
+			parsePalette(event.cookies.get(PALETTE_COOKIE)),
+			parseFont(event.cookies.get(FONT_COOKIE))
+		);
+
 		return resolve(event, {
 			transformPageChunk: ({ html }) =>
 				html
 					.replace('%paraglide.lang%', locale)
 					.replace('%paraglide.dir%', getTextDirection(locale))
+					.replace('%typefy.theme%', themeAttributes)
 		});
 	});
 

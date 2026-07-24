@@ -18,6 +18,7 @@ export const prideAndPrejudiceExcerpt: TypeableText = {
 	author: 'Jane Austen',
 	language: 'en',
 	chunkCount: 6,
+	coverUrl: null,
 	chunks: [
 		{
 			id: 'pride-and-prejudice-excerpt-0',
