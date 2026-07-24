@@ -21,5 +21,9 @@
 	"summary_overall_accuracy": "Overall accuracy",
 	"summary_chunks_completed": "Chunks completed",
 	"summary_total_time": "Total active time",
-	"summary_pick_another": "Choose another text"
+	"summary_pick_another": "Choose another text",
+	"summary_sign_in_prompt": "Sign in to save your progress",
+	"auth_sign_in_google": "Sign in with Google",
+	"auth_sign_out": "Sign out",
+	"auth_signed_in_as": "Signed in as {name}"
 }

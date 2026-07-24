@@ -8,16 +8,22 @@ Portfolio project, free, following professional industry standards.
 
 ## Status
 
-In active development. Phase 0 is complete (spec #3): SvelteKit + TS scaffold, Tailwind v4,
-Vitest/Playwright harnesses, Paraglide EN/ES (`/` = EN, `/es` = ES), CI, and production deploy on
-Vercel. Phase 1 (spec #5) delivers the typing engine over hardcoded fixture texts.
+In active development. Phase 0 (spec #3) and Phase 1 (spec #5) are complete: the SvelteKit + TS
+scaffold, Tailwind v4, Vitest/Playwright harnesses, Paraglide EN/ES (`/` = EN, `/es` = ES), CI and
+Vercel deploy; and the typing engine over hardcoded fixture texts. Phase 2 is split into **2a**
+(spec #7 — Supabase foundation, auth, and typeable text served from the database; fixtures leave the
+runtime path, no progress persisted yet) and **2b** (progress sync). 2a's database foundation —
+schema, RLS, and both books seeded on the local stack and the hosted project — is in place; auth and
+the content-from-database routes are in progress.
 
 Phased roadmap:
 
 - **Phase 0** — ✅ Scaffolding + baseline i18n: SvelteKit+TS, Tailwind, Vitest/Playwright,
   ESLint/Prettier, Paraglide EN/ES wired from the start, empty deploy to Vercel + CI.
 - **Phase 1** — Typing engine (TDD) over hardcoded text. The core of the product.
-- **Phase 2** — Supabase + Auth + early progress sync, against 1 manually seeded book.
+- **Phase 2** — Supabase + Auth + early progress sync, against seeded books. Split into **2a**
+  (foundation, auth, typeable text from the database — spec #7) and **2b** (progress sync). Seeding
+  both Phase 1 fixtures (EN + ES) keeps the UI-locale-vs-content-language independence verifiable.
 - **Phase 3** — Ingestion pipeline + catalog of 10-20 books read from the database.
 - **Phase 4** — Game modes + polish + E2E coverage.
 
@@ -47,8 +53,11 @@ Use these terms as defined here; do not drift to synonyms.
   slice of the log (word / chunk / session).
 - **WPM** — Words per minute, measured over the chunk's time. Gross WPM = (typed characters ÷ 5) ÷
   elapsed minutes; backspaces do not count as typed characters. Always displayed alongside accuracy.
-- **Accuracy (raw)** — First-attempt correct characters / total characters. The `corrected` state counts
-  as a miss even though it is visually resolved.
+- **Accuracy (raw)** — First-attempt correct characters ÷ the first-attempt characters actually judged
+  (the positions reached so far), **not** ÷ the chunk's total length. The two agree once a chunk is
+  complete but diverge mid-chunk: a total-length denominator would render live accuracy as ~5% at the
+  first keystroke. The `corrected` state counts as a miss even though it is visually resolved.
+  (Implemented in `src/lib/engine/metrics.ts`.)
 - **Normal mode** — Tracks WPM + accuracy, with live metrics (update granularity configurable by
   word / line / page; default: word).
 - **Zen mode** — No WPM/accuracy tracking; only text completion %.
@@ -59,8 +68,20 @@ Use these terms as defined here; do not drift to synonyms.
   redeploy. The paragraph-grouping chunker is built here (Phase 3), TDD from its day one (ADR-0009's
   "chunking TDD from day one" reads as day one of that module); Phase 1 fixture texts are chunked by
   hand.
-- **Progress / sync** — Per-user progress state (completed chunks, WPM, accuracy). Persisted in the
-  database and protected with Row Level Security; each user sees only their own.
+- **Progress / sync** — Per-user progress persisted in Supabase under Row Level Security (each user
+  sees only their own). The store is an append-only history of **chunk attempts** (the source of truth)
+  plus rolled-up per-chunk and per-book tables for cheap reads
+  ([ADR-0010](docs/adr/0010-progress-data-model.md)). Written from Phase 2b; the 2a schema creates the
+  tables but leaves them empty.
+- **Chunk attempt** — One traversal of one chunk from first keystroke to completion. The atomic unit of
+  persisted progress: each completed attempt appends an immutable row (gross WPM, accuracy, elapsed) to
+  the history. Distinct from **Session** (a typing stretch of one or more chunks) and from the engine's
+  in-memory session state.
+- **Profile** — A signed-in user's identity row (display name, avatar, optional locale preference),
+  created automatically on first sign-in and readable/editable only by that user. A null `locale` means
+  "no explicit preference", leaving the cookie > `Accept-Language` > EN detection to apply.
+- **Guest** — A visitor who is not signed in. Types fully (content is world-readable) but no progress is
+  saved, and there is no anonymous account. Signing in is optional and only unlocks progress persistence.
 
 ## Decisions (ADRs)
 
@@ -73,3 +94,4 @@ Use these terms as defined here; do not drift to synonyms.
 - [ADR-0007](docs/adr/0007-paraglide-i18n.md) — Paraglide for EN/ES internationalization
 - [ADR-0008](docs/adr/0008-tailwind-styling.md) — Tailwind CSS for styling
 - [ADR-0009](docs/adr/0009-vitest-playwright-testing.md) — Vitest + Playwright, TDD on the engine
+- [ADR-0010](docs/adr/0010-progress-data-model.md) — Progress data model: append-only attempts + rollups

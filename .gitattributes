@@ -1,0 +1,5 @@
+# Normalize all text files to LF in the repository and on checkout.
+# Without this, core.autocrlf=true checks files out as CRLF on Windows, which makes
+# `npm run lint` (Prettier, endOfLine: lf) fail locally while CI passes on Linux.
+# git auto-detects binary files and leaves them untouched.
+* text=auto eol=lf

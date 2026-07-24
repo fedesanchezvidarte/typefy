@@ -300,6 +300,9 @@ test.describe('full session (ES text, 5 chunks)', () => {
 		await expect(summary).toBeVisible();
 		await expect(summary).toBeFocused();
 
+		// A guest is prompted to sign in to save progress (spec #7).
+		await expect(page.getByTestId('summary-sign-in-prompt')).toBeVisible();
+
 		// Aggregates: 5 chunks, flawless run → 100.0%, plausible WPM and mm:ss time.
 		await expect(page.getByTestId('summary-chunks')).toHaveText('5');
 		await expect(page.getByTestId('summary-accuracy')).toHaveText('100.0%');

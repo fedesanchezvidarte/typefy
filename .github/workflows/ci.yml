@@ -10,6 +10,12 @@ jobs:
   quality:
     name: Lint, type check & tests
     runs-on: ubuntu-latest
+    # The local Supabase stack's URL and publishable key are fixed, non-secret defaults
+    # (derived from the CLI's shared local JWT secret — identical on every machine). The
+    # build, type-check, and E2E all read them via $env/static/public.
+    env:
+      PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -25,6 +31,15 @@ jobs:
 
       - name: Compile Paraglide messages
         run: npx paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide
+
+      # Local Supabase stack: applies the migrations (incl. the seed) so the E2E suite
+      # reads real content. Dummy Google credentials satisfy config.toml's env()
+      # substitution — real Google OAuth is not E2E-testable.
+      - name: Start local Supabase stack
+        run: npx supabase start
+        env:
+          SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID: ci-dummy-client-id
+          SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: ci-dummy-secret
 
       - name: i18n key parity (EN/ES)
         run: npm run check:i18n

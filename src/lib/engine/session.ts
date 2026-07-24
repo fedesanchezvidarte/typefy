@@ -49,7 +49,11 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 	if (event.type === 'restart-chunk') {
 		return {
 			...state,
-			activeChunk: createChunk(state.text.chunks[state.activeIndex].content)
+			activeChunk: createChunk(state.text.chunks[state.activeIndex].content),
+			// Clear `finished` so the restarted chunk is typeable again. A no-op mid-session
+			// (finished is already false); it removes the dead state where restarting a chunk
+			// after the session finished left `finished: true` and ignored all keystrokes.
+			finished: false
 		};
 	}
 	if (state.finished) {

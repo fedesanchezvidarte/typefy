@@ -21,5 +21,9 @@
 	"summary_overall_accuracy": "Precisión general",
 	"summary_chunks_completed": "Fragmentos completados",
 	"summary_total_time": "Tiempo activo total",
-	"summary_pick_another": "Elige otro texto"
+	"summary_pick_another": "Elige otro texto",
+	"summary_sign_in_prompt": "Inicia sesión para guardar tu progreso",
+	"auth_sign_in_google": "Iniciar sesión con Google",
+	"auth_sign_out": "Cerrar sesión",
+	"auth_signed_in_as": "Sesión iniciada como {name}"
 }

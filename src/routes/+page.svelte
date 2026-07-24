@@ -4,6 +4,9 @@
 	import { m } from '$lib/paraglide/messages';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
+	import type { PageData } from './$types';
+
+	let { data }: { data: PageData } = $props();
 </script>
 
 <svelte:head>
@@ -21,5 +24,5 @@
 	>
 		{m.landing_start_typing()}
 	</a>
-	<LanguageSwitcher />
+	<LanguageSwitcher signedIn={!!data.user} />
 </main>
