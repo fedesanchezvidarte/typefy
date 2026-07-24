@@ -60,12 +60,29 @@ const handleSupabase: Handle = async ({ event, resolve }) => {
  *
  * The URL is authoritative for the rendered page (`/` = EN unprefixed, `/es` = ES).
  * This hook only decides where document requests to unprefixed URLs land, following
- * the priority: saved cookie > Accept-Language > EN (base locale).
+ * the priority: signed-in profile locale > saved cookie > Accept-Language > EN.
+ *
+ * A null `profiles.locale` means "no explicit preference", so the cookie and
+ * Accept-Language tiers still apply. Guests never pay for the profile lookup: with no
+ * session cookie, getSession() returns null without a network call.
  *
  * The Paraglide locale governs UI strings only; the language of typeable text content
  * is data and is fully independent of the UI locale.
  */
-const handleLocaleNegotiation: Handle = ({ event, resolve }) => {
+async function getProfileLocale(event: Parameters<Handle>[0]['event']): Promise<string | null> {
+	const { user } = await event.locals.safeGetSession();
+	if (!user) {
+		return null;
+	}
+	const { data } = await event.locals.supabase
+		.from('profiles')
+		.select('locale')
+		.eq('id', user.id)
+		.maybeSingle();
+	return data?.locale ?? null;
+}
+
+const handleLocaleNegotiation: Handle = async ({ event, resolve }) => {
 	const { request, url } = event;
 
 	const isDocumentRequest =
@@ -78,10 +95,13 @@ const handleLocaleNegotiation: Handle = ({ event, resolve }) => {
 	const isAuthRoute = url.pathname.startsWith('/auth/');
 
 	if (isDocumentRequest && !hasLocalePrefix && !isAuthRoute) {
+		const profileLocale = await getProfileLocale(event);
 		const cookieLocale = event.cookies.get(cookieName);
-		const locale = isLocale(cookieLocale)
-			? cookieLocale
-			: (extractLocaleFromHeader(request) ?? 'en');
+		const locale = isLocale(profileLocale)
+			? profileLocale
+			: isLocale(cookieLocale)
+				? cookieLocale
+				: (extractLocaleFromHeader(request) ?? 'en');
 
 		if (locale !== 'en') {
 			return new Response(null, {
