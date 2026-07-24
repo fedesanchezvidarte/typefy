@@ -4,13 +4,14 @@
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
+	import { m } from '$lib/paraglide/messages';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import { applySessionEvent, createSession, sessionSummary } from '$lib/engine/session';
 	import type { SessionEvent, SessionState } from '$lib/engine/session';
 	import { computeMetrics } from '$lib/engine/metrics';
 	import type { MetricsSnapshot } from '$lib/engine/metrics';
 	import type { TypeableText } from '$lib/types';
-	import MetricsBar from './MetricsBar.svelte';
+	import PassageMeta from './PassageMeta.svelte';
 	import SessionSummaryView from './SessionSummary.svelte';
 	import TypingSurface from './TypingSurface.svelte';
 
@@ -26,10 +27,17 @@
 	let liveMetrics = $state.raw<MetricsSnapshot | null>(null);
 	let surface = $state<{ focusInput: () => void } | null>(null);
 
-	/** Frozen figures of the just-completed chunk (null on the first chunk). */
-	const lastResult = $derived(
-		session.activeIndex > 0 ? session.results[session.activeIndex - 1] : null
-	);
+	// Zen mode (spec #9): a per-visit presentation toggle — the engine keeps
+	// logging (the keystroke log is the single source of truth); only the meta
+	// line's metric segments are subtracted.
+	let zen = $state(false);
+
+	/** Whole-book percent: completed passages plus the cursor's way through the active one. */
+	const pct = $derived.by(() => {
+		const length = session.activeChunk.display.length;
+		const partial = length > 0 ? session.activeChunk.cursor / length : 0;
+		return Math.round((100 * (session.activeIndex + partial)) / session.text.chunkCount);
+	});
 
 	/**
 	 * Single dispatch point: applies the engine reducer, then refreshes live metrics
@@ -67,17 +75,24 @@
 
 	function restartSession() {
 		dispatch({ type: 'restart-session' });
-		// From the metrics bar the surface stays mounted — refocus it. From the
-		// summary it remounts and focuses itself on mount.
+		// From the summary the surface remounts and focuses itself on mount.
 		surface?.focusInput();
+	}
+
+	function toggleZen() {
+		zen = !zen;
+		surface?.focusInput(); // toggling chrome must not strand focus either
 	}
 
 	function pickAnother() {
 		goto(resolve(localizeHref('/type') as Pathname));
 	}
+
+	const buttonClasses =
+		'rounded-lg border border-border bg-transparent px-3.5 py-[7px] text-[13px] text-muted transition-colors hover:border-accent hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 </script>
 
-<main class="flex min-h-svh flex-col items-center gap-8 p-8">
+<main class="mx-auto flex w-full max-w-[860px] flex-col items-center gap-5 px-6 pt-10 pb-24">
 	{#if session.finished}
 		<SessionSummaryView
 			summary={sessionSummary(session)}
@@ -87,22 +102,56 @@
 			next={page.url.pathname + page.url.search}
 		/>
 	{:else}
-		<MetricsBar
-			live={liveMetrics}
-			{lastResult}
+		<!-- Exactly two elements of chrome frame the sheet (brief §2): the book
+		     line above, the meta line (and its quiet buttons) below. -->
+		<!-- The page's h1, styled as quiet chrome: screen readers get structure,
+		     sighted users get the brief's minimal book line. -->
+		<h1
+			class="text-center text-sm font-normal tracking-[0.01em] text-muted"
+			data-testid="book-line"
+		>
+			{book.title} · {book.author}
+		</h1>
+		<div class="flex w-full justify-center">
+			<TypingSurface
+				bind:this={surface}
+				text={session.activeChunk.text}
+				display={session.activeChunk.display}
+				cursor={session.activeChunk.cursor}
+				passageKey={session.activeIndex}
+				onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}
+				onBackspace={(timestamp) => dispatch({ type: 'backspace', timestamp })}
+				onRestartChunk={restartChunk}
+			/>
+		</div>
+		<PassageMeta
 			current={session.activeIndex + 1}
 			total={session.text.chunkCount}
-			onRestartChunk={restartChunk}
-			onRestartSession={restartSession}
+			{pct}
+			live={liveMetrics}
+			{zen}
 		/>
-		<TypingSurface
-			bind:this={surface}
-			text={session.activeChunk.text}
-			display={session.activeChunk.display}
-			cursor={session.activeChunk.cursor}
-			onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}
-			onBackspace={(timestamp) => dispatch({ type: 'backspace', timestamp })}
-			onRestartChunk={restartChunk}
-		/>
+		<div class="mt-1 flex flex-wrap justify-center gap-2">
+			<button
+				type="button"
+				data-testid="zen-toggle"
+				class={buttonClasses}
+				aria-pressed={zen}
+				onclick={toggleZen}
+			>
+				{zen ? m.zen_exit() : m.zen_enter()}
+			</button>
+			<button
+				type="button"
+				data-testid="restart-chunk"
+				class={buttonClasses}
+				onclick={restartChunk}
+			>
+				{m.passage_restart()}
+			</button>
+			<button type="button" data-testid="pick-another" class={buttonClasses} onclick={pickAnother}>
+				{m.typing_pick_another()}
+			</button>
+		</div>
 	{/if}
 </main>

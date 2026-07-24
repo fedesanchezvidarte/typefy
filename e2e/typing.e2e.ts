@@ -15,15 +15,20 @@ function chars(page: Page) {
 	return page.locator('[data-testid="typing-surface"] .char');
 }
 
+/** The single meta line under the sheet: "Passage N of M · pct% [· wpm · accuracy]". */
+function meta(page: Page) {
+	return page.getByTestId('passage-meta');
+}
+
 /** Real typing through the OS-level keyboard path; no artificial per-key delay. */
 async function type(page: Page, text: string) {
 	await page.keyboard.type(text, { delay: 0 });
 }
 
 /**
- * Opens /type (or a locale-prefixed variant) and picks a text. The click only
- * registers once the page has hydrated, so it is retried (same pattern as
- * smoke.e2e.ts). Resolves with the hidden input focused and ready to type.
+ * Opens the library at /type (or a locale-prefixed variant) and picks a book.
+ * The click only registers once the page has hydrated, so it is retried (same
+ * pattern as smoke.e2e.ts). Resolves with the hidden input focused and ready.
  */
 async function pickText(page: Page, textId: string, path = '/type') {
 	await page.goto(path);
@@ -35,8 +40,8 @@ async function pickText(page: Page, textId: string, path = '/type') {
 	await expect(page.getByTestId('typing-input')).toBeFocused();
 }
 
-test.describe('text picker', () => {
-	test('renders both fixtures; choosing one shows the surface with focus ready', async ({
+test.describe('library grid', () => {
+	test('renders both seeded books as cards; choosing one shows the surface with focus ready', async ({
 		page
 	}) => {
 		await page.goto('/type');
@@ -44,32 +49,32 @@ test.describe('text picker', () => {
 		await expect(page.getByTestId(`text-picker-option-${EN_ID}`)).toBeVisible();
 		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).toBeVisible();
 
+		// Both seeded books have no curated cover art → generated typographic covers.
+		await expect(page.getByTestId('generated-cover')).toHaveCount(2);
+
 		await pickText(page, EN_ID);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
-		await expect(page.getByTestId('metrics-bar')).toBeVisible();
-		await expect(page.getByTestId('chunk-progress')).toHaveText('Chunk 1 of 6');
+		await expect(meta(page)).toContainText('Passage 1 of 6');
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 	});
 
-	test('picker options are reachable keyboard-only (Tab, then Enter starts typing)', async ({
-		page
-	}) => {
+	test('cards are reachable keyboard-only (Tab, then Enter starts typing)', async ({ page }) => {
 		await page.goto('/type');
 		await expect(page.getByTestId('text-picker')).toBeVisible();
 
-		// Tab from page load until focus lands on a picker option (bounded walk
-		// so a new header control cannot make this loop forever).
+		// Tab from page load until focus lands on a card (bounded walk — the
+		// header now carries theme/language/auth controls before the grid).
 		let reached = false;
-		for (let i = 0; i < 10 && !reached; i++) {
+		for (let i = 0; i < 20 && !reached; i++) {
 			await page.keyboard.press('Tab');
 			const focusedTestId = await page.evaluate(
 				() => document.activeElement?.getAttribute('data-testid') ?? ''
 			);
 			reached = focusedTestId.startsWith('text-picker-option-');
 		}
-		expect(reached, 'Tab should reach a text-picker option within 10 stops').toBe(true);
+		expect(reached, 'Tab should reach a book card within 20 stops').toBe(true);
 
-		// Enter activates the focused option once hydrated (retried like clicks).
+		// Enter activates the focused card once hydrated (retried like clicks).
 		await expect(async () => {
 			await page.keyboard.press('Enter');
 			await expect(page.getByTestId('typing-surface')).toBeVisible({ timeout: 2000 });
@@ -85,12 +90,12 @@ test.describe('character states (spec criterion path)', () => {
 		// EN chunk 0 starts "It is a truth..." — positions 0..2 are 'I', 't', ' '.
 		await pickText(page, EN_ID);
 
-		// Correct characters go green.
+		// Correct characters fill in at full foreground strength (tonal, no green).
 		await type(page, 'It');
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
 		await expect(chars(page).nth(1)).toHaveAttribute('data-state', 'correct');
 
-		// A wrong character shows red; the cursor still advances (free typing).
+		// A wrong character shows the error state; the cursor still advances (free typing).
 		await type(page, 'x'); // expected ' '
 		await expect(chars(page).nth(2)).toHaveAttribute('data-state', 'incorrect');
 		await expect(chars(page).nth(3)).toHaveClass(/caret/);
@@ -114,33 +119,83 @@ test.describe('character states (spec criterion path)', () => {
 		await expect(chars(page).nth(1)).toHaveAttribute('data-state', 'correct');
 		await expect(chars(page).nth(2)).toHaveAttribute('data-state', 'corrected');
 	});
+
+	test('corrected renders identically to correct; incorrect carries non-color cues', async ({
+		page
+	}) => {
+		await pickText(page, EN_ID);
+		await type(page, 'Ix'); // wrong for 't'
+		await page.keyboard.press('Backspace');
+		await type(page, 't'); // → corrected
+		await type(page, 'x'); // wrong for ' ' → incorrect, stays visible
+
+		const styleOf = (index: number) =>
+			chars(page)
+				.nth(index)
+				.evaluate((el) => {
+					const s = getComputedStyle(el);
+					return {
+						color: s.color,
+						background: s.backgroundColor,
+						decoration: `${s.textDecorationLine}/${s.textDecorationStyle}`
+					};
+				});
+
+		// A fixed error carries no lasting visual mark (tonal surface, brief §2).
+		const correct = await styleOf(0);
+		const corrected = await styleOf(1);
+		expect(corrected).toEqual(correct);
+
+		// The only chromatic event also has non-color signals: tint + wavy underline.
+		const incorrect = await styleOf(2);
+		expect(incorrect.color).not.toBe(correct.color);
+		expect(incorrect.background).not.toBe(correct.background);
+		expect(incorrect.decoration).toBe('underline/wavy');
+	});
 });
 
-test.describe('live metrics', () => {
+test.describe('the meta line', () => {
 	test('em-dash placeholders until the first word boundary, then numbers; corrected char caps accuracy below 100%', async ({
 		page
 	}) => {
 		await pickText(page, EN_ID);
-		const wpm = page.getByTestId('metrics-wpm');
-		const accuracy = page.getByTestId('metrics-accuracy');
 
-		await expect(wpm).toHaveText('—');
-		await expect(accuracy).toHaveText('—');
+		await expect(meta(page)).toContainText('— wpm');
+		await expect(meta(page)).toContainText('—% accuracy');
 
 		// Mistype inside the first word, fix it — still before any word boundary.
 		await type(page, 'Ix'); // 'x' wrong for 't'
 		await page.keyboard.press('Backspace');
 		await type(page, 't');
 		await expect(chars(page).nth(1)).toHaveAttribute('data-state', 'corrected');
-		await expect(wpm).toHaveText('—');
-		await expect(accuracy).toHaveText('—');
+		await expect(meta(page)).toContainText('— wpm');
 
 		// The space (word boundary) flips both to numbers; the corrected
-		// character counts as a miss, so accuracy is numeric but below 100%.
+		// character counts as a miss, so accuracy lands below 100%.
 		await type(page, ' ');
-		await expect(wpm).toHaveText(/^\d+$/);
-		await expect(accuracy).toHaveText(/^\d+\.\d%$/);
-		await expect(accuracy).not.toHaveText('100.0%');
+		await expect(meta(page)).toContainText(/\d+ wpm/);
+		await expect(meta(page)).toContainText(/ \d+% accuracy/);
+		await expect(meta(page)).not.toContainText('100% accuracy');
+	});
+
+	test('Zen mode subtracts the metrics from the same line and Exit Zen restores them', async ({
+		page
+	}) => {
+		await pickText(page, EN_ID);
+		await expect(meta(page)).toContainText('wpm');
+
+		await page.getByTestId('zen-toggle').click();
+		await expect(meta(page)).toContainText('Passage 1 of 6');
+		await expect(meta(page)).not.toContainText('wpm');
+		await expect(meta(page)).not.toContainText('accuracy');
+
+		// Toggling chrome never strands focus — typing continues immediately.
+		await expect(page.getByTestId('typing-input')).toBeFocused();
+		await type(page, 'I');
+		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
+
+		await page.getByTestId('zen-toggle').click();
+		await expect(meta(page)).toContainText('wpm');
 	});
 });
 
@@ -160,34 +215,29 @@ test.describe('chunk completion', () => {
 		await expect(chars(page).nth(errorIndex)).toHaveAttribute('data-state', 'incorrect');
 		await type(page, EN_CHUNK_0.slice(errorIndex + 1));
 
-		// Every position is judged but one is incorrect: the chunk must not advance.
-		await expect(page.getByTestId('chunk-progress')).toHaveText('Chunk 1 of 6');
+		// Every position is judged but one is incorrect: the passage must not advance.
+		await expect(meta(page)).toContainText('Passage 1 of 6');
 
 		// Typing past the end is a no-op: the cursor stays parked on the end sentinel.
 		await type(page, 'z');
-		await expect(page.getByTestId('chunk-progress')).toHaveText('Chunk 1 of 6');
+		await expect(meta(page)).toContainText('Passage 1 of 6');
 		await expect(page.locator('[data-testid="typing-surface"] .chunk-end')).toHaveClass(/caret/);
 
 		// Backspace to the error, then retype the last word: completion is
-		// instant and the session auto-advances to chunk 2.
+		// instant and the session auto-advances to passage 2.
 		for (let i = 0; i < lastWord.length; i++) {
 			await page.keyboard.press('Backspace');
 		}
 		await expect(chars(page).nth(errorIndex)).toHaveAttribute('data-state', 'pending');
 		await type(page, lastWord);
-		await expect(page.getByTestId('chunk-progress')).toHaveText('Chunk 2 of 6');
-
-		// The completed chunk's frozen figures appear, with the corrected
-		// character counted as a miss (accuracy below 100%).
-		const lastChunk = page.getByTestId('metrics-last-chunk');
-		await expect(lastChunk).toBeVisible();
-		await expect(lastChunk).toContainText(/\d+\.\d%/);
-		await expect(lastChunk).not.toContainText('100.0%');
+		await expect(meta(page)).toContainText('Passage 2 of 6');
 	});
 });
 
 test.describe('restart controls', () => {
-	test('Escape restarts the chunk: all states reset and typing starts clean', async ({ page }) => {
+	test('Escape restarts the passage: all states reset and typing starts clean', async ({
+		page
+	}) => {
 		await pickText(page, EN_ID);
 		await type(page, 'Ix is'); // one error, four correct-ish positions
 
@@ -196,25 +246,22 @@ test.describe('restart controls', () => {
 			await expect(chars(page).nth(i)).toHaveAttribute('data-state', 'pending');
 		}
 		await expect(chars(page).nth(0)).toHaveClass(/caret/);
-		await expect(page.getByTestId('chunk-progress')).toHaveText('Chunk 1 of 6');
+		await expect(meta(page)).toContainText('Passage 1 of 6');
 
 		// The reset attempt is discarded: a fresh correct keystroke is plain correct.
 		await type(page, 'I');
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
 	});
 
-	test('the restart-session button resets states and metrics and refocuses the input', async ({
-		page
-	}) => {
+	test('the restart-passage button resets states and refocuses the input', async ({ page }) => {
 		await pickText(page, EN_ID);
 		await type(page, 'It is '); // crosses a word boundary → numeric metrics
-		await expect(page.getByTestId('metrics-wpm')).toHaveText(/^\d+$/);
+		await expect(meta(page)).toContainText(/\d+ wpm/);
 
-		await page.getByTestId('restart-session').click();
+		await page.getByTestId('restart-chunk').click();
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'pending');
-		await expect(page.getByTestId('metrics-wpm')).toHaveText('—');
-		await expect(page.getByTestId('metrics-accuracy')).toHaveText('—');
-		await expect(page.getByTestId('chunk-progress')).toHaveText('Chunk 1 of 6');
+		await expect(meta(page)).toContainText('— wpm');
+		await expect(meta(page)).toContainText('Passage 1 of 6');
 
 		// Button-triggered restarts must not strand focus on the button.
 		await expect(page.getByTestId('typing-input')).toBeFocused();
@@ -291,7 +338,7 @@ test.describe('full session (ES text, 5 chunks)', () => {
 
 		await pickText(page, ES_ID);
 		for (const [index, chunk] of donQuijoteExcerpt.chunks.entries()) {
-			await expect(page.getByTestId('chunk-progress')).toHaveText(`Chunk ${index + 1} of 5`);
+			await expect(meta(page)).toContainText(`Passage ${index + 1} of 5`);
 			await type(page, chunk.content);
 		}
 
@@ -300,19 +347,22 @@ test.describe('full session (ES text, 5 chunks)', () => {
 		await expect(summary).toBeVisible();
 		await expect(summary).toBeFocused();
 
+		// No celebration — a quiet heading reading the passage count.
+		await expect(summary).toContainText('You read 5 passages.');
+
 		// A guest is prompted to sign in to save progress (spec #7).
 		await expect(page.getByTestId('summary-sign-in-prompt')).toBeVisible();
 
-		// Aggregates: 5 chunks, flawless run → 100.0%, plausible WPM and mm:ss time.
+		// Aggregates: 5 passages, flawless run → 100%, plausible WPM and mm:ss time.
 		await expect(page.getByTestId('summary-chunks')).toHaveText('5');
-		await expect(page.getByTestId('summary-accuracy')).toHaveText('100.0%');
-		await expect(page.getByTestId('summary-wpm')).toHaveText(/^[1-9]\d*$/);
-		await expect(page.getByTestId('summary-time')).toHaveText(/^\d{2}:\d{2}$/);
-		await expect(page.getByTestId('summary-time')).not.toHaveText('00:00');
+		await expect(page.getByTestId('summary-accuracy')).toHaveText('100%');
+		await expect(page.getByTestId('summary-wpm')).toContainText(/^[1-9]\d*/);
+		await expect(page.getByTestId('summary-time')).toContainText(/\d{2}:\d{2}/);
+		await expect(page.getByTestId('summary-time')).not.toContainText('00:00');
 
-		// Restarting from the summary returns to a clean chunk 1, ready to type.
+		// "Type it again" returns to a clean passage 1, ready to type.
 		await page.getByTestId('summary-restart-session').click();
-		await expect(page.getByTestId('chunk-progress')).toHaveText('Chunk 1 of 5');
+		await expect(meta(page)).toContainText('Passage 1 of 5');
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'pending');
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 	});
@@ -322,7 +372,7 @@ test.describe('UI locale vs content language', () => {
 	test('the EN text is typeable from the Spanish UI at /es/type', async ({ page }) => {
 		await pickText(page, EN_ID, '/es/type');
 		// Spanish UI chrome around English content: locale and text are independent.
-		await expect(page.getByTestId('chunk-progress')).toHaveText('Fragmento 1 de 6');
+		await expect(meta(page)).toContainText('Pasaje 1 de 6');
 		await type(page, 'It is');
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
 		await expect(chars(page).nth(4)).toHaveAttribute('data-state', 'correct');
