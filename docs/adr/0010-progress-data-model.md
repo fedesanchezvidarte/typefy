@@ -55,10 +55,18 @@ trigger is behaviour, and 2a delivers shape and policy only.
   atomic, and completion is an infrequent, human-paced event.
 - `best_*` semantics (e.g. best WPM only among completed attempts) are defined by the 2b trigger, not the
   schema; the ADR fixes the shape, 2b fixes the aggregation rules.
-- **Accepted advisor noise:** foreign-key columns carry covering indexes (Supabase advisor 0001), which
-  the performance advisor then reports as *unused* (0005) because the tables are empty and unqueried until
-  2b. This is a false positive on empty tables; the indexes are intentional and the INFO is consciously
-  accepted, not acted on. The security advisor reports zero issues on the finished 2a schema.
+- **Accepted advisor findings** (spec #7 gates on zero errors and zero *undocumented* warnings):
+  - _Performance, INFO — `unused_index` (0005) ×8._ Foreign-key columns carry covering indexes (advisor
+    0001), which the performance advisor then reports as unused because the progress tables are empty and
+    unqueried until 2b. A false positive on empty tables; the indexes are intentional and the INFO is
+    consciously accepted, not acted on.
+  - _Security, WARN — `auth_leaked_password_protection`._ Accepted permanently, because it cannot apply:
+    the hosted project has **no password-based auth to protect**. `/auth/v1/settings` reports
+    `google: true` with `email: false`, `phone: false`, and `anonymous_users: false` — Google OAuth is the
+    only enabled provider, per ADR-0002, and email/password and magic-link auth are explicitly out of
+    scope in spec #7. HaveIBeenPwned checking guards a password flow that does not exist here. If a
+    password provider is ever enabled, this warning stops being inapplicable and must be actioned.
+  - The security advisor reports **no errors** and no other warnings on the finished 2a schema.
 
 ## Alternatives considered
 

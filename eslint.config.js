@@ -34,6 +34,28 @@ export default defineConfig(
 		}
 	},
 	{
+		// Spec #7: fixtures left the runtime path when the database became the source of
+		// typeable text. They survive as Vitest data and as the input that generates the
+		// seed migration — but a route importing them would reinstate exactly the silent
+		// fallback the phase removed, masking the database failures it must expose.
+		// The spec requires this to be enforced by a lint rule rather than checked by hand.
+		files: ['src/routes/**'],
+		rules: {
+			'@typescript-eslint/no-restricted-imports': [
+				'error',
+				{
+					patterns: [
+						{
+							group: ['$lib/fixtures', '$lib/fixtures/*', '**/lib/fixtures', '**/lib/fixtures/*'],
+							message:
+								'Routes must read typeable text from the database via $lib/server/books. Fixtures are test/seed data only (spec #7).'
+						}
+					]
+				}
+			]
+		}
+	},
+	{
 		// Override or add rule settings here, such as:
 		// 'svelte/button-has-type': 'error'
 		rules: {}
