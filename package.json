@@ -23,6 +23,7 @@
 		"db:stop": "supabase stop",
 		"db:status": "supabase status",
 		"db:reset": "supabase db reset",
+		"db:push": "supabase db push",
 		"db:seed:generate": "tsx scripts/generate-seed.ts",
 		"db:types": "supabase gen types typescript --local > src/lib/database.types.ts && prettier --write src/lib/database.types.ts"
 	},
