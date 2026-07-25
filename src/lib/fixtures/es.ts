@@ -19,6 +19,7 @@ export const donQuijoteExcerpt: TypeableText = {
 	author: 'Miguel de Cervantes',
 	language: 'es',
 	chunkCount: 5,
+	coverUrl: null,
 	chunks: [
 		{
 			id: 'don-quijote-excerpt-0',

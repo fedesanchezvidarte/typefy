@@ -161,7 +161,13 @@ site_url = "http://localhost:5173"
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 # SvelteKit dev runs on 5173; the app's OAuth callback route must be allow-listed here.
-additional_redirect_urls = ["http://localhost:5173/auth/callback"]
+# Production/preview entries mirror the hosted project's Auth > URL Configuration: without them
+# Supabase discards `redirect_to` and falls back to Site URL.
+additional_redirect_urls = [
+  "http://localhost:5173/auth/callback",
+  "https://typefy.vercel.app/auth/callback",
+  "https://typefy-*-federico-sanchezs-projects-b8cb6b60.vercel.app/auth/callback"
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.

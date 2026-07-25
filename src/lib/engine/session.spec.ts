@@ -11,6 +11,7 @@ function makeText(contents: readonly string[]): TypeableText {
 		author: 'Test author',
 		language: 'en',
 		chunkCount: contents.length,
+		coverUrl: null,
 		chunks: contents.map((content, index) => ({
 			id: `chunk-${index}`,
 			textId: 'text-1',

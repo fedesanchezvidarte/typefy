@@ -20,9 +20,14 @@ typed — and read — the whole book.
 
 - **Type through public-domain books** — English (Project Gutenberg) and Spanish (Cervantes Virtual and
   similar sources).
-- **Live typing feedback** — per-character states: correct (green) and incorrect (red). Only current
-  mistakes are highlighted; a fixed error renders like a correct character but still counts against
-  accuracy. A chunk only completes when every mistake has been fixed.
+- **Live typing feedback** — tonal, not chromatic: pending text is dimmed, correct text fills in at
+  full foreground strength, and an active mistake is the only colour on the page (error red with an
+  underline and tint). There is no green. Only current mistakes are highlighted; a fixed error renders
+  like a correct character but still counts against accuracy. A chunk (shown to users as a **passage**)
+  only completes when every mistake has been fixed.
+- **Two-axis theming** — four colour palettes × three font families (IBM Plex, self-hosted),
+  independently switchable; the system colour scheme only picks the initial default
+  ([ADR-0011](docs/adr/0011-two-axis-theming.md)).
 - **Metrics** — WPM and raw accuracy, with live updates (by word / line / page).
 - **Game modes** — **Normal** (tracks WPM + accuracy) and **Zen** (no tracking, just completion %).
 - **Google login (optional)** — the app works without an account; signing in enables cross-device

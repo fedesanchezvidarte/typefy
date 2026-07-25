@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
-import { getBookBySlug, listBooks } from './books';
+import { getBookBySlug, getHeroBook, listBooks } from './books';
 
 /**
  * Service tests (spec #7): the injected Supabase client is mocked — a real DB call must
@@ -25,6 +25,7 @@ function mockSupabase(result: { data: unknown; error: unknown }) {
 	builder.select = record('select');
 	builder.eq = record('eq');
 	builder.order = record('order');
+	builder.limit = record('limit');
 	builder.maybeSingle = (...args: unknown[]) => {
 		calls.push({ method: 'maybeSingle', args });
 		return Promise.resolve(result);
@@ -52,7 +53,8 @@ describe('listBooks', () => {
 					title: 'Pride and Prejudice (excerpt)',
 					author: 'Jane Austen',
 					language: 'en',
-					chunk_count: 6
+					chunk_count: 6,
+					cover_url: null
 				}
 			],
 			error: null
@@ -66,9 +68,28 @@ describe('listBooks', () => {
 				title: 'Pride and Prejudice (excerpt)',
 				author: 'Jane Austen',
 				language: 'en',
-				chunkCount: 6
+				chunkCount: 6,
+				coverUrl: null
 			}
 		]);
+	});
+
+	it('passes curated cover art through as coverUrl (spec #9 cover policy)', async () => {
+		const { client } = mockSupabase({
+			data: [
+				{
+					slug: 'x',
+					title: 'X',
+					author: 'Y',
+					language: 'en',
+					chunk_count: 1,
+					cover_url: 'https://covers.example/x.jpg'
+				}
+			],
+			error: null
+		});
+		const books = await listBooks(client);
+		expect(books[0].coverUrl).toBe('https://covers.example/x.jpg');
 	});
 
 	it('queries the books table for metadata only, never chunk content', async () => {
@@ -103,6 +124,7 @@ describe('getBookBySlug', () => {
 		author: 'Miguel de Cervantes',
 		language: 'es',
 		chunk_count: 2,
+		cover_url: null,
 		chunks: [
 			{ id: 'uuid-1', index: 1, content: 'segundo', char_count: 7 },
 			{ id: 'uuid-0', index: 0, content: 'primero', char_count: 7 }
@@ -120,6 +142,7 @@ describe('getBookBySlug', () => {
 			author: 'Miguel de Cervantes',
 			language: 'es',
 			chunkCount: 2,
+			coverUrl: null,
 			chunks: [
 				{ id: 'uuid-0', textId: 'don-quijote-excerpt', index: 0, content: 'primero', charCount: 7 },
 				{ id: 'uuid-1', textId: 'don-quijote-excerpt', index: 1, content: 'segundo', charCount: 7 }
@@ -149,5 +172,39 @@ describe('getBookBySlug', () => {
 	it('throws when the database returns an error', async () => {
 		const { client } = mockSupabase({ data: null, error: { message: 'timeout' } });
 		await expect(getBookBySlug(client, 'x')).rejects.toEqual({ message: 'timeout' });
+	});
+});
+
+describe('getHeroBook', () => {
+	const bookRow = {
+		slug: 'don-quijote-excerpt',
+		title: 'Don Quijote de la Mancha (fragmento)',
+		author: 'Miguel de Cervantes',
+		language: 'es',
+		chunk_count: 1,
+		cover_url: null,
+		chunks: [{ id: 'uuid-0', index: 0, content: 'primero', char_count: 7 }]
+	};
+
+	it('resolves the first book in the requested content language, with chunks', async () => {
+		const { client, calls } = mockSupabase({ data: bookRow, error: null });
+
+		const book = await getHeroBook(client, 'es');
+
+		expect(book?.id).toBe('don-quijote-excerpt');
+		expect(book?.chunks).toHaveLength(1);
+		expect(calls.find((c) => c.method === 'eq')?.args).toEqual(['language', 'es']);
+		expect(calls.find((c) => c.method === 'limit')?.args).toEqual([1]);
+		expect(calls.find((c) => c.method === 'select')?.args[0]).toContain('chunks(');
+	});
+
+	it('returns null when no book exists in that language', async () => {
+		const { client } = mockSupabase({ data: null, error: null });
+		expect(await getHeroBook(client, 'en')).toBeNull();
+	});
+
+	it('throws when the database returns an error', async () => {
+		const { client } = mockSupabase({ data: null, error: { message: 'timeout' } });
+		await expect(getHeroBook(client, 'es')).rejects.toEqual({ message: 'timeout' });
 	});
 });

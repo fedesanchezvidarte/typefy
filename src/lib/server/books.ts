@@ -17,13 +17,16 @@ type Client = SupabaseClient<Database>;
 type BookRow = Database['public']['Tables']['books']['Row'];
 type ChunkRow = Database['public']['Tables']['chunks']['Row'];
 
-/** The book columns the picker needs — metadata only, no chunk content. */
-type BookSummaryRow = Pick<BookRow, 'slug' | 'title' | 'author' | 'language' | 'chunk_count'>;
+/** The book columns the library needs — metadata only, no chunk content. */
+type BookSummaryRow = Pick<
+	BookRow,
+	'slug' | 'title' | 'author' | 'language' | 'chunk_count' | 'cover_url'
+>;
 /** One chunk's content columns, as embedded under a book. */
 type ChunkContentRow = Pick<ChunkRow, 'id' | 'index' | 'content' | 'char_count'>;
 type BookWithChunksRow = BookSummaryRow & { chunks: ChunkContentRow[] };
 
-const BOOK_SUMMARY_COLUMNS = 'slug, title, author, language, chunk_count';
+const BOOK_SUMMARY_COLUMNS = 'slug, title, author, language, chunk_count, cover_url';
 const CHUNK_COLUMNS = 'id, index, content, char_count';
 
 const LANGUAGES: readonly Language[] = ['en', 'es'];
@@ -42,7 +45,8 @@ function toSummary(row: BookSummaryRow): TypeableTextSummary {
 		title: row.title,
 		author: row.author,
 		language: toLanguage(row.language),
-		chunkCount: row.chunk_count
+		chunkCount: row.chunk_count,
+		coverUrl: row.cover_url
 	};
 }
 
@@ -86,6 +90,32 @@ export async function getBookBySlug(client: Client, slug: string): Promise<Typea
 		.from('books')
 		.select(`${BOOK_SUMMARY_COLUMNS}, chunks(${CHUNK_COLUMNS})`)
 		.eq('slug', slug)
+		.maybeSingle();
+	if (error) {
+		throw error;
+	}
+	if (!data) {
+		return null;
+	}
+	return toTypeableText(data as unknown as BookWithChunksRow);
+}
+
+/**
+ * The landing hero's book (spec #9): the first seeded book in the given content
+ * language, with all its chunks — the hero passage responds on the first
+ * keystroke, so it must be real typeable text, not copy. `null` when no book
+ * exists in that language (the route falls back before erroring).
+ */
+export async function getHeroBook(
+	client: Client,
+	language: Language
+): Promise<TypeableText | null> {
+	const { data, error } = await client
+		.from('books')
+		.select(`${BOOK_SUMMARY_COLUMNS}, chunks(${CHUNK_COLUMNS})`)
+		.eq('language', language)
+		.order('title')
+		.limit(1)
 		.maybeSingle();
 	if (error) {
 		throw error;

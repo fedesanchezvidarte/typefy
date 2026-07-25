@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="./image-slot.js"></script>
+<style>
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  a{color:var(--accent);text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  @keyframes caret-blink{50%{box-shadow:none;}}
+  @media (prefers-reduced-motion: reduce){[data-caret]{animation:none !important;}}
+</style>
+</helmet>
+<div style="{{ rootStyle }} min-height:100vh;background:var(--bg);color:var(--fg);font-family:var(--font);transition:background .25s ease,color .25s ease;">
+
+  <div style="position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 24px;background:color-mix(in srgb, var(--bg) 86%, transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);">
+    <button onClick="{{ goLanding }}" style="display:flex;align-items:center;gap:0;background:none;border:none;padding:0;cursor:pointer;">
+      <span style="font-family:var(--font);font-weight:600;font-size:21px;letter-spacing:-0.03em;color:var(--fg);">typefy</span>
+      <span style="display:inline-block;width:3px;height:19px;margin-left:3px;background:var(--accent);transform:translateY(2px);border-radius:1px;"></span>
+    </button>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="display:flex;align-items:center;gap:10px;">{{ controlsEl }}</div>
+      <nav style="display:flex;gap:4px;">
+        <button onClick="{{ goLibrary }}" style="border:none;background:transparent;color:var(--muted);font-family:inherit;font-size:13px;padding:6px 8px;cursor:pointer;">Library</button>
+      </nav>
+    </div>
+  </div>
+
+  <sc-if value="{{ isLanding }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:860px;margin:0 auto;padding:52px 24px 96px;">
+    <div style="text-align:center;font-size:12px;letter-spacing:0.18em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;">A reading sanctuary for typists</div>
+    <h1 style="text-align:center;font-family:var(--font);font-weight:600;font-size:clamp(28px,5vw,46px);line-height:1.12;letter-spacing:-0.025em;margin:0 0 14px;text-wrap:balance;">Type through a book, one passage at a time.</h1>
+    <p style="text-align:center;color:var(--muted);max-width:540px;margin:0 auto 40px;font-size:16px;line-height:1.6;text-wrap:pretty;">Read by writing. Live per-character feedback on real public-domain books — nothing gamified. Just start; the passage below is already listening.</p>
+    <div style="display:flex;justify-content:center;">{{ surfaceEl }}</div>
+    <div style="text-align:center;margin-top:16px;font-size:13px;color:var(--muted);">Start typing above · Backspace to fix · Esc restarts the passage</div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:28px;margin-top:72px;">
+      <div>
+        <div style="font-family:var(--font);font-weight:600;font-size:15px;margin-bottom:6px;">Read by writing</div>
+        <p style="margin:0;color:var(--muted);font-size:14px;line-height:1.6;">Books are split into passages of one short paragraph. Type one and you have read one.</p>
+      </div>
+      <div>
+        <div style="font-family:var(--font);font-weight:600;font-size:15px;margin-bottom:6px;">Tonal feedback</div>
+        <p style="margin:0;color:var(--muted);font-size:14px;line-height:1.6;">Text fills in as you type. Colour appears only for a live mistake — never to celebrate.</p>
+      </div>
+      <div>
+        <div style="font-family:var(--font);font-weight:600;font-size:15px;margin-bottom:6px;">Guest-first</div>
+        <p style="margin:0;color:var(--muted);font-size:14px;line-height:1.6;">Everything is readable without an account. Sign in only to keep your progress and metrics.</p>
+      </div>
+    </div>
+
+    <div style="margin-top:64px;display:flex;flex-direction:column;align-items:center;gap:18px;">
+      <div style="font-size:12px;letter-spacing:0.16em;text-transform:uppercase;color:var(--muted);">The library</div>
+      <button onClick="{{ goLibrary }}" style="border:1px solid var(--border);background:var(--sheet);color:var(--fg);font-family:inherit;font-size:15px;padding:12px 22px;border-radius:10px;cursor:pointer;" style-hover="border-color:var(--accent);">Browse the library →</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isLibrary }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:1040px;margin:0 auto;padding:44px 24px 96px;">
+    <h2 style="font-family:var(--font);font-weight:600;font-size:26px;letter-spacing:-0.02em;margin:0 0 6px;">Library</h2>
+    <p style="color:var(--muted);margin:0 0 36px;font-size:15px;">Every cover sits in the same frame — curated art and generated typographic covers alike.</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:26px 22px;">
+      <sc-for list="{{ books }}" as="book" hint-placeholder-count="8">
+        <button onClick="{{ book.open }}" style="text-align:left;background:none;border:none;padding:0;cursor:pointer;font-family:inherit;color:inherit;perspective:900px;">
+          <div style="position:relative;aspect-ratio:2/3;border-radius:10px;overflow:hidden;border:1px solid var(--border);background:var(--sheet);transition:transform .3s ease,box-shadow .3s ease;transform-style:preserve-3d;" style-hover="transform:translateY(-6px) rotateX(5deg) rotateY(-4deg);box-shadow:0 22px 44px -20px rgba(0,0,0,0.5);">
+            {{ book.coverEl }}
+          </div>
+          <div style="margin-top:11px;">
+            <div style="font-family:var(--font);font-weight:600;font-size:14px;line-height:1.25;">{{ book.title }}</div>
+            <div style="font-size:13px;color:var(--muted);margin-top:1px;">{{ book.author }}</div>
+            <div style="margin-top:9px;display:flex;align-items:center;gap:8px;">
+              <div style="flex:1;height:3px;border-radius:2px;background:var(--border);overflow:hidden;">
+                <div style="height:100%;width:{{ book.progressW }};background:var(--accent);"></div>
+              </div>
+              <span style="font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;">{{ book.progressW }}</span>
+            </div>
+          </div>
+        </button>
+      </sc-for>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isTyping }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:860px;margin:0 auto;padding:40px 24px 96px;display:flex;flex-direction:column;align-items:center;gap:20px;">
+    <div style="text-align:center;font-size:14px;color:var(--muted);letter-spacing:0.01em;">{{ bookTitle }} · {{ bookAuthor }}</div>
+    <div style="display:flex;justify-content:center;width:100%;">{{ surfaceEl }}</div>
+    <div style="font-size:14px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:0.01em;">Passage {{ passageCurrent }} of {{ passageTotal }} · {{ pct }}%<sc-if value="{{ notZen }}" hint-placeholder-val="{{ true }}"><span> · {{ wpm }} wpm · {{ acc }}% accuracy</span></sc-if></div>
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <button onClick="{{ toggleZen }}" style="border:1px solid var(--border);background:transparent;color:var(--muted);font-family:inherit;font-size:13px;padding:7px 14px;border-radius:8px;cursor:pointer;" style-hover="border-color:var(--accent);color:var(--fg);">{{ zenLabel }}</button>
+      <button onClick="{{ restartChunk }}" style="border:1px solid var(--border);background:transparent;color:var(--muted);font-family:inherit;font-size:13px;padding:7px 14px;border-radius:8px;cursor:pointer;" style-hover="border-color:var(--accent);color:var(--fg);">Restart passage</button>
+      <button onClick="{{ goLibrary }}" style="border:1px solid var(--border);background:transparent;color:var(--muted);font-family:inherit;font-size:13px;padding:7px 14px;border-radius:8px;cursor:pointer;" style-hover="border-color:var(--accent);color:var(--fg);">Pick another</button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{ isSummary }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:560px;margin:0 auto;padding:72px 24px;">
+    <div style="font-size:12px;letter-spacing:0.16em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;">Session</div>
+    <h2 style="font-family:var(--font);font-weight:600;font-size:28px;letter-spacing:-0.02em;margin:0 0 8px;">You read {{ sumPassages }} passages.</h2>
+    <p style="color:var(--muted);margin:0 0 36px;font-size:15px;line-height:1.6;">Progress on {{ bookTitle }} is saved. Pick up where you left off any time.</p>
+    <dl style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:0 0 36px;">
+      <div><dt style="font-size:13px;color:var(--muted);margin-bottom:4px;">Average speed</dt><dd style="margin:0;font-family:var(--font);font-size:34px;font-weight:600;font-variant-numeric:tabular-nums;">{{ sumWpm }}<span style="font-size:15px;color:var(--muted);font-weight:400;"> wpm</span></dd></div>
+      <div><dt style="font-size:13px;color:var(--muted);margin-bottom:4px;">Accuracy</dt><dd style="margin:0;font-family:var(--font);font-size:34px;font-weight:600;font-variant-numeric:tabular-nums;">{{ sumAcc }}<span style="font-size:15px;color:var(--muted);font-weight:400;">%</span></dd></div>
+      <div><dt style="font-size:13px;color:var(--muted);margin-bottom:4px;">Passages</dt><dd style="margin:0;font-family:var(--font);font-size:34px;font-weight:600;font-variant-numeric:tabular-nums;">{{ sumPassages }}</dd></div>
+      <div><dt style="font-size:13px;color:var(--muted);margin-bottom:4px;">Time</dt><dd style="margin:0;font-family:var(--font);font-size:34px;font-weight:600;font-variant-numeric:tabular-nums;">{{ sumTime }}</dd></div>
+    </dl>
+    <div style="display:flex;gap:10px;">
+      <button onClick="{{ restartSession }}" style="border:1px solid var(--border);background:var(--sheet);color:var(--fg);font-family:inherit;font-size:14px;padding:10px 18px;border-radius:9px;cursor:pointer;" style-hover="border-color:var(--accent);">Type it again</button>
+      <button onClick="{{ goLibrary }}" style="border:1px solid var(--border);background:transparent;color:var(--muted);font-family:inherit;font-size:14px;padding:10px 18px;border-radius:9px;cursor:pointer;" style-hover="border-color:var(--accent);color:var(--fg);">Back to library</button>
+    </div>
+    <sc-if value="{{ notSignedIn }}" hint-placeholder-val="{{ true }}">
+    <div style="margin-top:28px;border-top:1px solid var(--border);padding-top:20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      <span style="font-size:14px;color:var(--muted);">Sign in to save this and sync across devices.</span>
+      <button onClick="{{ signIn }}" style="border:1px solid var(--border);background:transparent;color:var(--fg);font-family:inherit;font-size:13px;padding:8px 14px;border-radius:8px;cursor:pointer;" style-hover="border-color:var(--accent);">Sign in with Google</button>
+    </div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:&quot;100%&quot;,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  PALETTES = {
+    'warm-light': { label:'Warm light', scheme:'light', bg:'#F3EDE2', sheet:'#FBF7EF', fg:'#2A251E', dim:'#BEB29C', muted:'#8C7F6A', border:'#E5DCC9', accent:'#B06B2E', error:'#B23A2E', errorTint:'#F1DAD3', caret:'#2A251E' },
+    'cool-light': { label:'Cool light', scheme:'light', bg:'#EDF0F3', sheet:'#FBFCFD', fg:'#1E2830', dim:'#AAB4BE', muted:'#68737F', border:'#DBE1E7', accent:'#3F6DA3', error:'#C23C2E', errorTint:'#F5DAD5', caret:'#1E2830' },
+    'soft-dark': { label:'Soft dark', scheme:'dark', bg:'#23262B', sheet:'#2C3037', fg:'#E5E2DB', dim:'#6C737E', muted:'#98A0A9', border:'#3A3F47', accent:'#C89B6A', error:'#E5776A', errorTint:'#3A2724', caret:'#E5E2DB' },
+    'near-black': { label:'Near black', scheme:'dark', bg:'#0E0F12', sheet:'#17181C', fg:'#F2F1EC', dim:'#555A63', muted:'#8A9099', border:'#262A31', accent:'#6BA5E8', error:'#F0655A', errorTint:'#331F1D', caret:'#F2F1EC' }
+  };
+  FONTS = {
+    sans:  { label:'Sans',  read:"'IBM Plex Sans', system-ui, sans-serif" },
+    serif: { label:'Serif', read:"'IBM Plex Serif', Georgia, serif" },
+    mono:  { label:'Mono',  read:"'IBM Plex Mono', ui-monospace, monospace" }
+  };
+  EN = [
+    `It is a truth universally acknowledged, that a single man in possession of a good fortune must be in want of a wife. However little known the feelings or views of such a man may be on his first entering a neighbourhood, this truth is so well fixed in the minds of the surrounding families, that he is considered as the rightful property of some one or other of their daughters.`,
+    `"My dear Mr. Bennet," said his lady to him one day, "have you heard that Netherfield Park is let at last?" Mr. Bennet replied that he had not. "But it is," returned she; "for Mrs. Long has just been here, and she told me all about it." Mr. Bennet made no answer. "Do not you want to know who has taken it?" cried his wife, impatiently. "You want to tell me, and I have no objection to hearing it." This was invitation enough.`,
+    `"Why, my dear, you must know, Mrs. Long says that Netherfield is taken by a young man of large fortune from the north of England; that he came down on Monday in a chaise and four to see the place, and was so much delighted with it that he agreed with Mr. Morris immediately; that he is to take possession before Michaelmas, and some of his servants are to be in the house by the end of next week." "What is his name?" "Bingley."`,
+    `"Is he married or single?" "Oh, single, my dear, to be sure! A single man of large fortune; four or five thousand a year. What a fine thing for our girls!" "How so? how can it affect them?" "My dear Mr. Bennet," replied his wife, "how can you be so tiresome? You must know that I am thinking of his marrying one of them."`,
+    `"I see no occasion for that. You and the girls may go - or you may send them by themselves, which perhaps will be still better; for as you are as handsome as any of them, Mr. Bingley might like you the best of the party." "My dear, you flatter me. I certainly have had my share of beauty, but I do not pretend to be anything extraordinary now."`,
+    `"But, my dear, you must indeed go and see Mr. Bingley when he comes into the neighbourhood." "It is more than I engage for, I assure you." "But consider your daughters. Only think what an establishment it would be for one of them. Indeed you must go, for it will be impossible for us to visit him, if you do not."`
+  ];
+  ES = [
+    `En un lugar de la Mancha, de cuyo nombre no quiero acordarme, no ha mucho tiempo que vivía un hidalgo de los de lanza en astillero, adarga antigua, rocín flaco y galgo corredor. Una olla de algo más vaca que carnero, salpicón las más noches, duelos y quebrantos los sábados, lantejas los viernes, algún palomino de añadidura los domingos, consumían las tres partes de su hacienda.`,
+    `Tenía en su casa una ama que pasaba de los cuarenta, y una sobrina que no llegaba a los veinte, y un mozo de campo y plaza, que así ensillaba el rocín como tomaba la podadera. Frisaba la edad de nuestro hidalgo con los cincuenta años; era de complexión recia, seco de carnes, enjuto de rostro, gran madrugador y amigo de la caza.`,
+    `Pero esto importa poco a nuestro cuento; basta que en la narración dél no se salga un punto de la verdad. Limpias, pues, sus armas, hecho del morrión celada, puesto nombre a su rocín y confirmándose a sí mismo, se dio a entender que no le faltaba otra cosa sino buscar una dama de quien enamorarse; porque el caballero andante sin amores era árbol sin hojas y sin fruto.`,
+    `¿No será bien tener a quien enviarle presentado y que entre y se hinque de rodillas ante mi dulce señora, y diga con voz humilde y rendido: "Yo, señora, soy el gigante Caraculiambro, señor de la ínsula Malindrania, a quien venció en singular batalla el jamás como se debe alabado caballero don Quijote de la Mancha"?`,
+    `¡Oh, cómo se holgó nuestro buen caballero cuando hubo hecho este discurso, y más cuando halló a quien dar nombre de su dama! Llamábase Aldonza Lorenzo, y a ésta le pareció ser bien darle título de señora de sus pensamientos; y vino a llamarla Dulcinea del Toboso, porque era natural del Toboso.`
+  ];
+  BOOKS = [
+    { id:'pride-and-prejudice', title:'Pride and Prejudice', author:'Jane Austen', lang:'en', progress:42, real:true },
+    { id:'don-quijote', title:'Don Quijote de la Mancha', author:'Miguel de Cervantes', lang:'es', progress:12, real:false },
+    { id:'frankenstein', title:'Frankenstein', author:'Mary Shelley', lang:'en', progress:0, real:false },
+    { id:'moby-dick', title:'Moby-Dick; or, The Whale', author:'Herman Melville', lang:'en', progress:8, real:true },
+    { id:'la-regenta', title:'La Regenta', author:'Leopoldo Alas', lang:'es', progress:0, real:false },
+    { id:'sherlock', title:'The Adventures of Sherlock Holmes', author:'Arthur Conan Doyle', lang:'en', progress:67, real:true },
+    { id:'alice', title:'Alice', author:'Lewis Carroll', lang:'en', progress:100, real:false },
+    { id:'meditations', title:'Meditations', author:'Marcus Aurelius', lang:'en', progress:23, real:false },
+    { id:'becquer', title:'Rimas y leyendas', author:'Gustavo A. Becquer', lang:'es', progress:0, real:false }
+  ];
+
+  state = {
+    screen:'landing', paletteId:'warm-light', fontId:'sans', zen:false, lang:'en', signedIn:false,
+    bookId:'pride-and-prejudice', chunkIndex:0, cursor:0, display:[], firstAttempt:[],
+    typed:0, hits:0, judged:0, startedAt:null, wpm:null, acc:null, completedChunks:0, results:[], fading:false
+  };
+
+  input = null;
+
+  chunksFor(bookId){ const b = this.BOOKS.find(x=>x.id===bookId); return (b && b.lang==='es') ? this.ES : this.EN; }
+  currentText(){ return this.chunksFor(this.state.bookId)[this.state.chunkIndex] || ''; }
+  currentChars(){ return Array.from(this.currentText()); }
+  totalChunks(){ return this.chunksFor(this.state.bookId).length; }
+
+  componentDidMount(){ this.loadChunk(this.state.chunkIndex); this.focusSoon(); }
+  focusSoon(){ setTimeout(()=>{ if(this.input) this.input.focus(); }, 40); }
+
+  freshChunkState(bookId, index, extra){
+    const len = Array.from(this.chunksFor(bookId)[index]).length;
+    return Object.assign({ cursor:0, display:new Array(len).fill('pending'), firstAttempt:new Array(len).fill(null),
+      typed:0, hits:0, judged:0, startedAt:null, wpm:null, acc:null, fading:false }, extra||{});
+  }
+  loadChunk(index){ this.setState(this.freshChunkState(this.state.bookId, index, { chunkIndex:index })); }
+
+  handleInput = (e)=>{
+    const v = e.target.value;
+    if(v){ const cps = Array.from(v); this.handleChar(cps[cps.length-1]); }
+    e.target.value = '';
+  };
+  handleKeyDown = (e)=>{
+    if(e.key==='Backspace'){ e.preventDefault(); this.handleBackspace(); }
+    else if(e.key==='Escape'){ e.preventDefault(); this.restartChunk(); }
+    else if(e.key==='Enter'){ e.preventDefault(); }
+  };
+
+  handleChar(ch){
+    const s = this.state;
+    if(s.fading) return;
+    const chars = this.currentChars();
+    if(s.cursor >= chars.length) return;
+    const expected = chars[s.cursor];
+    const hit = ch === expected;
+    const fa = s.firstAttempt.slice();
+    const disp = s.display.slice();
+    let hits = s.hits, judged = s.judged;
+    if(fa[s.cursor]==null){ fa[s.cursor] = hit?'hit':'miss'; judged++; if(hit) hits++; }
+    disp[s.cursor] = hit ? (fa[s.cursor]==='miss' ? 'corrected' : 'correct') : 'incorrect';
+    const cursor = s.cursor + 1;
+    const typed = s.typed + 1;
+    const now = Date.now();
+    const startedAt = s.startedAt==null ? now : s.startedAt;
+    const mins = (now - startedAt)/60000;
+    const wpm = mins>0 ? Math.round((typed/5)/mins) : s.wpm;
+    const acc = judged ? Math.round((hits/judged)*100) : null;
+    const complete = cursor>=chars.length && !disp.includes('incorrect') && !disp.includes('pending');
+    this.setState({ display:disp, firstAttempt:fa, cursor, typed, hits, judged, startedAt, wpm, acc }, ()=>{ if(complete) this.complete(); });
+  }
+  handleBackspace(){
+    const s = this.state;
+    if(s.fading || s.cursor<=0) return;
+    const disp = s.display.slice();
+    const cursor = s.cursor - 1;
+    disp[cursor] = 'pending';
+    this.setState({ display:disp, cursor });
+  }
+
+  complete(){
+    this.setState({ fading:true });
+    setTimeout(()=>{
+      const s = this.state;
+      const results = s.results.concat([{ wpm:s.wpm||0, hits:s.hits, judged:s.judged, ms: s.startedAt?Date.now()-s.startedAt:0 }]);
+      const next = s.chunkIndex + 1;
+      if(next < this.totalChunks()){
+        this.setState(this.freshChunkState(s.bookId, next, { chunkIndex:next, completedChunks:s.completedChunks+1, results }), ()=>this.focusSoon());
+      } else {
+        this.setState({ screen:'summary', completedChunks:s.completedChunks+1, results, fading:false });
+      }
+    }, 220);
+  }
+
+  restartChunk = ()=>{ this.loadChunk(this.state.chunkIndex); this.focusSoon(); };
+  restartSession = ()=>{ this.setState(this.freshChunkState(this.state.bookId, 0, { screen:'typing', chunkIndex:0, completedChunks:0, results:[] }), ()=>this.focusSoon()); };
+  toggleZen = ()=>{ this.setState({ zen: !this.state.zen }); this.focusSoon(); };
+  goLanding = ()=>{ this.setState({ screen:'landing' }); this.focusSoon(); };
+  goLibrary = ()=>{ this.setState({ screen:'library' }); };
+  signIn = ()=>{ this.setState({ signedIn:true }); };
+  openBook = (id)=>{ this.setState(this.freshChunkState(id, 0, { screen:'typing', bookId:id, chunkIndex:0, completedChunks:0, results:[] }), ()=>this.focusSoon()); };
+  selectLang = (l)=>{ const bookId = l==='es' ? 'don-quijote' : 'pride-and-prejudice'; this.setState(this.freshChunkState(bookId, 0, { lang:l, bookId, chunkIndex:0, completedChunks:0, results:[] }), ()=>this.focusSoon()); };
+
+  buildControls(){
+    const st = this.state;
+    const seg = (active, onClick, label, key)=> React.createElement('button', { key, onClick, style:{ border:'none', background: active?'var(--fg)':'transparent', color: active?'var(--bg)':'var(--muted)', padding:'5px 9px', borderRadius:'6px', fontFamily:'inherit', fontSize:'12px', fontWeight: active?600:500, cursor:'pointer', letterSpacing:'0.02em' } }, label);
+    const dots = Object.keys(this.PALETTES).map(id=>{ const p=this.PALETTES[id]; const sel=st.paletteId===id;
+      return React.createElement('button', { key:id, title:p.label, onClick:()=>this.setState({paletteId:id}), style:{ width:'20px', height:'20px', borderRadius:'50%', padding:0, cursor:'pointer', border: sel?'2px solid var(--accent)':'1px solid var(--border)', background:`linear-gradient(135deg, ${p.bg} 0 50%, ${p.fg} 50% 100%)` } }); });
+    const fonts = Object.keys(this.FONTS).map(id=> seg(st.fontId===id, ()=>{ this.setState({fontId:id}); this.focusSoon(); }, this.FONTS[id].label, 'f'+id));
+    const langs = ['en','es'].map(l=> seg(st.lang===l, ()=>this.selectLang(l), l.toUpperCase(), 'l'+l));
+    const divider = (k)=> React.createElement('div', { key:k, style:{ width:'1px', height:'20px', background:'var(--border)' } });
+    const signin = React.createElement('button', { key:'si', onClick:()=>this.setState({signedIn:!st.signedIn}), style:{ border:'1px solid var(--border)', background:'transparent', color:'var(--fg)', padding:'6px 12px', borderRadius:'8px', fontFamily:'inherit', fontSize:'13px', cursor:'pointer' } }, st.signedIn?'Signed in':'Sign in');
+    return React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' } },
+      React.createElement('div', { key:'d', style:{ display:'flex', gap:'6px' } }, dots), divider('d1'),
+      React.createElement('div', { key:'f', style:{ display:'flex', gap:'2px' } }, fonts), divider('d2'),
+      React.createElement('div', { key:'l', style:{ display:'flex', gap:'2px' } }, langs), signin);
+  }
+
+  buildSurface(){
+    const s = this.state;
+    const chars = this.currentChars();
+    const disp = (s.display.length===chars.length) ? s.display : chars.map(()=> 'pending');
+    const cur = s.cursor;
+    const spans = chars.map((ch,i)=>{
+      const stt = disp[i];
+      const style = { borderRadius:'2px' };
+      if(stt==='pending') style.color='var(--dim)';
+      else if(stt==='incorrect'){ style.color='var(--error)'; style.background='var(--error-tint)'; style.textDecoration='underline'; style.textDecorationStyle='wavy'; style.textDecorationThickness='1.5px'; }
+      else style.color='var(--fg)';
+      if(i===cur){ style.boxShadow='inset 2px 0 0 0 var(--caret)'; style.animation='caret-blink 1.1s step-end infinite'; }
+      return React.createElement('span', { key:i, 'data-caret': i===cur?'':undefined, style }, ch);
+    });
+    if(cur>=chars.length) spans.push(React.createElement('span', { key:'end', 'data-caret':'', style:{ boxShadow:'inset 2px 0 0 0 var(--caret)', animation:'caret-blink 1.1s step-end infinite' } }, '​'));
+    return React.createElement('label', { onClick:()=>this.focusSoon(), style:{ position:'relative', display:'block', width:'100%', maxWidth:'720px', cursor:'text', background:'var(--sheet)', border:'1px solid var(--border)', borderRadius:'12px', padding:'34px 38px', fontFamily:'var(--font)', fontSize:'21px', lineHeight:'1.85', whiteSpace:'pre-wrap', overflowWrap:'anywhere', color:'var(--fg)', opacity: s.fading?0.45:1, transition:'opacity .2s ease, background .25s ease' } },
+      React.createElement('span', { key:'t' }, spans),
+      React.createElement('input', { key:'i', ref:(n)=>{ this.input=n; }, type:'text', 'aria-label':'Typing input', autoComplete:'off', autoCapitalize:'off', autoCorrect:'off', spellCheck:false, onInput:this.handleInput, onKeyDown:this.handleKeyDown, style:{ position:'absolute', width:'1px', height:'1px', padding:0, border:0, opacity:0, left:'14px', top:'14px' } }));
+  }
+
+  buildCover(b){
+    if(b.real){
+      return React.createElement('image-slot', { id:'cover-'+b.id, shape:'rect', placeholder:b.title+' — drop cover art', style:{ position:'absolute', inset:0, width:'100%', height:'100%' } });
+    }
+    const len = b.title.length;
+    const titleSize = len<=8 ? '32px' : (len<=18 ? '25px' : '19px');
+    const tint = b.lang==='es' ? 20 : 14;
+    return React.createElement('div', { style:{ position:'absolute', inset:0, display:'flex', flexDirection:'column', justifyContent:'space-between', padding:'16px', background:`color-mix(in oklab, var(--accent) ${tint}%, var(--sheet))`, fontFamily:'var(--font)' } },
+      React.createElement('div', { key:'k', style:{ fontSize:'10px', letterSpacing:'0.14em', textTransform:'uppercase', color:'var(--muted)' } }, b.lang==='es'?'Espanol':'English'),
+      React.createElement('div', { key:'t', style:{ fontFamily:'var(--font)', fontWeight:600, fontSize:titleSize, lineHeight:1.12, color:'var(--fg)', letterSpacing:'-0.01em' } }, b.title),
+      React.createElement('div', { key:'a', style:{ fontSize:'12px', color:'var(--muted)' } }, b.author));
+  }
+
+  renderVals(){
+    const s = this.state;
+    const p = this.PALETTES[s.paletteId];
+    const f = this.FONTS[s.fontId];
+    const rootStyle = `--bg:${p.bg};--sheet:${p.sheet};--fg:${p.fg};--dim:${p.dim};--muted:${p.muted};--border:${p.border};--accent:${p.accent};--error:${p.error};--error-tint:${p.errorTint};--caret:${p.caret};--font:${f.read};`;
+    const book = this.BOOKS.find(x=>x.id===s.bookId) || this.BOOKS[0];
+    const total = this.totalChunks();
+    const chars = this.currentChars();
+    const pct = Math.round(((s.completedChunks + (chars.length? s.cursor/chars.length : 0))/total)*100);
+    const results = s.results;
+    const sumWpm = results.length ? Math.round(results.reduce((a,r)=>a+r.wpm,0)/results.length) : 0;
+    const totJ = results.reduce((a,r)=>a+r.judged,0);
+    const totH = results.reduce((a,r)=>a+r.hits,0);
+    const sumAcc = totJ ? Math.round((totH/totJ)*100) : 100;
+    const totMs = results.reduce((a,r)=>a+r.ms,0);
+    const secs = Math.round(totMs/1000);
+    const sumTime = `${String(Math.floor(secs/60)).padStart(2,'0')}:${String(secs%60).padStart(2,'0')}`;
+    return {
+      rootStyle,
+      isLanding: s.screen==='landing', isLibrary: s.screen==='library', isTyping: s.screen==='typing', isSummary: s.screen==='summary',
+      controlsEl: this.buildControls(),
+      surfaceEl: this.buildSurface(),
+      books: this.BOOKS.map(b=>({ title:b.title, author:b.author, progressW: b.progress+'%', coverEl:this.buildCover(b), open:()=>this.openBook(b.id) })),
+      bookTitle: book.title, bookAuthor: book.author,
+      passageCurrent: s.chunkIndex+1, passageTotal: total, pct,
+      wpm: s.wpm==null?'—':String(s.wpm), acc: s.acc==null?'—':String(s.acc),
+      isZen: s.zen, notZen: !s.zen, zenLabel: s.zen?'Exit Zen':'Zen mode',
+      goLanding:this.goLanding, goLibrary:this.goLibrary, toggleZen:this.toggleZen,
+      restartChunk:this.restartChunk, restartSession:this.restartSession, signIn:this.signIn,
+      notSignedIn: !s.signedIn,
+      sumWpm, sumAcc, sumPassages: results.length || s.completedChunks, sumTime
+    };
+  }
+}
+</script>
+</body>
+</html>

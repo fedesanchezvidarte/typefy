@@ -10,6 +10,12 @@ export interface TypeableTextSummary {
 	author: string;
 	language: Language; // content language — independent of UI locale
 	chunkCount: number;
+	/**
+	 * Curated cover art (ADR-0006 `books.cover_url`); null → the library renders
+	 * a generated typographic cover (spec #9). The call is made per book by a
+	 * human — there is no heuristic.
+	 */
+	coverUrl: string | null;
 }
 
 /** A summary plus its chunks (ADR-0006 `books` row + its `chunks`). */
