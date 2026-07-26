@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { createSession, applySessionEvent, sessionSummary } from './session.js';
-import { createChunk } from './chunk.js';
+import {
+	createSession,
+	applySessionEvent,
+	sessionSummary,
+	runningLog,
+	runningMetrics
+} from './session.js';
+import { createChunk, applyChunkEvent } from './chunk.js';
+import { computeMetrics } from './metrics.js';
 import type { SessionEvent, SessionState } from './session.js';
+import type { ChunkEvent, Keystroke } from './types.js';
 import type { TypeableText } from '../types.js';
 
 function makeText(contents: readonly string[]): TypeableText {
@@ -24,6 +32,15 @@ function makeText(contents: readonly string[]): TypeableText {
 
 function run(state: SessionState, events: readonly SessionEvent[]): SessionState {
 	return events.reduce((s, e) => applySessionEvent(s, e), state);
+}
+
+/** The keystroke log a chunk produces on its own — an expected value built without session.ts. */
+function chunkLog(content: string, events: readonly SessionEvent[]): readonly Keystroke[] {
+	let state = createChunk(content);
+	for (const event of events) {
+		state = applyChunkEvent(state, event as ChunkEvent);
+	}
+	return state.log;
 }
 
 /** Chunk 1 'abcd': one mistype fixed (accuracy 3/4), 5 typed chars over 6s → 10 WPM. */
@@ -49,6 +66,34 @@ describe('createSession', () => {
 		expect(state.activeChunk).toEqual(createChunk('abcd'));
 		expect(state.results).toEqual([null, null]);
 		expect(state.finished).toBe(false);
+		expect(state.completedLog).toEqual([]);
+	});
+
+	it('opens at the given startIndex without fabricating results for earlier chunks', () => {
+		const state = createSession(makeText(['abcd', 'ef', 'gh', 'ij']), 2);
+		expect(state.activeIndex).toBe(2);
+		expect(state.activeChunk).toEqual(createChunk('gh'));
+		expect(state.results).toEqual([null, null, null, null]);
+		expect(state.completedLog).toEqual([]);
+		expect(state.finished).toBe(false);
+	});
+
+	it('clamps a startIndex beyond the last chunk to the last chunk', () => {
+		const state = createSession(makeText(['abcd', 'ef']), 99);
+		expect(state.activeIndex).toBe(1);
+		expect(state.activeChunk).toEqual(createChunk('ef'));
+	});
+
+	it('clamps a negative startIndex to 0', () => {
+		const state = createSession(makeText(['abcd', 'ef']), -3);
+		expect(state.activeIndex).toBe(0);
+		expect(state.activeChunk).toEqual(createChunk('abcd'));
+	});
+
+	it('floors a fractional startIndex and falls back to 0 for NaN', () => {
+		expect(createSession(makeText(['abcd', 'ef', 'gh']), 1.9).activeIndex).toBe(1);
+		expect(createSession(makeText(['abcd', 'ef', 'gh']), Number.NaN).activeIndex).toBe(0);
+		expect(createSession(makeText(['abcd', 'ef', 'gh']), undefined).activeIndex).toBe(0);
 	});
 });
 
@@ -148,6 +193,82 @@ describe('applySessionEvent — restart semantics', () => {
 	});
 });
 
+describe('runningLog / runningMetrics — cumulative across passages', () => {
+	const LOG_ONE = chunkLog('abcd', CHUNK_ONE_EVENTS);
+	const LOG_TWO = chunkLog('ef', CHUNK_TWO_EVENTS);
+
+	it('is empty for a fresh session', () => {
+		const state = createSession(makeText(['abcd', 'ef']));
+		expect(runningLog(state)).toEqual([]);
+		expect(runningMetrics(state)).toEqual(computeMetrics([]));
+	});
+
+	it('concatenates the completed chunks and the active chunk in completion order', () => {
+		const state = run(createSession(makeText(['abcd', 'ef'])), [
+			...CHUNK_ONE_EVENTS,
+			{ type: 'char', char: 'e', timestamp: 100_000 }
+		]);
+		expect(state.completedLog).toEqual(LOG_ONE);
+		expect(runningLog(state)).toEqual([...LOG_ONE, ...state.activeChunk.log]);
+	});
+
+	it('matches computeMetrics over the concatenated log across two passages', () => {
+		const state = run(createSession(makeText(['abcd', 'ef'])), [
+			...CHUNK_ONE_EVENTS,
+			...CHUNK_TWO_EVENTS
+		]);
+		const expected = computeMetrics([...LOG_ONE, ...LOG_TWO]);
+		expect(runningLog(state)).toEqual([...LOG_ONE, ...LOG_TWO]);
+		expect(runningMetrics(state)).toEqual(expected);
+		// The idle gap between passages is inside the span, by design (elapsed = 103s, not 9s).
+		expect(expected.elapsedMs).toBe(103_000);
+		expect(expected.typedChars).toBe(7);
+		expect(expected.accuracyRaw).toBeCloseTo(5 / 6, 5);
+	});
+
+	it('does not double-count the final passage once the session is finished', () => {
+		const state = run(createSession(makeText(['abcd', 'ef'])), [
+			...CHUNK_ONE_EVENTS,
+			...CHUNK_TWO_EVENTS
+		]);
+		expect(state.finished).toBe(true);
+		expect(runningLog(state)).toHaveLength(LOG_ONE.length + LOG_TWO.length);
+		expect(runningMetrics(state).typedChars).toBe(7);
+	});
+
+	it('honours endTime for live metrics, exactly as computeMetrics does', () => {
+		const state = run(createSession(makeText(['abcd', 'ef'])), [
+			...CHUNK_ONE_EVENTS,
+			{ type: 'char', char: 'e', timestamp: 100_000 }
+		]);
+		expect(runningMetrics(state, 130_000)).toEqual(computeMetrics(runningLog(state), 130_000));
+		expect(runningMetrics(state, 130_000).elapsedMs).toBe(130_000);
+	});
+
+	it('restart-chunk drops the active passage strokes but keeps the completed ones', () => {
+		const midSecond = run(createSession(makeText(['abcd', 'ef'])), [
+			...CHUNK_ONE_EVENTS,
+			{ type: 'char', char: 'e', timestamp: 100_000 }
+		]);
+		const state = applySessionEvent(midSecond, { type: 'restart-chunk' });
+		expect(state.completedLog).toEqual(LOG_ONE);
+		expect(runningLog(state)).toEqual(LOG_ONE);
+	});
+
+	it('restart-session clears the running log entirely', () => {
+		const state = applySessionEvent(
+			run(createSession(makeText(['abcd', 'ef'])), [
+				...CHUNK_ONE_EVENTS,
+				{ type: 'char', char: 'e', timestamp: 100_000 }
+			]),
+			{ type: 'restart-session' }
+		);
+		expect(state.completedLog).toEqual([]);
+		expect(runningLog(state)).toEqual([]);
+		expect(runningMetrics(state)).toEqual(computeMetrics([]));
+	});
+});
+
 describe('sessionSummary', () => {
 	it('returns zeroed aggregates before any chunk completes', () => {
 		const state = createSession(makeText(['abcd', 'ef']));
@@ -159,13 +280,15 @@ describe('sessionSummary', () => {
 		});
 	});
 
-	it('aggregates average WPM, overall accuracy, chunks completed, and total active time', () => {
+	it('reports cumulative WPM, overall accuracy, chunks completed, and total active time', () => {
 		const state = run(createSession(makeText(['abcd', 'ef'])), [
 			...CHUNK_ONE_EVENTS,
 			...CHUNK_TWO_EVENTS
 		]);
 		const summary = sessionSummary(state);
-		expect(summary.averageWpm).toBeCloseTo(9, 5); // mean of 10 and 8
+		// Cumulative over the whole session log — no longer the mean of 10 and 8.
+		expect(summary.averageWpm).toBe(runningMetrics(state).grossWpm);
+		expect(summary.averageWpm).toBeCloseTo(7 / 5 / (103_000 / 60_000), 5);
 		// Aggregate first-attempt hits ÷ entries: (3 + 2) ÷ (4 + 2) — weighted, not a mean of ratios.
 		expect(summary.overallAccuracy).toBeCloseTo(5 / 6, 5);
 		expect(summary.chunksCompleted).toBe(2);
@@ -179,7 +302,9 @@ describe('sessionSummary', () => {
 		]);
 		const summary = sessionSummary(state);
 		expect(summary.chunksCompleted).toBe(1);
-		expect(summary.averageWpm).toBeCloseTo(10, 5);
-		expect(summary.totalActiveMs).toBe(6000);
+		// Cumulative: the in-progress passage's stroke is inside the running log too.
+		expect(summary.averageWpm).toBe(runningMetrics(state).grossWpm);
+		expect(summary.averageWpm).toBeCloseTo(6 / 5 / (100_000 / 60_000), 5);
+		expect(summary.totalActiveMs).toBe(6000); // unchanged: sum of per-chunk spans
 	});
 });

@@ -1,7 +1,7 @@
 import type { TypeableText } from '../types.js';
-import type { ChunkEngineState, ChunkEvent } from './types.js';
+import type { ChunkEngineState, ChunkEvent, Keystroke } from './types.js';
 import { createChunk, applyChunkEvent } from './chunk.js';
-import { computeMetrics } from './metrics.js';
+import { computeMetrics, type MetricsSnapshot } from './metrics.js';
 
 /**
  * In-memory session over a typeable text: chunks consumed in order, auto-advance on
@@ -16,7 +16,7 @@ export interface ChunkResult {
 }
 
 export interface SessionSummary {
-	averageWpm: number; // mean of per-chunk gross WPM
+	averageWpm: number; // cumulative gross WPM over the session's running log (not a per-chunk mean)
 	overallAccuracy: number; // aggregate first-attempt hits ÷ first-attempt entries across all chunks
 	chunksCompleted: number;
 	totalActiveMs: number; // sum of per-chunk first-keystroke→completion times
@@ -27,19 +27,47 @@ export interface SessionState {
 	readonly activeIndex: number;
 	readonly activeChunk: ChunkEngineState;
 	readonly results: readonly (ChunkResult | null)[]; // frozen at each chunk's completion
+	/**
+	 * Concatenated keystroke logs of the chunks left behind this session, in completion
+	 * order. Invariant: it never overlaps `activeChunk.log` — the active chunk's strokes
+	 * live only in `activeChunk`, including the last chunk once the session is finished.
+	 * That is what makes `runningLog` a plain concatenation and lets `restart-chunk`
+	 * drop the active passage's strokes structurally.
+	 */
+	readonly completedLog: readonly Keystroke[];
 	readonly finished: boolean;
 }
 
 export type SessionEvent = ChunkEvent | { type: 'restart-chunk' } | { type: 'restart-session' };
 
-export function createSession(text: TypeableText): SessionState {
+/**
+ * Opens a session at `startIndex` (resume), defaulting to the first chunk. The index is
+ * floored and clamped into `0..chunkCount - 1`; a non-finite value falls back to 0, so a
+ * hand-edited or stale link can never produce an unopenable session. Resuming does NOT
+ * fabricate results for the skipped chunks — `results` is all-null either way.
+ */
+export function createSession(text: TypeableText, startIndex = 0): SessionState {
+	const index = Number.isFinite(startIndex)
+		? Math.min(Math.max(Math.floor(startIndex), 0), text.chunkCount - 1)
+		: 0;
 	return {
 		text,
-		activeIndex: 0,
-		activeChunk: createChunk(text.chunks[0].content),
+		activeIndex: index,
+		activeChunk: createChunk(text.chunks[index].content),
 		results: text.chunks.map(() => null),
+		completedLog: [],
 		finished: false
 	};
+}
+
+/** The session's running keystroke log: completed chunks' strokes + the active chunk's. */
+export function runningLog(state: SessionState): readonly Keystroke[] {
+	return [...state.completedLog, ...state.activeChunk.log];
+}
+
+/** Cumulative metrics over the whole session's log. `endTime` enables live metrics. */
+export function runningMetrics(state: SessionState, endTime?: number): MetricsSnapshot {
+	return computeMetrics(runningLog(state), endTime);
 }
 
 export function applySessionEvent(state: SessionState, event: SessionEvent): SessionState {
@@ -76,6 +104,8 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 
 	const nextIndex = state.activeIndex + 1;
 	if (nextIndex >= state.text.chunkCount) {
+		// The completed chunk stays active, so its strokes stay in `activeChunk.log` and
+		// must NOT also be appended to `completedLog` — see the invariant on SessionState.
 		return { ...state, activeChunk, results, finished: true };
 	}
 	return {
@@ -83,6 +113,8 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 		activeIndex: nextIndex,
 		activeChunk: createChunk(state.text.chunks[nextIndex].content),
 		results,
+		// The completed chunk is being left behind: its strokes move into the running log.
+		completedLog: [...state.completedLog, ...activeChunk.log],
 		finished: false
 	};
 }
@@ -104,7 +136,7 @@ export function sessionSummary(state: SessionState): SessionSummary {
 	const totalHits = completed.reduce((sum, c) => sum + c.result.accuracyRaw * c.charCount, 0);
 
 	return {
-		averageWpm: completed.reduce((sum, c) => sum + c.result.grossWpm, 0) / completed.length,
+		averageWpm: runningMetrics(state).grossWpm,
 		overallAccuracy: totalHits / totalEntries,
 		chunksCompleted: completed.length,
 		totalActiveMs: completed.reduce((sum, c) => sum + c.result.elapsedMs, 0)
