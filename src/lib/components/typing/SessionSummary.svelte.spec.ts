@@ -17,10 +17,14 @@ const summary: SessionSummary = {
 };
 
 const noop = () => {};
+// `pendingSaves: 0` is the spec #12 baseline these tests describe: every failure permanent,
+// so `failedSaves - pendingSaves` is still the whole count and the wording is unchanged.
+// The pending/lost split itself is Phase 7's to cover.
 const baseProps = {
 	summary,
 	onRestartSession: noop,
 	onPickAnother: noop,
+	pendingSaves: 0,
 	signedIn: true,
 	next: '/type/test-book'
 };

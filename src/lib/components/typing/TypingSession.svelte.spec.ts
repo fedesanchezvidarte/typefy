@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
 import type { TypeableText } from '$lib/types';
+import { ATTEMPT_BUFFER_KEY } from '$lib/progress/buffer';
 import TypingSession from './TypingSession.svelte';
 
 /**
@@ -15,11 +16,17 @@ import TypingSession from './TypingSession.svelte';
  * reach a real Supabase client or a real database.
  */
 const recordChunkAttempt = vi.hoisted(() => vi.fn());
+const backfillChunkAttempt = vi.hoisted(() => vi.fn());
 const getBrowserSupabase = vi.hoisted(() => vi.fn(() => ({ __mock: 'supabase-client' })));
 const goto = vi.hoisted(() => vi.fn());
 
 vi.mock('$lib/supabase/browser', () => ({ getBrowserSupabase }));
-vi.mock('$lib/progress/client', () => ({ recordChunkAttempt }));
+// `backfillChunkAttempt` belongs in the factory even though this component never calls it:
+// a successful write now fires `drainOnce`, whose dynamic `./drain` import resolves
+// `backfillChunkAttempt` out of THIS mocked module. Without it, any test whose buffer is
+// non-empty when a save succeeds would fail on `backfillChunkAttempt is not a function`
+// rather than on anything it means to assert.
+vi.mock('$lib/progress/client', () => ({ recordChunkAttempt, backfillChunkAttempt }));
 // Mocked purely so "no re-authentication flow is triggered" (spec §6) is assertable:
 // a redirect out of the session would have to go through `goto`.
 vi.mock('$app/navigation', () => ({ goto }));
@@ -78,8 +85,14 @@ async function settleSaves() {
 beforeEach(() => {
 	recordChunkAttempt.mockReset();
 	recordChunkAttempt.mockResolvedValue({ saved: true });
+	backfillChunkAttempt.mockReset();
+	backfillChunkAttempt.mockResolvedValue({ saved: true });
 	getBrowserSupabase.mockClear();
 	goto.mockClear();
+	// These run in a real browser against a real `localStorage`, and the component now
+	// enqueues into it. Without this, one test's buffered entries survive into the next and
+	// change what its drain trigger does — a shared-state leak, not a flake.
+	localStorage.removeItem(ATTEMPT_BUFFER_KEY);
 });
 
 describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)', () => {
@@ -193,7 +206,11 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 
 describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 	it('shows nothing during typing and states the failure count once on the summary', async () => {
-		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'error' });
+		// `'permanent'` explicitly, not the old catch-all `'error'`: this test asserts the
+		// *lost* wording, which spec #15 narrowed `summary_save_failures` to. A transient stub
+		// would render the pending notice instead and this assertion would be exercising the
+		// opposite path from the one it names.
+		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'permanent' });
 
 		render(TypingSession, {
 			book: makeBook(passages(2)),
@@ -242,10 +259,14 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
 	});
 
-	it('treats an expired token as an ordinary save failure: notice shown, no re-auth flow, no rollback of the figure', async () => {
-		// An expired token is not a distinct code path — `recordChunkAttempt` reports the
-		// refused insert the same way it reports any other (spec §6).
-		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'error' });
+	it('treats an expired token as a pending save: notice shown, no re-auth flow, no rollback of the figure', async () => {
+		// An expired token is still not a distinct code path in the component — but spec #15
+		// §11 classifies it TRANSIENT, because it is the exact condition the buffer exists to
+		// survive. So the honest stub is `'transient'`, and the honest assertion is the
+		// pending notice: those passages are buffered and will be written, not lost. What
+		// spec #12 §6 fixed is unchanged and still asserted below — no re-auth flow, and the
+		// optimistic figure is never rewound.
+		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'transient' });
 		const hrefBefore = window.location.href;
 
 		render(TypingSession, {
@@ -272,8 +293,10 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		await typeText('e f');
 
 		await expect
-			.element(page.getByTestId('summary-save-failures'))
-			.toHaveTextContent("3 passages couldn't be saved.");
+			.element(page.getByTestId('summary-save-pending'))
+			.toHaveTextContent("3 passages will be saved when you're back online.");
+		// Nothing is reported as lost: every failure here was transient and therefore buffered.
+		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
 		// No re-authentication flow: nothing navigated, and no sign-in prompt was raised
 		// (that prompt is the guest-only surface).
 		expect(goto).not.toHaveBeenCalled();

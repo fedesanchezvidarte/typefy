@@ -16,6 +16,15 @@
 	import type { ChunkResult, SessionEvent, SessionState } from '$lib/engine/session';
 	import type { MetricsSnapshot } from '$lib/engine/metrics';
 	import type { TypeableText } from '$lib/types';
+	// All three are Supabase-free and therefore STATICALLY importable — that is the whole
+	// point of the split (spec #15 §2/§4). `buffer` + `storage` name no browser global but
+	// `localStorage`; `drain-once` reaches `@supabase/*` and `drain.ts` only through its own
+	// `await import()`. So a guest can enqueue, and a signed-in user can fire a drain, with
+	// neither adding a byte of `@supabase/ssr` or `@supabase/supabase-js` to this bundle.
+	// `loadProgressModules()` below remains the ONLY path from this component to either.
+	import { ATTEMPT_BUFFER_KEY, enqueue, type BufferedChunkAttempt } from '$lib/progress/buffer';
+	import { getAttemptStorage } from '$lib/progress/storage';
+	import { drainOnce } from '$lib/progress/drain-once';
 	import PassageMeta from './PassageMeta.svelte';
 	import SessionSummaryView from './SessionSummary.svelte';
 	import TypingSurface from './TypingSurface.svelte';
@@ -28,7 +37,19 @@
 		chunksCompleted: number;
 		/** Chunk ids already completed at least once. Empty for guests. */
 		completedChunkIds: readonly string[];
-		/** null for a guest — the sole gate on the write path. No insert, no import, no request. */
+		/**
+		 * null for a guest — the sole gate on the write path. No insert, no import, no request.
+		 *
+		 * **It can flip to null mid-session** (spec #15 §10 R3b). The parent derives it from
+		 * `page.data.user`, so a post-drain `invalidateAll()` that finds the session expired
+		 * re-renders this prop as `null`, and every later completion is enqueued as
+		 * *guest-authored* rather than owned. Accepted deliberately rather than defended
+		 * against: a guest-authored entry is not lost, it is attributable to whoever signs in
+		 * next on this browser (§1), which for an expired-then-renewed session is the same
+		 * person — so the passages still backfill. Freezing `userId` at mount would instead
+		 * keep stamping a user id whose token is gone, buffering entries that only ever drain
+		 * under that one id. The looser attribution is the recoverable failure of the two.
+		 */
 		userId: string | null;
 	}
 
@@ -51,11 +72,33 @@
 	 *
 	 * `SvelteSet` is reactive on its own, so no `$state` wrapper. Seeded once via `untrack`
 	 * for the same reason as `session` above: the seed is a starting point, not a binding.
+	 *
+	 * **The consequence, now that a drain can call `invalidateAll()` (spec #15 §4): this set
+	 * is seeded, not live.** A backfill that persists ids while this session is mounted
+	 * re-runs the load, but `untrack` means the fresh `completedChunkIds` is never folded in
+	 * here — only the reactive `chunksCompleted` below updates. `pct` survives that because
+	 * it takes `Math.max(completed.size, chunksCompleted)`, so the NUMBER self-corrects while
+	 * the SET does not. Left as is on purpose: refreshing the set would need it to be
+	 * `$derived`, which would also let a mid-session reload discard ids added optimistically
+	 * since. Nothing else reads the set today — **any future consumer must not assume the set
+	 * and the count agree after a drain.**
 	 */
 	const completed = untrack(() => new SvelteSet(completedChunkIds));
 
-	/** Count of inserts that came back `{ saved: false }`. Stated once, on the summary. */
+	/**
+	 * Count of inserts that came back `{ saved: false }`, for ANY reason — its spec #12
+	 * meaning, unchanged. Stated once, on the summary.
+	 */
 	let failedSaves = $state(0);
+
+	/**
+	 * The subset of `failedSaves` that failed **transiently** and was therefore buffered
+	 * (spec #15 §3). Tracked separately because the summary now tells two different truths:
+	 * `pendingSaves` passages are pending, not lost, and `failedSaves - pendingSaves` are
+	 * genuinely lost. Collapsing the two would report a passage waiting on the network as
+	 * discarded.
+	 */
+	let pendingSaves = $state(0);
 
 	// Zen mode (spec #9): a per-visit presentation toggle — the engine keeps
 	// logging (the keystroke log is the single source of truth); only the meta
@@ -88,8 +131,46 @@
 	}
 
 	/**
-	 * One insert attempt for one completed passage. No retry, no backoff, no queue (spec §1),
-	 * and never awaited by the render path — the next passage must appear regardless.
+	 * Buffers one completed passage that could not be persisted (spec #15 §3) — a guest's
+	 * (`entryUserId === null`, attributable to whoever signs in next on this browser) or a
+	 * signed-in user's transient failure (their own id, drainable only under it).
+	 *
+	 * Synchronous and total: `enqueue` swallows an absent binding, a parse failure and a
+	 * quota error alike, so this call can sit on the completion instant without a `try` and
+	 * without an `await`. A permanent failure never reaches here — retrying a refused row
+	 * cannot succeed, so buffering it would only strand the entries behind it.
+	 *
+	 * The storage port is constructed per call rather than once at component init on purpose:
+	 * this script also runs during SSR, where `getAttemptStorage` resolves to `null`, and a
+	 * captured `null` would silently disable buffering for the hydrated instance.
+	 */
+	function enqueueAttempt(
+		entryUserId: string | null,
+		chunkId: string,
+		result: ChunkResult,
+		startedAt: number
+	) {
+		const now = Date.now();
+		const entry: BufferedChunkAttempt = {
+			userId: entryUserId,
+			chunkId,
+			bookId: book.bookId,
+			completed: true,
+			grossWpm: result.grossWpm,
+			accuracyRaw: result.accuracyRaw,
+			elapsedMs: result.elapsedMs,
+			startedAt,
+			bufferedAt: now
+		};
+		enqueue(getAttemptStorage(ATTEMPT_BUFFER_KEY), entry, now);
+	}
+
+	/**
+	 * One insert attempt for one completed passage. No retry, no backoff (spec #12 §1) — the
+	 * attempt buffer is the only retry mechanism in the system, and it works by replaying the
+	 * entry later, never by re-issuing this call. Never awaited by the render path: the next
+	 * passage must appear regardless.
+	 *
 	 * `recordChunkAttempt` never throws; a failure is counted, shown nowhere until the summary.
 	 */
 	async function saveAttempt(
@@ -113,7 +194,28 @@
 		});
 		if (!outcome.saved) {
 			failedSaves += 1;
+			// Transient (offline, 5xx, a token mid-refresh): a later attempt can succeed, so
+			// buffer it and say so on the summary. Permanent (an RLS refusal, a dead
+			// `chunk_id`, a malformed row) is NOT buffered — it can never succeed, and it is
+			// the one thing the summary still reports as lost.
+			if (outcome.reason === 'transient') {
+				pendingSaves += 1;
+				enqueueAttempt(signedInUserId, chunkId, result, startedAt);
+			}
+			return;
 		}
+
+		// A successful write proves there is connectivity AND a valid token right now, which
+		// is the cheapest signal we will ever get that a backlog can be flushed (spec #15 §4).
+		// `drainOnce` is single-flight and re-checks the buffer synchronously before importing
+		// anything, so on the overwhelmingly common empty-buffer path this costs one
+		// `localStorage` read. Not awaited — nothing here may hold up the next passage.
+		//
+		// Deliberately NO `invalidateAll()` (spec §11): on the typing screen that re-runs
+		// `safeGetSession()` and re-serialises the whole book text mid-passage, to refresh
+		// figures `completed` has already advanced optimistically. The mount and `online`
+		// triggers in `+layout.svelte` own that call.
+		void drainOnce(signedInUserId);
 	}
 
 	/**
@@ -133,16 +235,25 @@
 		const chunk = previous.text.chunks[index];
 		completed.add(chunk.id); // optimistic and unconditional — the Set dedupes
 
-		// The guest gate. It sits ABOVE the dynamic import on purpose: a guest must issue no
-		// request at all, not a request that fails, and must never fetch the lazy chunk.
-		if (userId === null) {
-			return;
-		}
-
 		// The attempt's first keystroke. `previous` is the state before the completing stroke,
 		// so its active chunk still carries the whole traversal. The fallback covers the one
 		// degenerate case where the very first stroke also completed the chunk.
+		//
+		// Hoisted above the guest gate (it used to sit below): a buffered guest entry carries
+		// the genuine first-keystroke timestamp too, and it is what the database's unique
+		// index dedupes on. Pure arithmetic over `previous`, so the move changes nothing else.
 		const startedAt = previous.activeChunk.startedAt ?? Date.now() - result.elapsedMs;
+
+		// The guest gate. It still sits ABOVE the dynamic import: a guest must issue no request
+		// at all, not a request that fails, and must never fetch the lazy Supabase chunk.
+		// Enqueuing does not weaken that — `enqueue` is a synchronous `localStorage` write from
+		// a statically-imported, Supabase-free module. What changes is only that the completion
+		// is now kept instead of dropped, ready for the sign-in the summary is about to offer.
+		if (userId === null) {
+			enqueueAttempt(null, chunk.id, result, startedAt);
+			return;
+		}
+
 		void saveAttempt(userId, chunk.id, result, startedAt);
 	}
 
@@ -239,6 +350,7 @@
 			onRestartSession={restartSession}
 			onPickAnother={pickAnother}
 			{failedSaves}
+			{pendingSaves}
 			signedIn={!!page.data.user}
 			next={page.url.pathname + page.url.search}
 		/>
