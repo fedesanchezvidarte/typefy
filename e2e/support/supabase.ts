@@ -40,8 +40,15 @@ export function anonClient(): AnyClient {
  * cannot be read the tests still run and simply leave their users behind (a `db:reset`
  * clears them).
  */
+let secretKeyCache: { value: string | null } | null = null;
+
 export function localSecretKey(): string | null {
 	if (process.env.SUPABASE_SECRET_KEY) return process.env.SUPABASE_SECRET_KEY;
+	// Memoised: `supabase status` spawns the CLI (through cmd.exe on Windows) and takes
+	// seconds. Every authenticated Playwright test tears a throwaway user down, so without
+	// this the lookup would dominate the suite's runtime. The null result is cached too —
+	// a missing key does not become readable partway through a run.
+	if (secretKeyCache) return secretKeyCache.value;
 	try {
 		// Node >= 20 refuses to spawn a `.cmd` directly (EINVAL), so on Windows the CLI is
 		// reached through cmd.exe. Without this the whole function silently returned null
@@ -54,10 +61,11 @@ export function localSecretKey(): string | null {
 		});
 		const parsed: unknown = JSON.parse(status);
 		const key = (parsed as Record<string, unknown>)?.SECRET_KEY;
-		return typeof key === 'string' ? key : null;
+		secretKeyCache = { value: typeof key === 'string' ? key : null };
 	} catch {
-		return null;
+		secretKeyCache = { value: null };
 	}
+	return secretKeyCache.value;
 }
 
 export interface TestUser {
@@ -85,6 +93,47 @@ export async function signUpUser(prefix = 'e2e'): Promise<TestUser> {
 	return { client, id: data.user!.id };
 }
 
+/** A seeded book as the database actually holds it — read, never assumed. */
+export interface SeededBook {
+	/** `books.id` (uuid) — what `chunk_attempts.book_id` and the rollups are keyed by. */
+	id: string;
+	/** `books.slug` — the value the routes and `TypeableTextSummary.id` use. */
+	slug: string;
+	chunkCount: number;
+	/** `chunks.id` in `index` order, so `chunkIds[n]` is the (n+1)th passage. */
+	chunkIds: string[];
+}
+
+/**
+ * Read a seeded book and its chunk ids. Books and chunks are world-readable, so any
+ * client will do. The shape is read rather than hardcoded: a reseed that changes the
+ * chunk count must fail loudly here, not silently shift a resume expectation.
+ */
+export async function readSeededBook(client: AnyClient, slug: string): Promise<SeededBook> {
+	const book = await client.from('books').select('id, chunk_count').eq('slug', slug).single();
+	expect(
+		book.error,
+		`the local stack must be seeded (npm run db:reset): ${book.error?.message}`
+	).toBeNull();
+
+	const chunks = await client
+		.from('chunks')
+		.select('id, index')
+		.eq('book_id', book.data!.id)
+		.order('index');
+	expect(chunks.error, `reading chunks failed: ${chunks.error?.message}`).toBeNull();
+	expect(chunks.data!.length, `${slug} should have ${book.data!.chunk_count} chunks`).toBe(
+		book.data!.chunk_count
+	);
+
+	return {
+		id: book.data!.id,
+		slug,
+		chunkCount: book.data!.chunk_count,
+		chunkIds: chunks.data!.map((c) => c.id)
+	};
+}
+
 /**
  * Parse a `timestamptz` as returned by PostgREST into epoch milliseconds.
  *
@@ -103,12 +152,28 @@ export function epoch(value: string | null | undefined): number {
 /**
  * Delete throwaway auth users with the local secret key. Deleting the auth user cascades
  * to `profiles` and every progress row. A no-op when the key cannot be read.
+ *
+ * Leaks are reported, never swallowed. This function has already failed silently once —
+ * `localSecretKey()` was a no-op on Windows and fifteen throwaway users piled up unnoticed —
+ * so a delete that comes back with an error says so on stderr rather than looking like a
+ * successful cleanup. It still does not throw: a teardown failure must not overwrite the
+ * test result that a run is actually about.
  */
 export async function deleteUsers(...ids: string[]): Promise<void> {
 	const secret = localSecretKey();
-	if (!secret) return;
+	if (!secret) {
+		console.warn(
+			`[e2e] no local secret key: leaving ${ids.length} throwaway user(s) behind; npm run db:reset clears them`
+		);
+		return;
+	}
 	const admin = createClient<Database>(SUPABASE_URL, secret, {
 		auth: { persistSession: false, autoRefreshToken: false }
 	});
-	await Promise.all(ids.map((id) => admin.auth.admin.deleteUser(id)));
+	const results = await Promise.all(ids.map((id) => admin.auth.admin.deleteUser(id)));
+	for (const [index, { error }] of results.entries()) {
+		if (error) {
+			console.warn(`[e2e] failed to delete throwaway user ${ids[index]}: ${error.message}`);
+		}
+	}
 }

@@ -4,9 +4,11 @@ import {
 	deleteUsers,
 	epoch,
 	isLocalStack,
+	readSeededBook,
 	signUpUser,
 	SUPABASE_URL,
 	type AnyClient,
+	type SeededBook,
 	type TestUser
 } from './support/supabase';
 
@@ -31,37 +33,8 @@ const BOOK_SLUG = 'don-quijote-excerpt';
 /** A second book, so chunk_progress cases never collide with the whole-book invariant. */
 const OTHER_BOOK_SLUG = 'pride-and-prejudice-excerpt';
 
-interface SeededBook {
-	id: string;
-	chunkCount: number;
-	/** Chunk ids in `index` order. */
-	chunkIds: string[];
-}
-
-/** Read the real seeded shape rather than assuming it (content is world-readable). */
-async function readBook(anon: AnyClient, slug: string): Promise<SeededBook> {
-	const book = await anon.from('books').select('id, chunk_count').eq('slug', slug).single();
-	expect(
-		book.error,
-		`the local stack must be seeded (npm run db:reset): ${book.error?.message}`
-	).toBeNull();
-
-	const chunks = await anon
-		.from('chunks')
-		.select('id, index')
-		.eq('book_id', book.data!.id)
-		.order('index');
-	expect(chunks.error, `reading chunks failed: ${chunks.error?.message}`).toBeNull();
-	expect(chunks.data!.length, `${slug} should have ${book.data!.chunk_count} chunks`).toBe(
-		book.data!.chunk_count
-	);
-
-	return {
-		id: book.data!.id,
-		chunkCount: book.data!.chunk_count,
-		chunkIds: chunks.data!.map((c) => c.id)
-	};
-}
+/** Read the real seeded shape rather than assuming it — shared with the auth fixture. */
+const readBook = readSeededBook;
 
 interface AttemptInput {
 	chunkId: string;
