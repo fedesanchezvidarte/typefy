@@ -1,6 +1,7 @@
 # ADR-0010 — Progress data model: append-only attempts + rollups
 
-**Status:** Accepted (Phase 2a — spec #7; tables created in 2a, written in 2b)
+**Status:** Accepted (Phase 2a — spec #7 — tables created; Phase 2b — spec #12 — rollup trigger, amended
+2026-07-26, see below)
 
 ## Context
 
@@ -67,6 +68,56 @@ trigger is behaviour, and 2a delivers shape and policy only.
     scope in spec #7. HaveIBeenPwned checking guards a password flow that does not exist here. If a
     password provider is ever enabled, this warning stops being inapplicable and must be actioned.
   - The security advisor reports **no errors** and no other warnings on the finished 2a schema.
+
+## Amendment (2026-07-26, Phase 2b implementation — spec #12)
+
+The shape above stands unchanged; this fills in the aggregation rules the Decision section deferred to
+2b, as implemented by the `AFTER INSERT` trigger `public.apply_chunk_attempt_rollups()`
+(`supabase/migrations/20260726002115_rollup_chunk_attempts.sql`), which is the rollups' sole writer.
+
+- **`best_wpm` / `best_accuracy_raw`** are `greatest()` of **completed attempts only**. An incomplete
+  attempt (`completed = false`) still increments `attempt_count` and bumps `last_attempt_at`, but never
+  touches either `best_*` column — `greatest()` ignores `NULL`s, so a completion following any number of
+  incomplete attempts seeds `best_*` correctly on its own, without a separate `coalesce`.
+- **`first_completed_at`** is write-once: `coalesce(cp.first_completed_at, new.created_at)` on a
+  completed attempt, so it is set on the first completion and never moved by any attempt after that,
+  completed or not.
+- **`chunks_completed`** on `book_progress` is implemented as a **count**, not an increment:
+  `count(*)` over this user's `chunk_progress` rows for the book where `first_completed_at is not null`.
+  This is a deliberate departure from the naive design — "`+1` only on this chunk's first completion,
+  guarded by reading `chunk_progress.first_completed_at` before the upsert" — which cannot be made
+  concurrency-safe: on a chunk's *first* completion there is no `chunk_progress` row yet, so a guarding
+  `select ... for update` locks zero rows, and two concurrent first-completions of the same chunk can both
+  observe `null` and both increment, permanently overcounting. Counting is race-free by construction
+  instead: the value can never exceed the book's chunk count (`chunk_progress` is keyed on
+  `(user_id, chunk_id)`, so a chunk contributes at most once regardless of how many attempts hit it), and
+  any transient inconsistency self-heals on the very next attempt rather than drifting forever. This is
+  **not** the "rollups derived on read" alternative this ADR already rejected below: the count is still
+  maintained on write, once per completion, over at most one row per chunk in `chunk_progress` — a client
+  reading a progress bar still reads a single indexed `book_progress` row, never the attempt history.
+  - **Ordering consequence:** `chunk_progress` must be upserted **before** `book_progress` in the same
+    trigger invocation, so the `book_progress` count reads `chunk_progress`'s *post-upsert* state for
+    this attempt. This is the opposite of what a naive increment-based design would need — an increment
+    would want the *pre-upsert* state to decide whether this is the chunk's first completion. Counting
+    inverts that requirement, and the trigger's statement order is load-bearing for exactly this reason.
+- **`created_at`** — the rollup row's own server-assigned `default now()` — is the **sole source** for
+  every rollup timestamp the trigger writes (`last_attempt_at`, `last_active_at`, `first_completed_at`).
+  The client-supplied `started_at` on `chunk_attempts` is never read by the trigger; it is informational
+  only (see [ADR-0012](0012-client-trusted-progress-writes.md) for what else on the row is client-asserted
+  versus server-verified). The same migration also **drops the table-level `INSERT` grant** 2a made on
+  `chunk_attempts` and **re-grants `INSERT` per column** (`user_id`, `chunk_id`, `book_id`, `completed`,
+  `gross_wpm`, `accuracy_raw`, `elapsed_ms`, `started_at`), omitting `created_at` and `id` so both always
+  fall to their defaults. Without that column-level grant, a client could have supplied its own
+  `created_at` and steered every rollup timestamp through it — the table-level grant covers every column,
+  and a column-level `REVOKE` alone cannot narrow it while the table grant stands. This is what makes "the
+  server clock is the sole source of rollup timestamps" a guarantee Postgres enforces, not merely a
+  documented intention.
+- **Advisor findings revisited:** the 2a Consequences section accepted the `unused_index` INFO findings as
+  a false positive specific to empty, unqueried progress tables. 2b's trigger makes those tables
+  non-empty and queried on every chunk completion (the `chunk_progress`/`book_progress` upserts and the
+  `book_progress` count subquery all hit the indexed foreign-key columns), so that INFO is expected to
+  start resolving itself as usage accrues rather than remaining a standing exception. Not re-verified
+  against a live advisor run as part of this docs-only amendment.
 
 ## Alternatives considered
 

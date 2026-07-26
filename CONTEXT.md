@@ -11,19 +11,21 @@ Portfolio project, free, following professional industry standards.
 In active development. Phase 0 (spec #3) and Phase 1 (spec #5) are complete: the SvelteKit + TS
 scaffold, Tailwind v4, Vitest/Playwright harnesses, Paraglide EN/ES (`/` = EN, `/es` = ES), CI and
 Vercel deploy; and the typing engine over hardcoded fixture texts. Phase 2 is split into **2a**
-(spec #7 — Supabase foundation, auth, and typeable text served from the database; fixtures leave the
-runtime path, no progress persisted yet) and **2b** (progress sync). 2a's database foundation —
-schema, RLS, and both books seeded on the local stack and the hosted project — is in place; auth and
-the content-from-database routes are in progress.
+(spec #7 — Supabase foundation, auth, and typeable text served from the database) and **2b**
+(spec #12 — progress sync), and both are complete: the database foundation, auth, and
+content-from-database routes shipped in 2a; 2b closes the loop — completed passages are written to
+Supabase, resumed on return, and shown as book-lifetime completion on the library card and the typing
+screen.
 
 Phased roadmap:
 
 - **Phase 0** — ✅ Scaffolding + baseline i18n: SvelteKit+TS, Tailwind, Vitest/Playwright,
   ESLint/Prettier, Paraglide EN/ES wired from the start, empty deploy to Vercel + CI.
-- **Phase 1** — Typing engine (TDD) over hardcoded text. The core of the product.
-- **Phase 2** — Supabase + Auth + early progress sync, against seeded books. Split into **2a**
-  (foundation, auth, typeable text from the database — spec #7) and **2b** (progress sync). Seeding
-  both Phase 1 fixtures (EN + ES) keeps the UI-locale-vs-content-language independence verifiable.
+- **Phase 1** — ✅ Typing engine (TDD) over hardcoded text. The core of the product.
+- **Phase 2** — ✅ Supabase + Auth + progress sync, against seeded books. Split into **2a**
+  (foundation, auth, typeable text from the database — spec #7) and **2b** (progress sync — spec #12).
+  Seeding both Phase 1 fixtures (EN + ES) keeps the UI-locale-vs-content-language independence
+  verifiable.
 - **Phase 3** — Ingestion pipeline + catalog of 10-20 books read from the database.
 - **Phase 4** — Game modes + polish + E2E coverage.
 
@@ -54,8 +56,13 @@ Use these terms as defined here; do not drift to synonyms.
 - **Keystroke log** — Ordered record of every keystroke (typed character or backspace) with its
   timestamp. The single source of truth for metrics: every metric is computable over an arbitrary
   slice of the log (word / chunk / session).
-- **WPM** — Words per minute, measured over the chunk's time. Gross WPM = (typed characters ÷ 5) ÷
-  elapsed minutes; backspaces do not count as typed characters. Always displayed alongside accuracy.
+- **WPM** — Words per minute. Gross WPM = (typed characters ÷ 5) ÷ elapsed minutes; backspaces do not
+  count as typed characters. Two distinct measurements, over different spans of the keystroke log:
+  the **per-attempt** figure, computed over one chunk's log and persisted to `chunk_attempts.gross_wpm`
+  at completion ([ADR-0010](docs/adr/0010-progress-data-model.md)); and the **running cumulative**
+  figure, computed over the session's concatenated keystroke log across passage boundaries
+  (`runningMetrics`) and shown live on the typing screen. `sessionSummary.averageWpm` is the running
+  cumulative figure, not the mean of per-attempt values. Always displayed alongside accuracy.
 - **Accuracy (raw)** — First-attempt correct characters ÷ the first-attempt characters actually judged
   (the positions reached so far), **not** ÷ the chunk's total length. The two agree once a chunk is
   complete but diverge mid-chunk: a total-length denominator would render live accuracy as ~5% at the
@@ -74,12 +81,23 @@ Use these terms as defined here; do not drift to synonyms.
 - **Progress / sync** — Per-user progress persisted in Supabase under Row Level Security (each user
   sees only their own). The store is an append-only history of **chunk attempts** (the source of truth)
   plus rolled-up per-chunk and per-book tables for cheap reads
-  ([ADR-0010](docs/adr/0010-progress-data-model.md)). Written from Phase 2b; the 2a schema creates the
-  tables but leaves them empty.
+  ([ADR-0010](docs/adr/0010-progress-data-model.md)). Live since Phase 2b (spec #12): completing a
+  passage inserts one `chunk_attempts` row from the browser under RLS
+  ([ADR-0012](docs/adr/0012-client-trusted-progress-writes.md)), and a `SECURITY DEFINER` trigger folds
+  it into the `chunk_progress` and `book_progress` rollups on write. Resume and the completion
+  percentages shown on the library card and the typing screen read the maintained rollups directly,
+  never the attempt history.
 - **Chunk attempt** — One traversal of one chunk from first keystroke to completion. The atomic unit of
   persisted progress: each completed attempt appends an immutable row (gross WPM, accuracy, elapsed) to
   the history. Distinct from **Session** (a typing stretch of one or more chunks) and from the engine's
   in-memory session state.
+- **Resume** — Opening a book starts the session at the **first incomplete passage**: the lowest chunk
+  index with no completed attempt on record for this user (gaps count — passages 1 and 3 done, 2 not,
+  resumes at 2). A `?passage=N` query param overrides the computed index, 1-based to match the number
+  the meta line displays; anything invalid — non-numeric, zero, negative, fractional, or beyond the
+  book's chunk count — silently falls back to the computed index rather than erroring. A fully
+  completed book resumes at the first passage (index 0) — there is no "finished" state. Guests always
+  resume at the first passage, since nothing is persisted for them to resume from.
 - **Profile** — A signed-in user's identity row (display name, avatar, optional locale preference),
   created automatically on first sign-in and readable/editable only by that user. A null `locale` means
   "no explicit preference", leaving the cookie > `Accept-Language` > EN detection to apply.
@@ -95,6 +113,9 @@ Use these terms as defined here; do not drift to synonyms.
   full foreground, incorrect = the only chromatic event (error + tint + wavy underline). No green.
 - **Guest** — A visitor who is not signed in. Types fully (content is world-readable) but no progress is
   saved, and there is no anonymous account. Signing in is optional and only unlocks progress persistence.
+  A guest's completed passages are discarded outright: nothing is buffered client-side and nothing
+  backfills on a later sign-in. A local buffer covering both guest backfill and offline retry is
+  deferred to issue #13.
 
 ## Decisions (ADRs)
 
@@ -109,3 +130,4 @@ Use these terms as defined here; do not drift to synonyms.
 - [ADR-0009](docs/adr/0009-vitest-playwright-testing.md) — Vitest + Playwright, TDD on the engine
 - [ADR-0010](docs/adr/0010-progress-data-model.md) — Progress data model: append-only attempts + rollups
 - [ADR-0011](docs/adr/0011-two-axis-theming.md) — Two-axis theming: palettes as data, fonts as data
+- [ADR-0012](docs/adr/0012-client-trusted-progress-writes.md) — Client-trusted progress writes
