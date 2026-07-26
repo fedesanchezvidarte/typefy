@@ -1,29 +1,50 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
-import { recordChunkAttempt, type ChunkAttemptInput } from './client';
+import {
+	backfillChunkAttempt,
+	classifyWriteOutcome,
+	recordChunkAttempt,
+	type ChunkAttemptInput
+} from './client';
 
 /**
- * Browser write-service tests (spec #12, Phase C). The injected Supabase client is
- * mocked — a unit test never touches a real database (testing-patterns).
+ * Browser write-service tests (spec #12 Phase C; widened by spec #15 Phase 3). The injected
+ * Supabase client is mocked — a unit test never touches a real database (testing-patterns).
  */
-function mockSupabase(outcome: { error: unknown } | { reject: unknown }) {
-	const inserts: unknown[] = [];
-	const tables: unknown[] = [];
+
+interface WriteCall {
+	table: string;
+	method: 'insert' | 'upsert';
+	payload: unknown;
+	options: unknown;
+}
+
+/**
+ * A mock whose resolved shape matches postgrest-js's real one: `status` sits alongside
+ * `error` on the failure shape too, which is what makes it usable as the discriminator.
+ */
+function mockSupabase(outcome: { error?: unknown; status?: number } | { reject: unknown }) {
+	const calls: WriteCall[] = [];
+	function respond(table: string, method: WriteCall['method'], payload: unknown, options: unknown) {
+		calls.push({ table, method, payload, options });
+		if ('reject' in outcome) return Promise.reject(outcome.reject);
+		const error = outcome.error ?? null;
+		return Promise.resolve({
+			data: null,
+			error,
+			count: null,
+			status: outcome.status ?? (error ? 400 : 201),
+			statusText: ''
+		});
+	}
 	const client = {
-		from: (table: string) => {
-			tables.push(table);
-			return {
-				insert: (payload: unknown) => {
-					inserts.push(payload);
-					return 'reject' in outcome
-						? Promise.reject(outcome.reject)
-						: Promise.resolve({ data: null, error: outcome.error });
-				}
-			};
-		}
+		from: (table: string) => ({
+			insert: (payload: unknown) => respond(table, 'insert', payload, undefined),
+			upsert: (payload: unknown, options: unknown) => respond(table, 'upsert', payload, options)
+		})
 	};
-	return { client: client as unknown as SupabaseClient<Database>, inserts, tables };
+	return { client: client as unknown as SupabaseClient<Database>, calls };
 }
 
 const attempt: ChunkAttemptInput = {
@@ -37,50 +58,52 @@ const attempt: ChunkAttemptInput = {
 	startedAt: Date.UTC(2026, 6, 26, 12, 0, 0)
 };
 
+const THE_EIGHT_COLUMNS = [
+	'accuracy_raw',
+	'book_id',
+	'chunk_id',
+	'completed',
+	'elapsed_ms',
+	'gross_wpm',
+	'started_at',
+	'user_id'
+];
+
 describe('recordChunkAttempt', () => {
 	it('appends one row to chunk_attempts', async () => {
-		const { client, tables, inserts } = mockSupabase({ error: null });
+		const { client, calls } = mockSupabase({ error: null });
 
 		const result = await recordChunkAttempt(client, attempt);
 
 		expect(result).toEqual({ saved: true });
-		expect(tables).toEqual(['chunk_attempts']);
-		expect(inserts).toHaveLength(1);
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({ table: 'chunk_attempts', method: 'insert' });
 	});
 
 	it('sends exactly the eight columns the 2b column-level INSERT grant covers', async () => {
-		const { client, inserts } = mockSupabase({ error: null });
+		const { client, calls } = mockSupabase({ error: null });
 
 		await recordChunkAttempt(client, attempt);
 
-		expect(Object.keys(inserts[0] as object).sort()).toEqual([
-			'accuracy_raw',
-			'book_id',
-			'chunk_id',
-			'completed',
-			'elapsed_ms',
-			'gross_wpm',
-			'started_at',
-			'user_id'
-		]);
+		expect(Object.keys(calls[0].payload as object).sort()).toEqual(THE_EIGHT_COLUMNS);
 	});
 
 	it('never sends created_at or id — the grant omits them and Postgres would refuse with 42501', async () => {
-		const { client, inserts } = mockSupabase({ error: null });
+		const { client, calls } = mockSupabase({ error: null });
 
 		await recordChunkAttempt(client, attempt);
 
-		const payload = inserts[0] as Record<string, unknown>;
+		const payload = calls[0].payload as Record<string, unknown>;
 		expect('created_at' in payload).toBe(false);
 		expect('id' in payload).toBe(false);
 	});
 
 	it('maps the input onto the row columns', async () => {
-		const { client, inserts } = mockSupabase({ error: null });
+		const { client, calls } = mockSupabase({ error: null });
 
 		await recordChunkAttempt(client, attempt);
 
-		expect(inserts[0]).toMatchObject({
+		expect(calls[0].payload).toMatchObject({
 			user_id: attempt.userId,
 			chunk_id: attempt.chunkId,
 			book_id: attempt.bookId,
@@ -89,49 +112,191 @@ describe('recordChunkAttempt', () => {
 	});
 
 	it('converts startedAt (ms epoch) to an ISO timestamptz string', async () => {
-		const { client, inserts } = mockSupabase({ error: null });
+		const { client, calls } = mockSupabase({ error: null });
 
 		await recordChunkAttempt(client, attempt);
 
-		expect((inserts[0] as Record<string, unknown>).started_at).toBe('2026-07-26T12:00:00.000Z');
+		expect((calls[0].payload as Record<string, unknown>).started_at).toBe(
+			'2026-07-26T12:00:00.000Z'
+		);
 	});
 
 	it('rounds elapsedMs to an integer (the column is integer) and passes the numerics through unrounded', async () => {
-		const { client, inserts } = mockSupabase({ error: null });
+		const { client, calls } = mockSupabase({ error: null });
 
 		await recordChunkAttempt(client, attempt);
 
-		const payload = inserts[0] as Record<string, unknown>;
+		const payload = calls[0].payload as Record<string, unknown>;
 		expect(payload.elapsed_ms).toBe(42_124);
 		expect(payload.gross_wpm).toBe(61.4321);
 		expect(payload.accuracy_raw).toBe(0.9737);
 	});
 
-	it('reports a PostgREST error as a save failure rather than throwing', async () => {
-		const { client } = mockSupabase({ error: { code: '42501', message: 'permission denied' } });
+	it('reports an RLS or grant refusal as a PERMANENT failure rather than throwing', async () => {
+		const { client } = mockSupabase({
+			status: 403,
+			error: { code: '42501', message: 'permission denied for table chunk_attempts' }
+		});
 
 		await expect(recordChunkAttempt(client, attempt)).resolves.toEqual({
 			saved: false,
-			reason: 'error'
+			reason: 'permanent'
 		});
 	});
 
-	it('reports a rejected request (network failure) as a save failure rather than throwing', async () => {
+	it('reports a network failure as a TRANSIENT failure — postgrest-js returns status 0, it does not throw', async () => {
+		const { client } = mockSupabase({
+			status: 0,
+			error: { code: '', message: 'TypeError: Failed to fetch' }
+		});
+
+		await expect(recordChunkAttempt(client, attempt)).resolves.toEqual({
+			saved: false,
+			reason: 'transient'
+		});
+	});
+
+	it('reports a rejected request as transient — the client constructor or a custom fetch can still throw', async () => {
 		const { client } = mockSupabase({ reject: new Error('Failed to fetch') });
 
 		await expect(recordChunkAttempt(client, attempt)).resolves.toEqual({
 			saved: false,
-			reason: 'error'
+			reason: 'transient'
 		});
 	});
 
 	it('issues exactly one insert on failure — no retry, no backoff, no queue', async () => {
-		const failed = mockSupabase({ error: { message: 'nope' } });
+		const failed = mockSupabase({ status: 500, error: { message: 'nope' } });
 		await recordChunkAttempt(failed.client, attempt);
-		expect(failed.inserts).toHaveLength(1);
+		expect(failed.calls).toHaveLength(1);
 
 		const rejected = mockSupabase({ reject: new Error('offline') });
 		await recordChunkAttempt(rejected.client, attempt);
-		expect(rejected.inserts).toHaveLength(1);
+		expect(rejected.calls).toHaveLength(1);
+	});
+});
+
+describe('classifyWriteOutcome', () => {
+	it('treats no error as saved, whatever the status', () => {
+		expect(classifyWriteOutcome(201, null)).toEqual({ saved: true });
+		expect(classifyWriteOutcome(200, null)).toEqual({ saved: true });
+	});
+
+	it.each([
+		['postgrest-js network/abort sentinel', 0, {}],
+		['500 internal error', 500, {}],
+		['502 bad gateway', 502, {}],
+		['503 unavailable', 503, {}],
+		['504 gateway timeout', 504, {}],
+		['408 request timeout', 408, {}],
+		['429 rate limited', 429, {}]
+	])('classifies %s as transient', (_label, status, error) => {
+		expect(classifyWriteOutcome(status, error)).toEqual({ saved: false, reason: 'transient' });
+	});
+
+	it('classifies 401 with PGRST301 (expired JWT) as transient — spec #15 §11', () => {
+		expect(classifyWriteOutcome(401, { code: 'PGRST301', message: 'JWT expired' })).toEqual({
+			saved: false,
+			reason: 'transient'
+		});
+	});
+
+	it('classifies 401 with PGRST303 (absent JWT) as transient — spec #15 §11', () => {
+		expect(classifyWriteOutcome(401, { code: 'PGRST303', message: 'no JWT' })).toEqual({
+			saved: false,
+			reason: 'transient'
+		});
+	});
+
+	it('classifies the JWT codes as transient even if the status is missing or unexpected', () => {
+		// The status is the primary discriminator, but a code the library already spells out
+		// must not be overruled by a status a mock, a proxy or a future version got wrong.
+		expect(classifyWriteOutcome(Number.NaN, { code: 'PGRST301' })).toEqual({
+			saved: false,
+			reason: 'transient'
+		});
+	});
+
+	it.each([
+		['403 RLS violation', 403, { message: 'new row violates row-level security policy' }],
+		['403 grant refusal', 403, { code: '42501', message: 'permission denied' }],
+		['400 bad request', 400, { code: 'PGRST102', message: 'malformed' }],
+		['404 unknown relation', 404, { code: 'PGRST205', message: 'not found' }],
+		['409 unique violation', 409, { code: '23505', message: 'duplicate key' }],
+		['409 foreign key violation', 409, { code: '23503', message: 'fk violation' }],
+		['422 unprocessable', 422, { code: '22P02', message: 'invalid input syntax' }]
+	])('classifies %s as permanent', (_label, status, error) => {
+		expect(classifyWriteOutcome(status, error)).toEqual({ saved: false, reason: 'permanent' });
+	});
+
+	it('classifies an unknown status defensively as transient — an entry is kept, never silently discarded', () => {
+		expect(classifyWriteOutcome(undefined as unknown as number, { message: '?' })).toEqual({
+			saved: false,
+			reason: 'transient'
+		});
+	});
+});
+
+describe('backfillChunkAttempt', () => {
+	it('upserts with ON CONFLICT DO NOTHING on the (user_id, chunk_id, started_at) target', async () => {
+		const { client, calls } = mockSupabase({ error: null });
+
+		await backfillChunkAttempt(client, attempt);
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({ table: 'chunk_attempts', method: 'upsert' });
+		expect(calls[0].options).toEqual({
+			onConflict: 'user_id,chunk_id,started_at',
+			ignoreDuplicates: true
+		});
+	});
+
+	it('sends the same eight columns as the live write, and never created_at or id', async () => {
+		const { client, calls } = mockSupabase({ error: null });
+
+		await backfillChunkAttempt(client, attempt);
+
+		expect(Object.keys(calls[0].payload as object).sort()).toEqual(THE_EIGHT_COLUMNS);
+	});
+
+	it('maps the payload identically to the live write — one mapper, one payload shape', async () => {
+		const live = mockSupabase({ error: null });
+		const backfill = mockSupabase({ error: null });
+
+		await recordChunkAttempt(live.client, attempt);
+		await backfillChunkAttempt(backfill.client, attempt);
+
+		expect(backfill.calls[0].payload).toEqual(live.calls[0].payload);
+	});
+
+	it('reports a duplicate-ignored write as success — the row is already there, which is the goal', async () => {
+		// `ignoreDuplicates: true` makes PostgREST emit ON CONFLICT DO NOTHING, so a
+		// conflict comes back as a plain 201 with no error and no rows affected.
+		const { client } = mockSupabase({ error: null, status: 201 });
+
+		await expect(backfillChunkAttempt(client, attempt)).resolves.toEqual({ saved: true });
+	});
+
+	it('classifies its failures by the same taxonomy as the live write', async () => {
+		const transient = mockSupabase({ status: 0, error: { message: 'TypeError: Failed to fetch' } });
+		await expect(backfillChunkAttempt(transient.client, attempt)).resolves.toEqual({
+			saved: false,
+			reason: 'transient'
+		});
+
+		const permanent = mockSupabase({ status: 403, error: { code: '42501', message: 'denied' } });
+		await expect(backfillChunkAttempt(permanent.client, attempt)).resolves.toEqual({
+			saved: false,
+			reason: 'permanent'
+		});
+	});
+
+	it('never throws on a rejected request', async () => {
+		const { client } = mockSupabase({ reject: new Error('offline') });
+
+		await expect(backfillChunkAttempt(client, attempt)).resolves.toEqual({
+			saved: false,
+			reason: 'transient'
+		});
 	});
 });
