@@ -50,8 +50,37 @@
 	"summary_time": "Time",
 	"summary_type_again": "Type it again",
 	"summary_back_to_library": "Back to library",
-	"summary_save_failures": "{count} passages couldn't be saved.",
+	"summary_save_pending": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "One passage will be saved when you're back online.",
+				"countPlural=*": "{count} passages will be saved when you're back online."
+			}
+		}
+	],
+	"summary_save_failures": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "One passage couldn't be saved.",
+				"countPlural=*": "{count} passages couldn't be saved."
+			}
+		}
+	],
 	"summary_sign_in_prompt": "Sign in to save your progress",
+	"summary_sign_in_prompt_count": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "Sign in to save the passage you just typed",
+				"countPlural=*": "Sign in to save the {count} passages you just typed"
+			}
+		}
+	],
 	"auth_sign_in_google": "Sign in with Google",
 	"auth_sign_out": "Sign out",
 	"auth_signed_in_as": "Signed in as {name}"

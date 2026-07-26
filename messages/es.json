@@ -50,8 +50,37 @@
 	"summary_time": "Tiempo",
 	"summary_type_again": "Escríbelo otra vez",
 	"summary_back_to_library": "Volver a la biblioteca",
-	"summary_save_failures": "No se pudieron guardar {count} pasajes.",
+	"summary_save_pending": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "Un pasaje se guardará cuando vuelvas a tener conexión.",
+				"countPlural=*": "{count} pasajes se guardarán cuando vuelvas a tener conexión."
+			}
+		}
+	],
+	"summary_save_failures": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "No se pudo guardar un pasaje.",
+				"countPlural=*": "No se pudieron guardar {count} pasajes."
+			}
+		}
+	],
 	"summary_sign_in_prompt": "Inicia sesión para guardar tu progreso",
+	"summary_sign_in_prompt_count": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "Inicia sesión para guardar el pasaje que acabas de escribir",
+				"countPlural=*": "Inicia sesión para guardar los {count} pasajes que acabas de escribir"
+			}
+		}
+	],
 	"auth_sign_in_google": "Iniciar sesión con Google",
 	"auth_sign_out": "Cerrar sesión",
 	"auth_signed_in_as": "Sesión iniciada como {name}"
