@@ -105,28 +105,55 @@
 	// line's metric segments are subtracted.
 	let zen = $state(false);
 
+	type ProgressModules = [
+		typeof import('$lib/supabase/browser'),
+		typeof import('$lib/progress/client')
+	];
+
 	/**
 	 * The lazily-loaded write path. `$lib/supabase/browser` and `$lib/progress/client` are
 	 * reached ONLY through this dynamic import, so `@supabase/ssr` + `@supabase/supabase-js`
 	 * are emitted as a separate chunk that is never in the entry graph and a guest never
 	 * fetches (brief §1.6). No static import of either module may exist in any component,
 	 * and no `modulepreload` hint may be added for the chunk.
+	 *
+	 * Holds an in-flight or fulfilled load only. A **rejected** load is never left here — see
+	 * `loadProgressModules` for why that distinction is the whole bug this memo once had.
 	 */
-	let progressModules: Promise<
-		[typeof import('$lib/supabase/browser'), typeof import('$lib/progress/client')]
-	> | null = null;
+	let progressModules: Promise<ProgressModules> | null = null;
 
 	/**
 	 * Starts the import if it has not started, and returns the one shared promise. Called
 	 * without awaiting on the session's first `char` event when signed in, so the completion
 	 * instant is not paying for a cold network fetch; awaited at the completion instant
-	 * itself. `??=` makes it idempotent. Guests never reach this line.
+	 * itself. Idempotent while a load is in flight or already done. Guests never reach here.
+	 *
+	 * **A failed fetch of the lazy chunk is TRANSIENT**, exactly like a failed write: the same
+	 * import succeeds the moment connectivity is back. So the memo must not keep the rejection.
+	 * It used to (`progressModules ??= …`), which turned one offline moment into every later
+	 * passage of that session being dropped the same silent way. The memo is cleared only if it
+	 * still holds THIS attempt, so a retry another completion already started is never
+	 * discarded by a late rejection from the attempt it replaced.
+	 *
+	 * Attaching the handler here is also what makes the bare `void loadProgressModules()`
+	 * warm-up call site safe: the promise is handled from birth, so a warm-up that fails can
+	 * never surface as an unhandled rejection, and it counts nothing — the completion instant
+	 * is the only place a passage is accounted for. Callers that `await` still see the failure:
+	 * `.catch()` returns a NEW promise and leaves this one rejected.
 	 */
-	function loadProgressModules() {
-		progressModules ??= Promise.all([
-			import('$lib/supabase/browser'),
-			import('$lib/progress/client')
-		]);
+	function loadProgressModules(): Promise<ProgressModules> {
+		if (progressModules === null) {
+			const attempt: Promise<ProgressModules> = Promise.all([
+				import('$lib/supabase/browser'),
+				import('$lib/progress/client')
+			]);
+			attempt.catch(() => {
+				if (progressModules === attempt) {
+					progressModules = null;
+				}
+			});
+			progressModules = attempt;
+		}
 		return progressModules;
 	}
 
@@ -172,6 +199,7 @@
 	 * passage must appear regardless.
 	 *
 	 * `recordChunkAttempt` never throws; a failure is counted, shown nowhere until the summary.
+	 * Loading the module that provides it CAN fail, and that failure is handled the same way.
 	 */
 	async function saveAttempt(
 		signedInUserId: string,
@@ -179,8 +207,24 @@
 		result: ChunkResult,
 		startedAt: number
 	) {
-		// Awaits the warm-up promise, starting it here if the session had no prior keystroke.
-		const [{ getBrowserSupabase }, { recordChunkAttempt }] = await loadProgressModules();
+		let modules: ProgressModules;
+		try {
+			// Awaits the warm-up promise, starting it here if the session had no prior keystroke.
+			modules = await loadProgressModules();
+		} catch {
+			// The write path could not even be loaded: the user went offline before their first
+			// keystroke of the session, or their first keystroke was also the completing one on a
+			// short passage, so the warm-up never got a chance to fetch the chunk while online.
+			// This is a transient failure — the chunk is still on the server — so it takes the
+			// same path as a transient write failure: counted, buffered, replayed by the drain.
+			// It used to take no path at all, and the passage was dropped silently: not saved,
+			// not counted, not buffered, visible only as an unhandled rejection in the console.
+			failedSaves += 1;
+			pendingSaves += 1;
+			enqueueAttempt(signedInUserId, chunkId, result, startedAt);
+			return;
+		}
+		const [{ getBrowserSupabase }, { recordChunkAttempt }] = modules;
 
 		const outcome = await recordChunkAttempt(getBrowserSupabase(), {
 			userId: signedInUserId,
@@ -309,7 +353,10 @@
 
 		if (event.type === 'char') {
 			if (userId !== null) {
-				void loadProgressModules(); // first `char` of the session; idempotent thereafter
+				// First `char` of the session; idempotent thereafter. Safe to fire and forget:
+				// `loadProgressModules` handles its own rejection (and clears the memo, so the
+				// next keystroke or the completion retries the fetch), and counts nothing here.
+				void loadProgressModules();
 			}
 			const log = next.activeChunk.log;
 			const last = log[log.length - 1];

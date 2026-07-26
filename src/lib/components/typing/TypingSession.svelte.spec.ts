@@ -527,6 +527,96 @@ describe('TypingSession.svelte — enqueue at the drop points (spec #15 §3)', (
 	});
 });
 
+/**
+ * The write path has to be FETCHED before it can fail, and that fetch can fail on its own
+ * (spec #15 §3). Nothing above reaches this: every test so far has the lazy chunk resolving.
+ *
+ * The seam is `Promise.all`, because that is the one call `loadProgressModules` makes and —
+ * measured, not assumed — the only `Promise.all` call in a whole render/type/save cycle here.
+ * Rejecting it reproduces a failed dynamic import from the component's point of view, with the
+ * one property a thrown `vi.mock` factory cannot give: the SAME import can succeed afterwards,
+ * which is what makes the memo's behaviour observable.
+ *
+ * That last part is more permissive than a real browser, deliberately. Chromium records a
+ * failed module fetch in the document's module map, so in production the retry below usually
+ * fails again until the page is replaced — which is why the buffer, not the retry, is what
+ * saves the passage (see the offline E2E). What this test pins is the memo's contract: it must
+ * never hold a rejection, so every later completion gets a fresh, individually-handled attempt
+ * instead of inheriting one dead promise for the rest of the session.
+ */
+describe('TypingSession.svelte — a write path that cannot be loaded (spec #15 §3)', () => {
+	/** Makes the component's module load reject until `stop()` is called. */
+	function failModuleLoads() {
+		const realAll = Promise.all;
+		let failing = true;
+		const spy = vi
+			.spyOn(Promise, 'all')
+			.mockImplementation(((values: never) =>
+				failing
+					? Promise.reject(
+							new TypeError(
+								'Failed to fetch dynamically imported module: /src/lib/supabase/browser.ts'
+							)
+						)
+					: realAll.call(Promise, values)) as typeof Promise.all);
+		return {
+			stop: () => {
+				failing = false;
+			},
+			restore: () => spy.mockRestore()
+		};
+	}
+
+	it('buffers a passage whose write path failed to load, and loads it again for the next passage', async () => {
+		// Offline from before the first keystroke: the warm-up on the session's first `char`
+		// fails too, so the completion instant arrives with no module and no way to get one.
+		const network = failModuleLoads();
+
+		try {
+			render(TypingSession, {
+				book: makeBook(passages(2)),
+				startIndex: 0,
+				chunksCompleted: 0,
+				completedChunkIds: [],
+				userId: 'user-1'
+			});
+
+			await typeText('a b');
+
+			// Pending, not dropped. Before the fix this passage went nowhere at all: the rejection
+			// escaped `void saveAttempt(...)` unhandled, so nothing was saved, counted or buffered.
+			await expect.poll(() => bufferEntries().map((entry) => entry.chunkId)).toEqual(['chunk-0']);
+			expect(bufferEntries()[0].userId).toBe('user-1');
+			// Nothing was even attempted against the database — there was no client to attempt it with.
+			expect(recordChunkAttempt).not.toHaveBeenCalled();
+
+			// ── Connectivity returns, same session, next passage ──────────────────────────
+			network.stop();
+
+			await typeText('c d');
+
+			// The memo did not keep the rejection: the import ran again and this passage was
+			// written. Before the fix a single offline moment poisoned every later passage of
+			// the session, because the rejected promise was cached under `??=`.
+			await expect.poll(() => recordChunkAttempt.mock.calls.length).toBe(1);
+			expect(recordChunkAttempt.mock.calls[0][1]).toMatchObject({
+				userId: 'user-1',
+				chunkId: 'chunk-1'
+			});
+			await settleSaves();
+		} finally {
+			network.restore();
+		}
+
+		// One passage pending, none reported lost: a chunk that would not download is a passage
+		// waiting on the network, not a passage thrown away.
+		await expect
+			.element(page.getByTestId('summary-save-pending'))
+			.toHaveTextContent("One passage will be saved when you're back online.");
+		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
+	});
+});
+
 describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', () => {
 	it("keeps showing a WPM figure across a passage boundary and at the second passage's first word boundary", async () => {
 		render(TypingSession, {

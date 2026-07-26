@@ -67,28 +67,35 @@ async function typePassage(page: Page, text: string): Promise<void> {
 }
 
 /**
- * Fetch the lazily-imported Supabase chunk before the test takes the network away.
+ * Every error the page reported with nobody to catch it, from the moment this is called.
  *
- * **This works around a real defect, and the workaround is deliberate rather than
- * incidental.** `TypingSession.saveAttempt` opens with `await loadProgressModules()` and is
- * called as `void saveAttempt(...)`. If the chunk has not been fetched by the time
- * connectivity goes, that import rejects, the rejection is unhandled, and the completion is
- * neither saved, nor counted in `failedSaves`, nor buffered — the one outcome spec #15 §3
- * exists to rule out. Verified by removing this call: the summary shows no pending notice,
- * the buffer stays empty, and the console carries `TypeError: Failed to fetch dynamically
- * imported module: /src/lib/supabase/browser.ts`.
+ * This is how Phase 7 found the cold-import defect, and it is why the offline test below now
+ * types NOTHING before going offline. `TypingSession.saveAttempt` awaits the lazily-imported
+ * write path; when the session's first keystroke never ran the warm-up, that import is still
+ * cold at the completion instant, and offline it rejects. The rejection used to escape
+ * `void saveAttempt(...)` entirely: the completion was neither saved, nor counted, nor
+ * buffered, and the only trace anywhere was `Uncaught (in promise) TypeError: Failed to fetch
+ * dynamically imported module: /src/lib/supabase/browser.ts` in the console.
  *
- * Reported, not fixed here (Phase 7 may not touch production code). Until it is fixed, the
- * offline test covers the case a user who has already typed a keystroke while online is in —
- * which is the ordinary one, since the import is started on the session's first keystroke.
- * One keystroke, undone with the passage restart the UI already offers, is the smallest way
- * to reach that state.
+ * So the test asserts both halves: the passage is buffered (the behaviour a user feels), and
+ * nothing went unhandled (the cause, which no UI assertion can see).
  */
-async function warmUpWritePath(page: Page): Promise<void> {
-	await page.keyboard.press('t');
-	await page.waitForLoadState('networkidle');
-	await page.getByTestId('restart-chunk').click();
-	await expect(page.getByTestId('typing-input')).toBeFocused();
+function collectUnhandledErrors(page: Page): string[] {
+	const errors: string[] = [];
+	// Chromium reports an unhandled rejection to the console; Playwright surfaces uncaught
+	// exceptions separately. Both are collected, and both are filtered to the module-load
+	// failure this test is about — an offline page produces plenty of legitimate network noise.
+	page.on('console', (message) => {
+		if (message.type() === 'error' && /dynamically imported module/i.test(message.text())) {
+			errors.push(message.text());
+		}
+	});
+	page.on('pageerror', (error) => {
+		if (/dynamically imported module/i.test(error.message)) {
+			errors.push(error.message);
+		}
+	});
+	return errors;
 }
 
 test.describe('offline → online: a completed passage is pending, then lands', () => {
@@ -104,6 +111,7 @@ test.describe('offline → online: a completed passage is pending, then lands', 
 	}) => {
 		// ~440 real keystrokes through the OS-level keyboard path.
 		test.setTimeout(180_000);
+		const unhandled = collectUnhandledErrors(page);
 		const book = await readSeededBook(authUser.client, BOOK_SLUG);
 		const lastChunkId = book.chunkIds[PASSAGE_COUNT - 1];
 
@@ -114,8 +122,12 @@ test.describe('offline → online: a completed passage is pending, then lands', 
 			`Passage ${PASSAGE_COUNT} of ${book.chunkCount}`
 		);
 		await expect(page.getByTestId('typing-input')).toBeFocused();
-		await warmUpWritePath(page);
 
+		// Deliberately NOT a single keystroke before this line: the lazy write path is still
+		// cold, so the completion below has to fetch it with the network already gone. That is
+		// the harder of the two offline shapes and the one that used to drop the passage
+		// silently — a signed-in user who loses connectivity before typing anything, or whose
+		// first keystroke is also the completing one.
 		await context.setOffline(true);
 		await typePassage(page, CHUNK_LAST);
 
@@ -134,14 +146,33 @@ test.describe('offline → online: a completed passage is pending, then lands', 
 		expect(buffered.completed).toBe(true);
 		// Nothing reached the database while the network was gone.
 		expect(await attemptsForChunk(authUser.client, lastChunkId)).toHaveLength(0);
+		// And the failed fetch of the write path was handled, not merely survived: an unhandled
+		// rejection here is the exact signature of the passage being dropped instead of buffered.
+		expect(
+			unhandled,
+			'the cold module load must fail into the buffer, not into the console'
+		).toEqual([]);
 
 		await context.setOffline(false);
 
-		// The `online` trigger drains it. Polled rather than waited on: the drain is
-		// fire-and-forget behind the page, exactly as it is in production.
+		// **The `online` trigger cannot rescue THIS document, and that is browser behaviour, not
+		// a defect.** A failed dynamic import is recorded in the document's module map, so every
+		// later `import()` of the same URL in the same document fails immediately — without
+		// touching the network, connectivity or not. (Verified in Chromium against this app's own
+		// module URL.) A session that went offline before it ever fetched the write path
+		// therefore stays without one until the page is replaced, which is exactly why the
+		// completion is BUFFERED rather than retried in place: the entry outlives the document.
+		//
+		// So the drain trigger this case actually gets is the next page load's mount trigger.
+		// The user reaches it the same way they always leave a summary — by picking another text.
+		const percent = Math.round((100 * 1) / book.chunkCount);
+		await page.goto('/type');
+
+		// Polled rather than waited on: the drain is fire-and-forget behind the page, exactly as
+		// it is in production.
 		await expect
 			.poll(() => attemptsForChunk(authUser.client, lastChunkId), {
-				message: 'the buffered attempt should have been written once connectivity returned'
+				message: 'the buffered attempt should have been written on the next page load'
 			})
 			.toHaveLength(1);
 		const [attempt] = await attemptsForChunk(authUser.client, lastChunkId);
@@ -155,8 +186,6 @@ test.describe('offline → online: a completed passage is pending, then lands', 
 		await expect.poll(() => readBuffer(page)).toEqual([]);
 
 		// And the backfill is visible where a user would look for it.
-		const percent = Math.round((100 * 1) / book.chunkCount);
-		await page.goto('/type');
 		await expect(page.getByTestId(`text-picker-option-${BOOK_SLUG}`)).toContainText(`${percent}%`);
 	});
 });
