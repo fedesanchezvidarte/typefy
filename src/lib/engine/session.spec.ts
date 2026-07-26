@@ -15,6 +15,7 @@ import type { TypeableText } from '../types.js';
 function makeText(contents: readonly string[]): TypeableText {
 	return {
 		id: 'text-1',
+		bookId: 'book-uuid-1', // the DB uuid; the engine never reads it, but the type carries it
 		title: 'Test text',
 		author: 'Test author',
 		language: 'en',

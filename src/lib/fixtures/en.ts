@@ -14,6 +14,10 @@ import type { TypeableText } from '$lib/types';
 
 export const prideAndPrejudiceExcerpt: TypeableText = {
 	id: 'pride-and-prejudice-excerpt',
+	// These Phase 1 fixtures predate the database, so there is no real `books.id` to carry.
+	// The value is a deliberately fake, stable placeholder — it is NOT a uuid and must never
+	// be used to address a row (spec #12).
+	bookId: 'fixture-book-pride-and-prejudice-excerpt',
 	title: 'Pride and Prejudice (excerpt)',
 	author: 'Jane Austen',
 	language: 'en',

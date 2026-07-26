@@ -15,6 +15,10 @@ import type { TypeableText } from '$lib/types';
 
 export const donQuijoteExcerpt: TypeableText = {
 	id: 'don-quijote-excerpt',
+	// These Phase 1 fixtures predate the database, so there is no real `books.id` to carry.
+	// The value is a deliberately fake, stable placeholder — it is NOT a uuid and must never
+	// be used to address a row (spec #12).
+	bookId: 'fixture-book-don-quijote-excerpt',
 	title: 'Don Quijote de la Mancha (fragmento)',
 	author: 'Miguel de Cervantes',
 	language: 'es',
