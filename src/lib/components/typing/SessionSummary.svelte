@@ -48,6 +48,12 @@
 	const lostSaves = $derived(failedSaves - pendingSaves);
 
 	/**
+	 * Whether either save notice has anything to say. Read only for spacing — the notice
+	 * region itself renders unconditionally; see the region's own comment for why.
+	 */
+	const hasSaveNotice = $derived(pendingSaves > 0 || lostSaves > 0);
+
+	/**
 	 * What the guest prompt may honestly promise signing in will save.
 	 *
 	 * Clamped to the buffer cap, because that is the most this browser can be holding: past
@@ -117,32 +123,56 @@
 			</dd>
 		</div>
 	</dl>
-	{#if pendingSaves > 0 || lostSaves > 0}
-		<!-- Two statements, not error banners: same muted register as the rest of the summary.
-		     Deliberately NOT live regions — they render with the summary, which takes focus on
-		     mount, so a screen reader reaches them in ordinary reading order.
-		     Wrapped so the 3-unit gap before the buttons is stated once however many of the
-		     two appear; each still guards itself, so neither ever renders at 0. -->
-		<div class="mb-3 flex flex-col gap-2">
-			{#if pendingSaves > 0}
-				<!-- Pending, not lost: buffered and waiting for connectivity to return. Read
-				     first because it is the better news and the more common case. -->
-				<p class="text-sm text-muted" data-testid="summary-save-pending">
-					{m.summary_save_pending({ count: pendingSaves })}
-				</p>
-			{/if}
-			{#if lostSaves > 0}
-				<!-- Genuinely lost: a permanently refused write is never buffered and never
-				     retried. `lostSaves`, NOT `failedSaves` — the message kept its name and its
-				     `count` signature when its meaning narrowed, so passing the total would
-				     still type-check and still render, silently reporting pending passages as
-				     discarded. -->
-				<p class="text-sm text-muted" data-testid="summary-save-failures">
-					{m.summary_save_failures({ count: lostSaves })}
-				</p>
-			{/if}
-		</div>
-	{/if}
+	<!--
+		Two statements, not error banners: same muted register as the rest of the summary.
+		Wrapped so the 3-unit gap before the buttons is stated once however many of the two
+		appear; each still guards itself, so neither ever renders at 0.
+
+		**The wrapper is a `role="status"` region, and it renders UNCONDITIONALLY.** Both halves
+		of that matter, and the earlier reasoning here — "not live regions, because they render
+		with the summary, which takes focus on mount, so a screen reader reaches them in
+		ordinary reading order" — was only ever true of failures that had already resolved.
+
+		The last passage of a session is completed by the same keystroke that finishes it, so
+		its `recordChunkAttempt` is still in flight when this component mounts and takes focus.
+		Its outcome raises `pendingSaves`/`failedSaves` a network round-trip LATER — and offline,
+		which is the exact condition these notices exist to report, that is always the case. So
+		the notice is inserted into a subtree that already has focus, after the screen reader has
+		read past this point: silently. Someone who cannot see the summary is told nothing about
+		the passages that did not save, which is the one thing the notices are for (WCAG 2.2
+		SC 4.1.3, Status Messages).
+
+		Hence `role="status"` (polite + atomic, so a late second notice re-reads the pair as one
+		statement). And hence unconditional: a live region must already be in the accessibility
+		tree BEFORE content enters it, or the insertion that creates the region is not announced
+		at all — guarding the wrapper with the counts would rebuild the region together with its
+		content and reproduce the silence it is here to fix.
+
+		Nothing is announced twice. When a count HAS settled before mount, region and content
+		arrive together, which screen readers correctly treat as initial content and read in
+		ordinary reading order — exactly what the original comment wanted, now true by
+		construction rather than by assumption. Empty, the region renders nothing and takes no
+		space; only the spacing below it is conditional.
+	-->
+	<div role="status" class={['flex flex-col gap-2', hasSaveNotice && 'mb-3']}>
+		{#if pendingSaves > 0}
+			<!-- Pending, not lost: buffered and waiting for connectivity to return. Read
+			     first because it is the better news and the more common case. -->
+			<p class="text-sm text-muted" data-testid="summary-save-pending">
+				{m.summary_save_pending({ count: pendingSaves })}
+			</p>
+		{/if}
+		{#if lostSaves > 0}
+			<!-- Genuinely lost: a permanently refused write is never buffered and never
+			     retried. `lostSaves`, NOT `failedSaves` — the message kept its name and its
+			     `count` signature when its meaning narrowed, so passing the total would
+			     still type-check and still render, silently reporting pending passages as
+			     discarded. -->
+			<p class="text-sm text-muted" data-testid="summary-save-failures">
+				{m.summary_save_failures({ count: lostSaves })}
+			</p>
+		{/if}
+	</div>
 	<div class="flex flex-wrap gap-2.5">
 		<button
 			type="button"

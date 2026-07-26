@@ -617,6 +617,104 @@ describe('TypingSession.svelte — a write path that cannot be loaded (spec #15 
 	});
 });
 
+/**
+ * Focus and announcement across the completion boundary (phase 8).
+ *
+ * The typing surface UNMOUNTS when the session finishes, so focus has to be handed to the
+ * summary or it dies on `<body>` and a keyboard-only user is stranded. And the summary's save
+ * notices are the one thing on it that does not exist yet at that moment — which is why they
+ * live in a `role="status"` region rather than in plain reading order.
+ */
+describe('TypingSession.svelte — focus and announcement at the completion boundary', () => {
+	it('hands focus from the typing surface to the summary when the session finishes', async () => {
+		render(TypingSession, {
+			book: makeBook(passages(1)),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: 'user-1'
+		});
+
+		expect(document.activeElement).toBe(page.getByTestId('typing-input').element());
+
+		await typeText('a b');
+
+		const summary = page.getByTestId('session-summary');
+		await expect.element(summary).toBeInTheDocument();
+		// Not `<body>`: the surface that held focus is gone, and nothing else would take it.
+		expect(document.activeElement).toBe(summary.element());
+		await settleSaves();
+	});
+
+	it('returns focus to the typing surface when the summary restarts the session', async () => {
+		render(TypingSession, {
+			book: makeBook(passages(1)),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: 'user-1'
+		});
+
+		await typeText('a b');
+		await expect.element(page.getByTestId('session-summary')).toBeInTheDocument();
+		await settleSaves();
+
+		// Driven from the keyboard, the way the user this test is about would reach it.
+		await userEvent.tab();
+		expect(document.activeElement).toBe(page.getByTestId('summary-restart-session').element());
+		await userEvent.keyboard('{Enter}');
+
+		// The surface remounts and focuses itself from its own attachment; `surface` is still
+		// null at the moment `restartSession` runs, so nothing else could have done it.
+		await expect.element(page.getByTestId('typing-surface')).toBeInTheDocument();
+		await expect
+			.poll(() => document.activeElement?.getAttribute('data-testid'))
+			.toBe('typing-input');
+	});
+
+	it('mounts the summary — focused, with the status region already in place — BEFORE the final save resolves', async () => {
+		// This ordering is the whole reason the notices are a live region. The keystroke that
+		// completes the last passage is also the one that finishes the session, so the summary
+		// is on screen and holding focus while `recordChunkAttempt` is still outstanding.
+		let release!: (outcome: { saved: false; reason: 'transient' }) => void;
+		recordChunkAttempt.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					release = resolve as typeof release;
+				})
+		);
+
+		render(TypingSession, {
+			book: makeBook(passages(1)),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: 'user-1'
+		});
+
+		await typeText('a b');
+
+		const summary = page.getByTestId('session-summary');
+		await expect.element(summary).toBeInTheDocument();
+		expect(document.activeElement).toBe(summary.element());
+		// Nothing to read yet — the outcome does not exist.
+		expect(page.getByTestId('summary-save-pending').query()).toBeNull();
+		// But the region that will carry it does. Captured now, compared after: this is the
+		// assertion that fails if the wrapper is ever guarded by the counts again.
+		const region = summary.element().querySelector('[role="status"]');
+		expect(region, 'the status region must exist before the notice does').not.toBeNull();
+
+		release({ saved: false, reason: 'transient' });
+
+		await expect
+			.element(page.getByTestId('summary-save-pending'))
+			.toHaveTextContent("One passage will be saved when you're back online.");
+		// Inserted into the established region, and focus was not disturbed to say so.
+		expect(summary.element().querySelector('[role="status"]')).toBe(region);
+		expect(document.activeElement).toBe(summary.element());
+	});
+});
+
 describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', () => {
 	it("keeps showing a WPM figure across a passage boundary and at the second passage's first word boundary", async () => {
 		render(TypingSession, {

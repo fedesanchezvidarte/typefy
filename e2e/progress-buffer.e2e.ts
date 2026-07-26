@@ -190,6 +190,102 @@ test.describe('offline → online: a completed passage is pending, then lands', 
 	});
 });
 
+/**
+ * Phase 8 (accessibility). The `online` drain trigger in `+layout.svelte` calls
+ * `invalidateAll()`, and unlike the mount trigger it can fire while somebody is mid-passage:
+ * connectivity returns, the backlog goes out, and the page's load functions re-run underneath
+ * a user who did nothing to ask for it.
+ *
+ * Spec §11 is often read as covering this — it does not. What §11 forbids is the IN-SESSION
+ * trigger (`TypingSession.saveAttempt`) invalidating after every successful write, and
+ * `TypingSession.svelte.spec.ts` asserts that negative. The reconnect trigger genuinely does
+ * invalidate mid-passage, so what protects the typist has to be proven rather than assumed:
+ * focus is not moved, the session is not yanked, and nothing is announced at them.
+ *
+ * Deliberately E2E and not a component test: every mechanism at issue belongs to the real
+ * router. `invalidateAll()` re-runs loads without going through `navigate()`, so it never
+ * applies focus or scroll reset; `{#key data.book.id}` keys on a stable id so nothing in the
+ * focused subtree remounts; and `startIndex` is read through `untrack` so a resume index that
+ * has just moved cannot pull the session with it. Mocking any of those would test the mock.
+ */
+test.describe('a reconnect drain must not disturb a typist mid-passage', () => {
+	test.skip(
+		!isLocalStack,
+		`refusing to create throwaway users against a non-local Supabase (${SUPABASE_URL})`
+	);
+
+	test('invalidateAll from the online trigger keeps focus, the session and the announcer intact', async ({
+		page,
+		authUser
+	}) => {
+		const book = await readSeededBook(authUser.client, BOOK_SLUG);
+		// A dozen characters is enough to have a session worth losing, and keeps the test fast.
+		const prefix = CHUNK_FIRST.slice(0, 12);
+		const typedCorrect = () =>
+			page.locator('[data-testid="typing-surface"] .char[data-state="correct"]');
+
+		await page.goto(`/type/${BOOK_SLUG}`);
+		await expect(page.getByTestId(META)).toContainText(`Passage 1 of ${book.chunkCount} · 0%`);
+		await typePassage(page, prefix);
+		await expect(typedCorrect()).toHaveCount(prefix.length);
+
+		// What the announcer says right now. It is the only live region on this screen, so it is
+		// the only thing that could speak over somebody who is typing.
+		const announcer = page.getByTestId('passage-announcer');
+		const announcedBefore = await announcer.textContent();
+
+		// A backlog appears — guest-authored, for the very passage being typed, so the drain
+		// moves BOTH the percentage and the resume index. The resume index is the sharper of
+		// the two: after this write the lowest incomplete passage is 2, and a session that
+		// re-read `startIndex` on invalidation would jump there and discard what is on screen.
+		const entry: BufferedChunkAttempt = {
+			userId: null,
+			chunkId: book.chunkIds[0],
+			// `books.id`, which is what `chunk_attempts.book_id` is keyed by. Typed as
+			// `BufferedChunkAttempt` rather than an object literal on purpose: an entry the
+			// buffer's own validator rejects reads back as an empty buffer, so a wrong field
+			// here would make the drain silently not happen and every assertion below vacuous.
+			bookId: book.id,
+			completed: true,
+			grossWpm: 55,
+			accuracyRaw: 0.96,
+			elapsedMs: 30_000,
+			startedAt: Date.now() - 600_000,
+			bufferedAt: Date.now() - 590_000
+		};
+		await page.evaluate(({ key, entries }) => localStorage.setItem(key, entries), {
+			key: ATTEMPT_BUFFER_KEY,
+			entries: JSON.stringify([entry])
+		});
+		// The buffer is really there — otherwise `maybeDrain`'s synchronous gate returns early
+		// and the `online` event below proves nothing.
+		expect(await readBuffer(page)).toHaveLength(1);
+
+		await page.evaluate(() => window.dispatchEvent(new Event('online')));
+
+		// The drain wrote and invalidated: the figure on screen caught up without a reload.
+		// This is the assertion that proves `invalidateAll()` actually ran — everything below
+		// is only meaningful because it did.
+		const percent = Math.round((100 * 1) / book.chunkCount);
+		await expect(page.getByTestId(META)).toContainText(`${percent}%`);
+
+		// ── and the typist noticed nothing ────────────────────────────────────────────────
+		// Focus never left the hidden input, so the next keystroke still reaches the engine.
+		await expect(page.getByTestId('typing-input')).toBeFocused();
+		// The session was not yanked to the new resume index, and no keystroke was lost.
+		await expect(page.getByTestId(META)).toContainText(`Passage 1 of ${book.chunkCount}`);
+		await expect(typedCorrect()).toHaveCount(prefix.length);
+		// Nothing was announced: the sr-only announcer is a pure function of the passage number
+		// and the book length, neither of which a drain can move. The visible percentage that
+		// DID change is not a live region, which is exactly why it may change silently.
+		await expect(announcer).toHaveText(announcedBefore ?? '');
+
+		// And typing simply continues from where it was.
+		await page.keyboard.type(CHUNK_FIRST.slice(prefix.length, prefix.length + 6), { delay: 0 });
+		await expect(typedCorrect()).toHaveCount(prefix.length + 6);
+	});
+});
+
 guestTest.describe('guest → sign-in: the completed passages backfill', () => {
 	guestTest.skip(
 		!isLocalStack,

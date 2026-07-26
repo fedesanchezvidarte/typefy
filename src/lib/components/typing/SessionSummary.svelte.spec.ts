@@ -1,4 +1,4 @@
-import { page } from 'vitest/browser';
+import { page, userEvent } from 'vitest/browser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { getLocale, overwriteGetLocale } from '$lib/paraglide/runtime';
@@ -186,6 +186,129 @@ describe('SessionSummary.svelte — the pending/lost split', () => {
 
 		await expect.element(page.getByTestId('summary-save-pending')).toBeInTheDocument();
 		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
+	});
+});
+
+/**
+ * Announcement semantics of the save notices (phase 8, WCAG 2.2 SC 4.1.3).
+ *
+ * The counts these notices render do not all exist at mount: the session's LAST passage is
+ * completed by the keystroke that finishes the session, so its write is still in flight when
+ * this component mounts and takes focus, and its outcome raises `pendingSaves`/`failedSaves`
+ * a network round-trip later. `TypingSession.svelte.spec.ts` proves that ordering against the
+ * real component; these tests pin the markup that makes the late arrival audible.
+ *
+ * The load-bearing assertion is that the region is present when EMPTY. A live region built at
+ * the same moment its content arrives is not announced at all, so a wrapper guarded by the
+ * counts would look correct and be silent — which is precisely the defect this replaced.
+ */
+describe('SessionSummary.svelte — the save notices are an announced status region', () => {
+	/** The one region, addressed the way an assistive technology resolves it. */
+	function statusRegion() {
+		return page.getByTestId('session-summary').element().querySelector('[role="status"]');
+	}
+
+	it('renders the status region even when there is nothing to announce yet', async () => {
+		render(SessionSummaryView, { ...baseProps, failedSaves: 0, pendingSaves: 0 });
+
+		await expect.element(page.getByTestId('session-summary')).toBeInTheDocument();
+		const region = statusRegion();
+		expect(
+			region,
+			'the region must pre-exist its content or the insertion is silent'
+		).not.toBeNull();
+		// Present but saying nothing, and costing no vertical space.
+		expect(region?.textContent?.trim()).toBe('');
+		expect(region?.className).not.toContain('mb-3');
+	});
+
+	it('announces a notice that arrives after mount, in the region that was already there', async () => {
+		// Mounted with no failure known yet — the state the summary is genuinely in while the
+		// final passage's write is still outstanding.
+		const screen = render(SessionSummaryView, {
+			...baseProps,
+			failedSaves: 0,
+			pendingSaves: 0
+		});
+		const regionBefore = statusRegion();
+		expect(regionBefore).not.toBeNull();
+
+		// The write comes back transient, exactly as it does offline.
+		await screen.rerender({ ...baseProps, failedSaves: 1, pendingSaves: 1 });
+
+		await expect.element(page.getByTestId('summary-save-pending')).toBeInTheDocument();
+		// The SAME node: the notice was inserted into an established region rather than
+		// arriving with a freshly-built one, which is what makes it announceable.
+		expect(statusRegion()).toBe(regionBefore);
+		expect(statusRegion()?.className).toContain('mb-3');
+	});
+
+	it('keeps both notices inside the one region, so the pair is announced as a single status', async () => {
+		render(SessionSummaryView, { ...baseProps, failedSaves: 4, pendingSaves: 1 });
+
+		const region = statusRegion();
+		expect(region?.querySelector('[data-testid="summary-save-pending"]')).not.toBeNull();
+		expect(region?.querySelector('[data-testid="summary-save-failures"]')).not.toBeNull();
+		// `role="status"` is implicitly atomic, so one region for both is what keeps a late
+		// second notice from being read without the first.
+		expect(region?.getAttribute('aria-live')).toBeNull(); // implicit from the role, not duplicated
+	});
+
+	it('places the notices between the figures and the buttons, so reading order is unchanged', async () => {
+		render(SessionSummaryView, { ...baseProps, failedSaves: 2, pendingSaves: 1 });
+
+		const section = page.getByTestId('session-summary').element();
+		const order = [...section.querySelectorAll('h1, dl, [role="status"], button')].map(
+			(node) => node.getAttribute('data-testid') ?? node.tagName.toLowerCase()
+		);
+		expect(order).toEqual([
+			'h1',
+			'dl',
+			'div', // the status region — no test id of its own
+			'summary-restart-session',
+			'summary-pick-another'
+		]);
+	});
+
+	it('adds nothing to the tab order — the notices are statements, not controls', async () => {
+		render(SessionSummaryView, { ...baseProps, failedSaves: 4, pendingSaves: 2 });
+
+		const region = statusRegion();
+		expect(region?.querySelectorAll('a, button, input, [tabindex]')).toHaveLength(0);
+	});
+});
+
+/**
+ * Focus handling (phase 8). The typing surface unmounts when the session finishes, so without
+ * this the caret dies on `<body>` and a keyboard-only user has nothing to tab from.
+ */
+describe('SessionSummary.svelte — focus on mount', () => {
+	it('takes focus itself, and is labelled by its own heading', async () => {
+		render(SessionSummaryView, { ...baseProps, failedSaves: 0 });
+
+		const section = page.getByTestId('session-summary').element();
+		expect(document.activeElement).toBe(section);
+		// Focusable programmatically but never a tab stop of its own.
+		expect(section.getAttribute('tabindex')).toBe('-1');
+		const labelledBy = section.getAttribute('aria-labelledby');
+		expect(labelledBy).toBe('session-summary-heading');
+		expect(section.querySelector(`#${labelledBy}`)?.tagName).toBe('H1');
+	});
+
+	it('reaches both actions by keyboard from where focus lands', async () => {
+		const restarted: string[] = [];
+		render(SessionSummaryView, {
+			...baseProps,
+			failedSaves: 0,
+			onRestartSession: () => restarted.push('restart')
+		});
+
+		// Tab from the focused section: the first stop is the primary action.
+		await userEvent.tab();
+		expect(document.activeElement).toBe(page.getByTestId('summary-restart-session').element());
+
+		await userEvent.keyboard('{Enter}');
+		expect(restarted).toEqual(['restart']);
 	});
 });
 
