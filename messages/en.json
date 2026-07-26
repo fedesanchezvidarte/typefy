@@ -50,6 +50,7 @@
 	"summary_time": "Time",
 	"summary_type_again": "Type it again",
 	"summary_back_to_library": "Back to library",
+	"summary_save_failures": "{count} passages couldn't be saved.",
 	"summary_sign_in_prompt": "Sign in to save your progress",
 	"auth_sign_in_google": "Sign in with Google",
 	"auth_sign_out": "Sign out",
