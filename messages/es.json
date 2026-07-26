@@ -42,7 +42,16 @@
 	"zen_enter": "Modo zen",
 	"zen_exit": "Salir del zen",
 	"summary_kicker": "Sesión",
-	"summary_heading_passages": "Leíste {count} pasajes.",
+	"summary_heading_passages": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "Leíste un pasaje.",
+				"countPlural=*": "Leíste {count} pasajes."
+			}
+		}
+	],
 	"summary_average_speed": "Velocidad media",
 	"summary_accuracy": "Precisión",
 	"unit_wpm": "ppm",

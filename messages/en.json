@@ -42,7 +42,16 @@
 	"zen_enter": "Zen mode",
 	"zen_exit": "Exit Zen",
 	"summary_kicker": "Session",
-	"summary_heading_passages": "You read {count} passages.",
+	"summary_heading_passages": [
+		{
+			"declarations": ["input count", "local countPlural = count: plural"],
+			"selectors": ["countPlural"],
+			"match": {
+				"countPlural=one": "You read one passage.",
+				"countPlural=*": "You read {count} passages."
+			}
+		}
+	],
 	"summary_average_speed": "Average speed",
 	"summary_accuracy": "Accuracy",
 	"unit_wpm": "wpm",
