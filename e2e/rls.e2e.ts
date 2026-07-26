@@ -1,8 +1,14 @@
-import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import type { Database } from '../src/lib/database.types';
+import {
+	anonClient,
+	deleteUsers,
+	epoch,
+	isLocalStack,
+	signUpUser,
+	SUPABASE_URL,
+	type AnyClient,
+	type TestUser
+} from './support/supabase';
 
 /**
  * RLS isolation + the profile trigger, exercised against the local Supabase stack
@@ -18,13 +24,10 @@ import type { Database } from '../src/lib/database.types';
  *
  * They create throwaway users, so they refuse to run against anything but a local
  * stack.
+ *
+ * Trigger *behaviour* belongs to `progress.e2e.ts`; what this file asserts about the
+ * rollups is only that RLS still seals them once they hold rows.
  */
-
-const SUPABASE_URL = process.env.PUBLIC_SUPABASE_URL ?? 'http://127.0.0.1:54321';
-const PUBLISHABLE_KEY =
-	process.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
-
-const isLocalStack = /^https?:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/.test(SUPABASE_URL);
 
 /** Tables that must be invisible to a signed-out client (spec #7 → RLS). */
 const PRIVATE_TABLES = ['chunk_attempts', 'chunk_progress', 'book_progress', 'profiles'] as const;
@@ -32,55 +35,12 @@ const PRIVATE_TABLES = ['chunk_attempts', 'chunk_progress', 'book_progress', 'pr
 /** The rollups have no client write policy at all — 2b's trigger is their only writer. */
 const ROLLUP_TABLES = ['chunk_progress', 'book_progress'] as const;
 
-type AnyClient = SupabaseClient<Database>;
-
-function anonClient(): AnyClient {
-	return createClient<Database>(SUPABASE_URL, PUBLISHABLE_KEY, {
-		auth: { persistSession: false, autoRefreshToken: false }
-	});
-}
-
-/**
- * The local secret key, used only to delete the throwaway users afterwards. It is
- * machine-specific, so it is read from the running stack rather than hardcoded; when it
- * cannot be read the tests still run and simply leave their users behind (a `db:reset`
- * clears them).
- */
-function localSecretKey(): string | null {
-	if (process.env.SUPABASE_SECRET_KEY) return process.env.SUPABASE_SECRET_KEY;
-	try {
-		const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-		const status = execFileSync(npx, ['supabase', 'status', '-o', 'json'], {
-			encoding: 'utf8',
-			stdio: ['ignore', 'pipe', 'ignore']
-		});
-		const parsed: unknown = JSON.parse(status);
-		const key = (parsed as Record<string, unknown>)?.SECRET_KEY;
-		return typeof key === 'string' ? key : null;
-	} catch {
-		return null;
-	}
-}
-
-interface TestUser {
-	client: AnyClient;
-	id: string;
-}
-
-async function signUpUser(): Promise<TestUser> {
-	const client = anonClient();
-	const { data, error } = await client.auth.signUp({
-		email: `rls-${randomUUID()}@typefy.test`,
-		password: `Pw-${randomUUID()}`
-	});
-	expect(error, `sign-up failed: ${error?.message}`).toBeNull();
-	expect(
-		data.session,
-		'local sign-up should return a session (confirmations disabled)'
-	).not.toBeNull();
-	expect(data.user).not.toBeNull();
-	return { client, id: data.user!.id };
-}
+/** The seeded attempt every rollup assertion below is derived from. */
+const SEED_ATTEMPT = {
+	gross_wpm: 42,
+	accuracy_raw: 0.97,
+	elapsed_ms: 30_000
+} as const;
 
 /**
  * A read that RLS must not satisfy: either PostgREST refuses it (no grant, 42501) or
@@ -108,10 +68,12 @@ test.describe('database access rules', () => {
 	let bob: TestUser;
 	let bookId: string;
 	let chunkId: string;
+	/** The server clock stamped on the seeded attempt — every rollup timestamp must equal it. */
+	let attemptCreatedAt: string;
 
 	test.beforeAll(async () => {
 		anon = anonClient();
-		[alice, bob] = await Promise.all([signUpUser(), signUpUser()]);
+		[alice, bob] = await Promise.all([signUpUser('rls'), signUpUser('rls')]);
 
 		// A real chunk to hang an attempt off, read as a guest (content is world-readable).
 		const { data, error } = await anon.from('chunks').select('id, book_id').limit(1);
@@ -120,29 +82,29 @@ test.describe('database access rules', () => {
 		chunkId = data![0].id;
 		bookId = data![0].book_id;
 
-		// 2a writes no progress, but the attempt row is what makes the isolation checks
-		// below non-vacuous: Bob and the guest must miss a row that demonstrably exists.
-		const { error: insertError } = await alice.client.from('chunk_attempts').insert({
-			user_id: alice.id,
-			chunk_id: chunkId,
-			book_id: bookId,
-			completed: true,
-			gross_wpm: 42,
-			accuracy_raw: 0.97,
-			elapsed_ms: 30_000,
-			started_at: new Date().toISOString()
-		});
-		expect(insertError, `seeding an attempt failed: ${insertError?.message}`).toBeNull();
+		// The attempt row is what makes the isolation checks below non-vacuous: Bob and the
+		// guest must miss a row that demonstrably exists. Since 2b's trigger fires on this
+		// insert, it is also what populates the rollups the last two tests read — the seed
+		// values and those assertions are a coupled pair.
+		const seeded = await alice.client
+			.from('chunk_attempts')
+			.insert({
+				user_id: alice.id,
+				chunk_id: chunkId,
+				book_id: bookId,
+				completed: true,
+				...SEED_ATTEMPT,
+				started_at: new Date().toISOString()
+			})
+			.select('created_at')
+			.single();
+		expect(seeded.error, `seeding an attempt failed: ${seeded.error?.message}`).toBeNull();
+		attemptCreatedAt = seeded.data!.created_at;
 	});
 
 	test.afterAll(async () => {
-		const secret = localSecretKey();
-		if (!secret) return;
-		const admin = createClient<Database>(SUPABASE_URL, secret, {
-			auth: { persistSession: false, autoRefreshToken: false }
-		});
 		// Deleting the auth user cascades to profiles and every progress row.
-		await Promise.all([admin.auth.admin.deleteUser(alice.id), admin.auth.admin.deleteUser(bob.id)]);
+		await deleteUsers(alice.id, bob.id);
 	});
 
 	test('a signed-out client can read books and chunks', async () => {
@@ -197,17 +159,22 @@ test.describe('database access rules', () => {
 		if (!remove.error) expect(remove.data).toEqual([]);
 
 		const still = await alice.client.from('chunk_attempts').select('gross_wpm');
-		expect(still.data).toEqual([{ gross_wpm: 42 }]);
+		expect(still.data).toEqual([{ gross_wpm: SEED_ATTEMPT.gross_wpm }]);
 	});
 
 	for (const table of ROLLUP_TABLES) {
 		test(`${table} is readable only per-user and not writable by a client`, async () => {
-			// 2a never writes the rollups, so there is no row to hide — what is verified
-			// here is that the tables are sealed: reads are scoped and writes are refused.
-			const own = await alice.client.from(table).select('*');
+			// 2b's trigger populated these from the seeded attempt, so the isolation check
+			// is no longer vacuous: there is a real row for Bob and the guest to miss.
+			const own = await alice.client.from(table).select('user_id');
 			expect(own.error, `${table} read failed: ${own.error?.message}`).toBeNull();
-			expect(own.data).toEqual([]);
+			expect(own.data).toEqual([{ user_id: alice.id }]);
 
+			expectNoRows(await bob.client.from(table).select('*'));
+			expectNoRows(await bob.client.from(table).select('*').eq('user_id', alice.id));
+			expectNoRows(await anon.from(table).select('*'));
+
+			// No client write policy and no write grant: the trigger is the sole writer.
 			const write = await alice.client.from(table).insert({
 				user_id: alice.id,
 				book_id: bookId,
@@ -217,8 +184,29 @@ test.describe('database access rules', () => {
 		});
 	}
 
+	test('the seeded attempt is rolled up into chunk_progress', async () => {
+		const { data, error } = await alice.client.from('chunk_progress').select('*').single();
+		expect(error, `chunk_progress read failed: ${error?.message}`).toBeNull();
+		expect(data!.chunk_id).toBe(chunkId);
+		expect(data!.book_id).toBe(bookId);
+		expect(data!.attempt_count).toBe(1);
+		expect(Number(data!.best_wpm)).toBeCloseTo(SEED_ATTEMPT.gross_wpm, 6);
+		expect(Number(data!.best_accuracy_raw)).toBeCloseTo(SEED_ATTEMPT.accuracy_raw, 6);
+		// Both timestamps derive from the attempt's server-clock created_at.
+		expect(epoch(data!.first_completed_at)).toBe(epoch(attemptCreatedAt));
+		expect(epoch(data!.last_attempt_at)).toBe(epoch(attemptCreatedAt));
+	});
+
+	test('the seeded attempt is rolled up into book_progress', async () => {
+		const { data, error } = await alice.client.from('book_progress').select('*').single();
+		expect(error, `book_progress read failed: ${error?.message}`).toBeNull();
+		expect(data!.book_id).toBe(bookId);
+		expect(data!.chunks_completed).toBe(1);
+		expect(epoch(data!.last_active_at)).toBe(epoch(attemptCreatedAt));
+	});
+
 	test('creating an auth user creates exactly one matching profiles row', async () => {
-		const carol = await signUpUser();
+		const carol = await signUpUser('rls');
 		try {
 			// Counted with the head request so the assertion is about row count, not payload.
 			const { count, error } = await carol.client
@@ -232,13 +220,7 @@ test.describe('database access rules', () => {
 			const { data } = await carol.client.from('profiles').select('id, locale');
 			expect(data).toEqual([{ id: carol.id, locale: null }]);
 		} finally {
-			const secret = localSecretKey();
-			if (secret) {
-				const admin = createClient<Database>(SUPABASE_URL, secret, {
-					auth: { persistSession: false, autoRefreshToken: false }
-				});
-				await admin.auth.admin.deleteUser(carol.id);
-			}
+			await deleteUsers(carol.id);
 		}
 	});
 });

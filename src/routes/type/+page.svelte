@@ -18,8 +18,17 @@
 		class="grid grid-cols-[repeat(auto-fill,minmax(158px,1fr))] gap-x-[22px] gap-y-[26px]"
 	>
 		{#each data.books as book (book.id)}
-			<!-- Progress is 0 for everyone until Phase 2b wires per-user data. -->
-			<BookCard {book} progress={0} />
+			<!-- Book-lifetime completion (spec #12): completed passages ÷ the book's passage
+			     count, not session progress. 0 for guests and for untouched books — an absent
+			     entry is "never attempted", which renders the same as "attempted, none finished".
+			     The chunkCount guard covers a book seeded with no chunks (the column defaults to
+			     0), which would otherwise divide by zero and render NaN%. -->
+			<BookCard
+				{book}
+				progress={book.chunkCount > 0
+					? Math.round((100 * (data.progressByBook[book.bookId] ?? 0)) / book.chunkCount)
+					: 0}
+			/>
 		{/each}
 	</div>
 </main>

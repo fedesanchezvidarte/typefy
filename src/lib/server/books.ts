@@ -20,13 +20,13 @@ type ChunkRow = Database['public']['Tables']['chunks']['Row'];
 /** The book columns the library needs — metadata only, no chunk content. */
 type BookSummaryRow = Pick<
 	BookRow,
-	'slug' | 'title' | 'author' | 'language' | 'chunk_count' | 'cover_url'
+	'id' | 'slug' | 'title' | 'author' | 'language' | 'chunk_count' | 'cover_url'
 >;
 /** One chunk's content columns, as embedded under a book. */
 type ChunkContentRow = Pick<ChunkRow, 'id' | 'index' | 'content' | 'char_count'>;
 type BookWithChunksRow = BookSummaryRow & { chunks: ChunkContentRow[] };
 
-const BOOK_SUMMARY_COLUMNS = 'slug, title, author, language, chunk_count, cover_url';
+const BOOK_SUMMARY_COLUMNS = 'id, slug, title, author, language, chunk_count, cover_url';
 const CHUNK_COLUMNS = 'id, index, content, char_count';
 
 const LANGUAGES: readonly Language[] = ['en', 'es'];
@@ -42,6 +42,7 @@ function toLanguage(value: string): Language {
 function toSummary(row: BookSummaryRow): TypeableTextSummary {
 	return {
 		id: row.slug, // the app addresses a typeable text by its slug
+		bookId: row.id, // the DB uuid — chunk_attempts.book_id and the progress rollup key (spec #12)
 		title: row.title,
 		author: row.author,
 		language: toLanguage(row.language),

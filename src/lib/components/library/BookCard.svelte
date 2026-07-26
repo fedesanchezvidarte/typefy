@@ -9,9 +9,10 @@
 	interface Props {
 		book: TypeableTextSummary;
 		/**
-		 * Per-book progress percent (0–100). Real per-user data arrives with
-		 * Phase 2b progress sync; until then callers pass 0 — the affordance is
-		 * part of the card's design, the number is honest.
+		 * Per-book progress percent (0–100): book-lifetime completion, i.e.
+		 * `round(100 × chunks_completed ÷ chunkCount)` (spec #12), not how far into
+		 * the current session the user is. Callers pass 0 for guests and for books
+		 * the signed-in user has no completed passages in.
 		 */
 		progress: number;
 	}

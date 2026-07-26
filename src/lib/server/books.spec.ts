@@ -49,6 +49,7 @@ describe('listBooks', () => {
 		const { client } = mockSupabase({
 			data: [
 				{
+					id: 'b0000000-0000-0000-0000-000000000001',
 					slug: 'pride-and-prejudice-excerpt',
 					title: 'Pride and Prejudice (excerpt)',
 					author: 'Jane Austen',
@@ -65,6 +66,7 @@ describe('listBooks', () => {
 		expect(books).toEqual([
 			{
 				id: 'pride-and-prejudice-excerpt',
+				bookId: 'b0000000-0000-0000-0000-000000000001',
 				title: 'Pride and Prejudice (excerpt)',
 				author: 'Jane Austen',
 				language: 'en',
@@ -103,6 +105,38 @@ describe('listBooks', () => {
 		expect(select?.args[0]).not.toContain('content');
 	});
 
+	it('selects books.id, and keeps the slug in `id` and the uuid in `bookId` (never swapped)', async () => {
+		const { client, calls } = mockSupabase({
+			data: [
+				{
+					id: 'b0000000-0000-0000-0000-000000000002',
+					slug: 'don-quijote-excerpt',
+					title: 'Don Quijote de la Mancha (fragmento)',
+					author: 'Miguel de Cervantes',
+					language: 'es',
+					chunk_count: 5,
+					cover_url: null
+				}
+			],
+			error: null
+		});
+
+		const books = await listBooks(client);
+
+		// The summary select must ask for the uuid: spec #12's write path needs
+		// chunk_attempts.book_id, and without this column it is simply not in the row.
+		const columns = String(calls.find((c) => c.method === 'select')?.args[0])
+			.split(',')
+			.map((column) => column.trim());
+		expect(columns).toContain('id');
+		expect(columns).toContain('slug');
+		// The two identifiers are distinct and must not be interchanged: `id` addresses
+		// the /type/[slug] URL, `bookId` addresses the database.
+		expect(books[0].id).toBe('don-quijote-excerpt');
+		expect(books[0].bookId).toBe('b0000000-0000-0000-0000-000000000002');
+		expect(books[0].id).not.toBe(books[0].bookId);
+	});
+
 	it('throws when the database returns an error (no fallback)', async () => {
 		const { client } = mockSupabase({ data: null, error: { message: 'connection refused' } });
 		await expect(listBooks(client)).rejects.toEqual({ message: 'connection refused' });
@@ -119,6 +153,7 @@ describe('listBooks', () => {
 
 describe('getBookBySlug', () => {
 	const bookRow = {
+		id: 'b0000000-0000-0000-0000-000000000002',
 		slug: 'don-quijote-excerpt',
 		title: 'Don Quijote de la Mancha (fragmento)',
 		author: 'Miguel de Cervantes',
@@ -138,6 +173,7 @@ describe('getBookBySlug', () => {
 
 		expect(book).toEqual({
 			id: 'don-quijote-excerpt',
+			bookId: 'b0000000-0000-0000-0000-000000000002',
 			title: 'Don Quijote de la Mancha (fragmento)',
 			author: 'Miguel de Cervantes',
 			language: 'es',
@@ -177,6 +213,7 @@ describe('getBookBySlug', () => {
 
 describe('getHeroBook', () => {
 	const bookRow = {
+		id: 'b0000000-0000-0000-0000-000000000002',
 		slug: 'don-quijote-excerpt',
 		title: 'Don Quijote de la Mancha (fragmento)',
 		author: 'Miguel de Cervantes',

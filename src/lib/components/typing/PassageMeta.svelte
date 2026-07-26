@@ -6,7 +6,13 @@
 		/** 1-based active passage number. */
 		current: number;
 		total: number;
-		/** Whole-book progress percent (completed passages + partial cursor). */
+		/**
+		 * Whole-book progress percent (spec #12 §4). For a signed-in user this is
+		 * BOOK-LIFETIME completion — passages ever completed ÷ the book's chunk count,
+		 * advanced optimistically in-session — so resuming at passage 7 of 11 shows the
+		 * persisted figure, not 0%. For a guest it stays session-relative: completed
+		 * passages plus the cursor's way through the active one.
+		 */
 		pct: number;
 		/** Live values, refreshed at word boundaries only; null until the first boundary. */
 		live: MetricsSnapshot | null;

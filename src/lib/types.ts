@@ -5,7 +5,17 @@ export type Language = 'en' | 'es';
  * the book list loads metadata only, no chunk text). `id` is the book's slug.
  */
 export interface TypeableTextSummary {
-	id: string; // the book's slug; used as the /type/[slug] URL segment
+	/**
+	 * The book's SLUG — the `/type/[slug]` URL segment, the `{#key}` identity in the typing
+	 * route, and what `Chunk.textId` points at. Never the uuid: `bookId` is that.
+	 */
+	id: string;
+	/**
+	 * The `books.id` uuid (spec #12). The database's own key for the book, used as
+	 * `chunk_attempts.book_id` and to look progress up in `book_progress` / `chunk_progress`.
+	 * Distinct from `id` on purpose — the URL is addressed by slug, the database by uuid.
+	 */
+	bookId: string;
 	title: string;
 	author: string;
 	language: Language; // content language — independent of UI locale

@@ -50,6 +50,7 @@
 	"summary_time": "Tiempo",
 	"summary_type_again": "Escríbelo otra vez",
 	"summary_back_to_library": "Volver a la biblioteca",
+	"summary_save_failures": "No se pudieron guardar {count} pasajes.",
 	"summary_sign_in_prompt": "Inicia sesión para guardar tu progreso",
 	"auth_sign_in_google": "Iniciar sesión con Google",
 	"auth_sign_out": "Cerrar sesión",

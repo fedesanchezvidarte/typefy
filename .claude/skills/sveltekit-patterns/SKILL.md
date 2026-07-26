@@ -36,6 +36,16 @@ src/routes/
 - Auth: Google OAuth via Supabase. Get the session server-side; **never trust client-provided user ids** — progress rows use the authenticated `user_id`.
 - Env vars: `PUBLIC_SUPABASE_URL` + publishable key via `$env/static/public`; any secret (service role for scripts only) stays out of the app entirely.
 - RLS is the real gate: routes may filter, but per-user isolation is enforced by policies, not by route code.
+- **The one sanctioned client-side write: progress.** `src/lib/progress/client.ts` inserts `chunk_attempts`
+  rows directly from the browser via `src/lib/supabase/browser.ts` (`getBrowserSupabase()`), under the same
+  RLS insert policy the server would otherwise enforce. This is a deliberate, ADR-recorded exception to
+  "client-side Supabase queries" below, not a precedent to generalize from — see
+  [ADR-0012](../../../docs/adr/0012-client-trusted-progress-writes.md). The `user_id` on that write is
+  still not trusted: RLS's `with check` verifies it against the JWT in Postgres, not in route code. What is
+  trusted is only the client-asserted metrics (`gross_wpm`, `accuracy_raw`, `elapsed_ms`), and only because
+  progress is strictly private today (no leaderboard, no cross-user comparison). A comparative feature
+  reopens ADR-0012 before this exception can be reused. Every *read* a page needs still comes from a load
+  function — this exception is for the one write, not a general license for client-side Supabase calls.
 
 ## Typing view specifics (ADR-0004)
 
@@ -50,7 +60,8 @@ src/routes/
 ## Anti-Patterns
 
 - Business logic inside `+page.server.ts` or `+server.ts` instead of `src/lib/`.
-- Client-side Supabase queries for data a load function should provide.
+- Client-side Supabase queries for data a load function should provide — the sole exception is the
+  progress write path documented above (ADR-0012); it is not a template for other client-side queries.
 - Trusting a `user_id` from the request body.
 - Adding an EN string without its ES counterpart.
 - Using a `<textarea>` for the typing surface.

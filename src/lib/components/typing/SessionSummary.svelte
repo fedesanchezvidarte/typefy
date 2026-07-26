@@ -6,12 +6,18 @@
 		summary: SessionSummary;
 		onRestartSession: () => void;
 		onPickAnother: () => void;
+		/**
+		 * Passages whose insert did not save this session (spec #12 §6). Stated once, quietly,
+		 * here — never during typing, never as an alarm, and never retried. Nothing renders
+		 * at 0.
+		 */
+		failedSaves: number;
 		/** Guests see a prompt to sign in and save progress (spec #7); `next` returns them here. */
 		signedIn: boolean;
 		next: string;
 	}
 
-	let { summary, onRestartSession, onPickAnother, signedIn, next }: Props = $props();
+	let { summary, onRestartSession, onPickAnother, failedSaves, signedIn, next }: Props = $props();
 
 	// Floored, not rounded: a session with an error must never display as 100%.
 	const accuracyPct = $derived(Math.floor(summary.overallAccuracy * 100));
@@ -76,6 +82,14 @@
 			</dd>
 		</div>
 	</dl>
+	{#if failedSaves > 0}
+		<!-- A statement, not an error banner: same muted register as the rest of the summary.
+		     Deliberately NOT a live region — it renders with the summary, which takes focus on
+		     mount, so a screen reader reaches it in ordinary reading order. -->
+		<p class="mb-3 text-sm text-muted" data-testid="summary-save-failures">
+			{m.summary_save_failures({ count: failedSaves })}
+		</p>
+	{/if}
 	<div class="flex flex-wrap gap-2.5">
 		<button
 			type="button"

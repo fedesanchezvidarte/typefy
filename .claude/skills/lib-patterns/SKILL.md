@@ -13,6 +13,12 @@ description: "Patterns for Typefy core logic in src/lib/ — the pure typing eng
 src/lib/
   engine/          → pure typing engine (ADR-0004): state machine, metrics
   chunking/        → paragraph chunking with size target (ADR-0005); shared with scripts/ingest.ts
+  progress/        → progress sync (ADR-0010, ADR-0012): resume.ts is pure (resolves the start index);
+                     client.ts is a browser-side service (records a chunk attempt), same injected-client
+                     convention as server/
+  supabase/        → browser.ts — the ONE module allowed to construct a client-side Supabase client
+                     (the browser twin of hooks.server.ts). Every other client-side consumer receives
+                     the client as an injected parameter; this is the sanctioned exception.
   server/          → server-only services (Supabase access); SvelteKit blocks client imports
   types.ts         → shared domain types
   database.types.ts→ generated Supabase types (never hand-edit)
@@ -20,8 +26,8 @@ src/lib/
 
 ## The two-tier rule
 
-1. **Pure modules** (`engine/`, `chunking/`): plain TypeScript. No DOM, no Supabase, no SvelteKit imports (`$app/*`, `$env/*`). Deterministic: same input → same output; time is injected, never read from `Date.now()` inside the logic.
-2. **Services** (`server/`): receive a `SupabaseClient` as the **first parameter** — they never create their own client. They orchestrate pure modules + persistence and are mocked in unit tests.
+1. **Pure modules** (`engine/`, `chunking/`, `progress/resume.ts`): plain TypeScript. No DOM, no Supabase, no SvelteKit imports (`$app/*`, `$env/*`). Deterministic: same input → same output; time is injected, never read from `Date.now()` inside the logic.
+2. **Services** (`server/`, `progress/client.ts`): receive a `SupabaseClient` as the **first parameter** — they never create their own client. They orchestrate pure modules + persistence and are mocked in unit tests. `progress/client.ts` runs in the browser rather than on the server — a deliberate, ADR-recorded exception (see `sveltekit-patterns` and [ADR-0012](../../../docs/adr/0012-client-trusted-progress-writes.md)) — but still obeys this rule: it receives its client, it does not create one. `src/lib/supabase/browser.ts` is the one module that *does* create a client, exactly as `hooks.server.ts` does on the server; it is the sanctioned exception to "services never create their own client."
 
 Routes call services; services call pure modules; pure modules call nothing above them.
 
