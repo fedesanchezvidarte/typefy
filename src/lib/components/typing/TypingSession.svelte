@@ -40,7 +40,7 @@
 		/**
 		 * null for a guest — the sole gate on the write path. No insert, no import, no request.
 		 *
-		 * **It can flip to null mid-session** (spec #15 §10 R3b). The parent derives it from
+		 * **It can flip to null mid-session** (ADR-0012, Phase 2c amendment). The parent derives it from
 		 * `page.data.user`, so a post-drain `invalidateAll()` that finds the session expired
 		 * re-renders this prop as `null`, and every later completion is enqueued as
 		 * *guest-authored* rather than owned. Accepted deliberately rather than defended

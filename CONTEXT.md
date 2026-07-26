@@ -11,11 +11,13 @@ Portfolio project, free, following professional industry standards.
 In active development. Phase 0 (spec #3) and Phase 1 (spec #5) are complete: the SvelteKit + TS
 scaffold, Tailwind v4, Vitest/Playwright harnesses, Paraglide EN/ES (`/` = EN, `/es` = ES), CI and
 Vercel deploy; and the typing engine over hardcoded fixture texts. Phase 2 is split into **2a**
-(spec #7 — Supabase foundation, auth, and typeable text served from the database) and **2b**
-(spec #12 — progress sync), and both are complete: the database foundation, auth, and
-content-from-database routes shipped in 2a; 2b closes the loop — completed passages are written to
-Supabase, resumed on return, and shown as book-lifetime completion on the library card and the typing
-screen.
+(spec #7 — Supabase foundation, auth, and typeable text served from the database), **2b**
+(spec #12 — progress sync) and **2c** (spec #15 — local attempt buffer), and all three are complete:
+the database foundation, auth, and content-from-database routes shipped in 2a; 2b closes the loop —
+completed passages are written to Supabase, resumed on return, and shown as book-lifetime completion
+on the library card and the typing screen; 2c stops losing the two completions 2b dropped — a
+guest's and a transiently failed write's are held in the local **attempt buffer** and drained into
+`chunk_attempts` once a valid session exists.
 
 Phased roadmap:
 
@@ -23,9 +25,10 @@ Phased roadmap:
   ESLint/Prettier, Paraglide EN/ES wired from the start, empty deploy to Vercel + CI.
 - **Phase 1** — ✅ Typing engine (TDD) over hardcoded text. The core of the product.
 - **Phase 2** — ✅ Supabase + Auth + progress sync, against seeded books. Split into **2a**
-  (foundation, auth, typeable text from the database — spec #7) and **2b** (progress sync — spec #12).
-  Seeding both Phase 1 fixtures (EN + ES) keeps the UI-locale-vs-content-language independence
-  verifiable.
+  (foundation, auth, typeable text from the database — spec #7), **2b** (progress sync — spec #12)
+  and **2c** (local attempt buffer: guest backfill on sign-in + offline retry — spec #15, which
+  closes #13). Seeding both Phase 1 fixtures (EN + ES) keeps the UI-locale-vs-content-language
+  independence verifiable.
 - **Phase 3** — Ingestion pipeline + catalog of 10-20 books read from the database.
 - **Phase 4** — Game modes + polish + E2E coverage.
 
@@ -86,11 +89,30 @@ Use these terms as defined here; do not drift to synonyms.
   ([ADR-0012](docs/adr/0012-client-trusted-progress-writes.md)), and a `SECURITY DEFINER` trigger folds
   it into the `chunk_progress` and `book_progress` rollups on write. Resume and the completion
   percentages shown on the library card and the typing screen read the maintained rollups directly,
-  never the attempt history.
+  never the attempt history. Since Phase 2c (spec #15) the completion instant is no longer the only
+  chance to persist: a completion that cannot be written then — a guest's, or a transiently failed
+  write's — is held in the **attempt buffer** and drained into the same table later. So a persisted
+  attempt keeps the genuine first-keystroke `started_at` but may carry rollup timestamps that mark
+  the *drain* moment rather than the typing moment (ADR-0010's Phase 2c amendment).
 - **Chunk attempt** — One traversal of one chunk from first keystroke to completion. The atomic unit of
   persisted progress: each completed attempt appends an immutable row (gross WPM, accuracy, elapsed) to
   the history. Distinct from **Session** (a typing stretch of one or more chunks) and from the engine's
   in-memory session state.
+- **Attempt buffer** — A capped, local (per-browser) store of completed **chunk attempts** awaiting
+  persistence, drained into `chunk_attempts` once a valid session exists. Two things fill it: a
+  guest's completion (no session to write under) and a signed-in user's **transient** write failure
+  (no connectivity to write over, or a lazy write path that could not even be fetched). A
+  **permanent** failure — an RLS refusal, a dead `chunk_id`, a malformed row — is never buffered,
+  because retrying a refused row cannot succeed. Three things empty it: the root layout's mount,
+  the browser's `online` event, and the next successful in-session write. **Attribution**: a
+  *guest-authored* entry attributes to whoever signs in next on that browser; a
+  *signed-in-authored* entry attributes only to its own user, and any other user's drain skips it
+  and leaves it in place. Signing out drops the signed-in-authored entries and keeps the
+  guest-authored ones. `localStorage`, one versioned key, cap 50 with oldest-first eviction, 30-day
+  TTL; every operation is total and silent, so a buffer failure can never interrupt typing. Lives in
+  `src/lib/progress/buffer.ts` (pure and Supabase-free, so a guest still fetches no Supabase code)
+  and `src/lib/progress/drain.ts`, which is where the attribution invariant is enforced
+  ([ADR-0012](docs/adr/0012-client-trusted-progress-writes.md)'s Phase 2c amendment).
 - **Resume** — Opening a book starts the session at the **first incomplete passage**: the lowest chunk
   index with no completed attempt on record for this user (gaps count — passages 1 and 3 done, 2 not,
   resumes at 2). A `?passage=N` query param overrides the computed index, 1-based to match the number
@@ -111,11 +133,16 @@ Use these terms as defined here; do not drift to synonyms.
 - **Sheet** — The typing surface's own page region: `sheet` background one step off `bg`, minimal
   border, generous padding. The passage renders on it **tonally**: pending = dim, correct/corrected =
   full foreground, incorrect = the only chromatic event (error + tint + wavy underline). No green.
-- **Guest** — A visitor who is not signed in. Types fully (content is world-readable) but no progress is
-  saved, and there is no anonymous account. Signing in is optional and only unlocks progress persistence.
-  A guest's completed passages are discarded outright: nothing is buffered client-side and nothing
-  backfills on a later sign-in. A local buffer covering both guest backfill and offline retry is
-  deferred to issue #13.
+- **Guest** — A visitor who is not signed in. Types fully (content is world-readable), holds no
+  session, and has no anonymous account: nothing is written to Supabase for them and nothing is read
+  back, so they still resume at the first passage and still see a session-relative completion figure
+  rather than a book-lifetime one. Signing in is optional and unlocks progress persistence — but
+  since Phase 2c (spec #15) a guest's completed passages are no longer discarded. Each one is
+  enqueued in the local **attempt buffer** as *guest-authored*, and drained into `chunk_attempts`
+  under whoever signs in next on that browser, which is why the session summary's sign-in prompt can
+  truthfully name the passages signing in will save. Buffering does not weaken the guest guarantee:
+  the buffer is a synchronous `localStorage` write from a Supabase-free module, so a guest still
+  issues no Supabase request and still fetches neither `@supabase/ssr` nor `@supabase/supabase-js`.
 
 ## Decisions (ADRs)
 
