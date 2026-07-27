@@ -1,6 +1,7 @@
 # ADR-0012 — Client-trusted progress writes
 
-**Status:** Accepted (Phase 2b — spec #12)
+**Status:** Accepted (Phase 2b — spec #12; amended 2026-07-26 for Phase 2c — spec #15, the attempt
+buffer's widened trust surface, see below)
 
 ## Context
 
@@ -59,6 +60,105 @@ stands today without first reopening this decision.
 - Any future feature that reads `chunk_attempts`/rollup values across users (leaderboard, public stats,
   matchmaking-style comparison) must treat this ADR's revisit trigger as a blocking dependency, not an
   afterthought.
+
+## Amendment (2026-07-26, Phase 2c implementation — spec #15)
+
+The Context above describes the write path as "one insert attempt, no retry, no queue". Phase 2c's
+**attempt buffer** changes that sentence, and widens the trust surface with it. The Decision stands
+unchanged — the numeric metrics are still client-asserted and still never revalidated server-side —
+and the revisit trigger is not tripped. What follows is what is *additionally* trusted now, and
+where that trust is enforced.
+
+### The attribution invariant lives in application code, not in RLS
+
+The drain writes every buffered entry with `user_id` stamped from the **draining** session, never
+read off the entry. A *guest-authored* entry (`userId: null`, typed with no session at all) is
+therefore written under whoever signs in next on that browser — that is the feature. A
+*signed-in-authored* entry must never be written under anyone but its own author, and the only thing
+that guarantees that is a function: `isEligible` in `src/lib/progress/drain.ts`, which admits an
+entry only when `entry.userId === null || entry.userId === <draining user>`, and skips a foreign
+entry, leaving it in place.
+
+**RLS cannot enforce this, and must not be credited with it.** The insert policy checks
+`user_id = auth.uid()`. A drain that stamped user A's entry with user B's id would satisfy that check
+perfectly: the row is well-formed and correctly owned, it is simply attributed to the wrong person.
+And a guest-authored entry satisfies `user_id = auth.uid()` under **any** signed-in user, by
+construction — that is exactly what makes guest backfill possible in the first place. So on a browser
+two people share, the only thing standing between user B and user A's failed writes is a client-side
+`if`.
+
+This is **materially weaker than the guarantees sitting beside it in this ADR**, and it is recorded
+as such rather than folded in as though it were equivalent. `user_id` forgery is stopped by Postgres
+and is not forgeable at all. Attempt *attribution* is stopped by one function in a bundle the user
+controls, over a store the user can edit. Someone editing their own `localStorage` can only move
+their own buffered attempts between their own sessions, which stays inside the blast radius the
+Decision already accepts; the invariant's real job is the honest case — two accounts on one browser,
+where nothing else keeps their histories apart. It is unit-tested and was mutation-checked (the
+eligibility test was broken deliberately and confirmed to fail). Do not "simplify" it away on the
+belief that RLS covers it.
+
+### An attempt can now be authored with no session at all
+
+Two facts follow from the buffer, both new to this ADR:
+
+- **Metrics can be asserted by a party who held no session when they typed.** A guest's `gross_wpm`,
+  `accuracy_raw` and `elapsed_ms` are computed with nobody authenticated, held on disk, and later
+  attributed to a real account by a later sign-in. The trust boundary the Decision draws at "the
+  browser asserts the numbers" now extends backwards in time, past the sign-in, into a period with no
+  identity attached to it.
+- **Buffered entries sit on disk, plainly readable and editable, for up to 30 days.** One
+  `localStorage` key, one JSON array, nothing signed, obfuscated or checksummed — and nothing should
+  be, for the same reason the third alternative below is rejected as security theatre: the client
+  controls both the store and the keyboard. The buffer validates entry *shape* on read (a malformed
+  entry reads as absent, so it can never be offered to PostgREST) but never *plausibility*.
+
+Both stay inside "a user can only cheat themselves" **because of** the attribution invariant above.
+That is what makes this a widening of the existing surface rather than a change of kind.
+
+### Two implementation facts that shape the invariant's edges
+
+- **`drainOnce` joins concurrent callers regardless of `userId`.** The single-flight promise in
+  `src/lib/progress/drain-once.ts` is keyed on nothing, so a drain already in flight for user A
+  returns *A's* result to a caller that asked for B. This is benign, and the reason is precise: the
+  running drain was invoked with A's id, so it can only ever have written A's own and guest-authored
+  entries, and B's entries are protected by the invariant whether or not B's call ever ran. **No
+  misattributed write is possible.** The only consequence is a possibly-wrong `invalidateAll()`
+  decision — B's caller may reload data it did not need to, or skip a reload it wanted — which
+  self-corrects on the next drain trigger or the next navigation. Keying the single flight was
+  rejected as complexity that buys back a spurious reload.
+- **A session expiring mid-session silently reclassifies later completions as guest-authored.**
+  `TypingSession`'s `userId` prop is `$derived(page.data.user?.id ?? null)` in
+  `src/routes/type/[slug]/+page.svelte`, so an `invalidateAll()` that finds the session gone
+  re-renders it as `null`, and every completion after that is buffered as guest-authored rather than
+  owned. Accepted deliberately: a guest-authored entry is not lost — it drains to whoever signs in
+  next on this browser, which for an expired-then-renewed session is the same person. Freezing
+  `userId` at mount would instead keep stamping a dead user id onto entries drainable under only that
+  id. The looser attribution is the recoverable failure of the two, and it is bounded: guest-authored
+  is the *only* classification this can ever reach, never another user's id.
+
+### Why the queue is on disk rather than a retry in place
+
+Worth recording because it is not obvious and it was observed rather than assumed: **Chromium caches
+a failed dynamic import in the document's module map.** Once an `import()` of a URL has failed, every
+later `import()` of that same URL in the same document fails immediately, without touching the
+network, whether or not connectivity has returned. A session that goes offline *before* it ever
+fetched the lazy write path therefore has no write path at all until the document is replaced — so an
+in-place retry is impossible for that case, and the `online` trigger is a no-op for it too; the entry
+lands on the next page load's mount drain instead. This is the load-bearing reason a completion that
+cannot be written is **buffered** rather than **retried**: the entry has to outlive the document. The
+offline E2E in `e2e/progress-buffer.e2e.ts` covers exactly this path and carries the detail at the
+assertion.
+
+### The revisit trigger is not tripped
+
+The trigger this ADR sets is specific: *the first leaderboard, public completion counter, or any
+statistic that compares one user's numbers against another's*. Nothing in Phase 2c is comparative.
+Progress remains strictly private under RLS — every read is still scoped to `auth.uid()`, and the
+buffer adds **no read path at all**, only a deferred write. The blast radius of a fabricated metric
+is still exactly one account. The buffer changes *when* a metric is asserted and *by whom*, not *who
+can see it*, and widening the write surface is not the condition the trigger names. A comparative
+feature built on this data would be exactly as unsafe as it was before Phase 2c — no more, no less,
+and still blocked behind the same reopening.
 
 ## Alternatives considered
 

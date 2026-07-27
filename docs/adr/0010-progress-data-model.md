@@ -1,7 +1,8 @@
 # ADR-0010 — Progress data model: append-only attempts + rollups
 
 **Status:** Accepted (Phase 2a — spec #7 — tables created; Phase 2b — spec #12 — rollup trigger, amended
-2026-07-26, see below)
+2026-07-26; Phase 2c — spec #15 — backfilled attempts and drain idempotency, amended 2026-07-26; see
+both amendments below)
 
 ## Context
 
@@ -118,6 +119,86 @@ The shape above stands unchanged; this fills in the aggregation rules the Decisi
   `book_progress` count subquery all hit the indexed foreign-key columns), so that INFO is expected to
   start resolving itself as usage accrues rather than remaining a standing exception. Not re-verified
   against a live advisor run as part of this docs-only amendment.
+
+## Amendment (2026-07-26, Phase 2c implementation — spec #15)
+
+Phase 2c adds the **attempt buffer** (CONTEXT.md glossary): a completed passage that cannot be written
+at the completion instant — a guest's, or a signed-in user's transiently failed write — is held in
+`localStorage` and drained into `chunk_attempts` once a valid session exists. The shape above is
+untouched: no new column, no new table, no policy change, and the 2b column-level `INSERT` grant is
+exactly as it was. ([ADR-0012](0012-client-trusted-progress-writes.md)'s own Phase 2c amendment covers
+the trust consequences.) Two consequences land on *this* ADR.
+
+### A backfilled attempt's rollup timestamps mark the drain, not the typing
+
+`started_at` stays the genuine first-keystroke moment. The buffer captures it at completion and the
+drain replays it verbatim, so a backfilled row carries the timestamp the passage was *typed* at, not
+the timestamp it was *written* at. `created_at` stays server-assigned and not client-suppliable at all,
+because the 2b migration dropped the table-level `INSERT` grant and re-granted per column without it.
+That pair is already the honest one, and it is deliberately left alone.
+
+The consequence is therefore stated rather than engineered away. `created_at` is the **sole source**
+for every rollup timestamp the trigger writes (the 2b amendment above), so for a backfilled attempt
+`first_completed_at`, `last_attempt_at` and `last_active_at` all mark the **drain** moment. A passage
+typed as a guest on Monday and drained on a Friday sign-in reads, in the rollups, as a Friday
+completion. Offline retry has the same shape at a smaller scale: the gap is however long connectivity
+was gone.
+
+Acceptable today, because nothing displays those columns and resume only tests
+`first_completed_at is not null` — a drain-stamped value satisfies that exactly as well as a
+completion-stamped one. Recorded because it will not stay invisible.
+
+**Forward constraint: Phase 4 statistics over time must read `chunk_attempts.started_at`, never a
+rollup timestamp.** "Passages typed per day", "WPM over the last month", streaks, heat maps — every
+time-series figure is a query over the attempt history, which is the only place the honest moment
+lives. A chart built on `last_attempt_at` or `first_completed_at` would draw a spike on the day a user
+reconnected or signed in, and would show nothing on the days they actually typed. This is not a
+preference about which column is more convenient; it is the difference between a correct chart and a
+wrong one.
+
+Adding a client-suppliable `recorded_at`/`occurred_at` column, so the trigger could source rollup
+timestamps from the client instead, was considered and **rejected**: it reopens precisely the hole the
+2b column-level grant closed — a client that can steer one rollup timestamp can steer all of them — in
+exchange for prettier values in columns nothing currently reads.
+
+### The unique index, and what it does and does not protect
+
+`chunk_attempts_user_chunk_started_key`, a unique index on `(user_id, chunk_id, started_at)`
+(`supabase/migrations/20260726190351_attempt_buffer_idempotency.sql`), makes a repeated drain a no-op
+at the database rather than by client-side care. All three columns are `not null`, so there is no
+NULL-uniqueness caveat. A unique **index**, not a **constraint**: PostgREST only ever emits a column
+list (`on_conflict=a,b,c`), never `ON CONFLICT ON CONSTRAINT`, so a named constraint buys nothing it
+could use, while the index is the smaller object and can later be rebuilt `CONCURRENTLY`.
+
+- **It protects** the duplicate this feature can actually create: the same buffered entry drained
+  twice — two tabs, or a retry after an acknowledgement that never arrived. Two genuine attempts by
+  the same user at the same chunk sharing a first-keystroke millisecond are not a real event; a real
+  repeat attempt carries a different `started_at`, still inserts, and still fires the 2b rollup
+  trigger.
+- **It does not protect** against anything a client chooses to assert. `started_at` is client-supplied
+  (ADR-0012), so a client that varies it can still append as many rows as it likes. This is an
+  idempotency guarantee for an honest replay, not an integrity constraint.
+- **It was already mostly redundant**, which is worth stating so it is not credited with more than it
+  earned. The 2b trigger had made a duplicate attempt harmless to completion state on its own:
+  `chunks_completed` is a `count(*)`, `first_completed_at` is write-once via `coalesce`, and both
+  `best_*` columns are `greatest()`. A duplicate could only ever have inflated `attempt_count` and
+  bumped `last_attempt_at`. The index closes that residue — and, the actual reason it exists, lets the
+  drain treat "already there" as success instead of guessing.
+
+**`ignoreDuplicates: true` on the drain's write is mandatory, not stylistic**, and Phase 2c verified
+this empirically as the `authenticated` role rather than reasoning about it. PostgREST's
+`Prefer: resolution=ignore-duplicates` emits `ON CONFLICT DO NOTHING`, which needs only the `INSERT`
+privilege the 2b column-level grant already gives: three identical writes each returned 201 and left
+exactly one row. The control case, `resolution=merge-duplicates` — a true upsert — fails **`42501`,
+permission denied**, because it compiles to `ON CONFLICT DO UPDATE` and `chunk_attempts` deliberately
+has no update policy and no update grant. The append-only guarantee this ADR calls *structural* is
+therefore also what forbids a real upsert. **Any future write path to this table must use
+`ON CONFLICT DO NOTHING` (or plain `INSERT`), or it will not run at all.**
+
+**One redundancy observed and deliberately not acted on:** `chunk_attempts_user_chunk_idx`
+(`user_id, chunk_id`) is now a strict prefix of the new index and could be dropped. Left in place
+because spec #15's third database criterion is that nothing else on the progress tables changes;
+recorded here so the next schema change picks it up rather than rediscovering it.
 
 ## Alternatives considered
 

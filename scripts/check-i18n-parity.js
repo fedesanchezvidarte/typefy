@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 /**
  * CI gate: every locale message bundle must expose the same message keys as the
- * base (EN) bundle. Exits non-zero and lists the offending keys otherwise.
+ * base (EN) bundle, and — for pluralised (variant) messages — the same set of
+ * `match` arms. Exits non-zero and lists the offending keys otherwise.
+ *
+ * The arm check matters because a variant message is a single top-level key on
+ * both sides even when a locale is missing an entire plural arm.
  *
  * Usage: node scripts/check-i18n-parity.js
  */
@@ -26,7 +30,21 @@ const otherLocales = readdirSync(messagesDir)
 let failed = false;
 
 for (const locale of otherLocales) {
-	const { missingInA, missingInB } = diffMessageKeys(readBundle(locale), base);
+	const { missingInA, missingInB, variantMismatches } = diffMessageKeys(readBundle(locale), base);
+
+	for (const mismatch of variantMismatches) {
+		failed = true;
+		if (mismatch.missingInA.length > 0) {
+			console.error(
+				`[i18n] ${locale}.json message "${mismatch.key}" is missing variant arms present in ${baseLocale}.json: ${mismatch.missingInA.join(', ')}`
+			);
+		}
+		if (mismatch.missingInB.length > 0) {
+			console.error(
+				`[i18n] ${baseLocale}.json message "${mismatch.key}" is missing variant arms present in ${locale}.json: ${mismatch.missingInB.join(', ')}`
+			);
+		}
+	}
 
 	if (missingInA.length > 0) {
 		failed = true;

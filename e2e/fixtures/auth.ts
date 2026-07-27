@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { expect, test as base } from '@playwright/test';
+import { expect, test as base, type BrowserContext } from '@playwright/test';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '../../src/lib/database.types';
@@ -45,6 +45,37 @@ import {
  * `test.skip(!isLocalStack, ...)` so a non-local configuration skips rather than fails —
  * the same contract `rls.e2e.ts` and `progress.e2e.ts` already follow.
  *
+ * ## Two fixtures, one minting path (spec #15, Phase 7)
+ *
+ * `test` is the original: one throwaway user, `storageState` overridden, so every page opens
+ * already signed in. Two spec #15 criteria cannot use it, for reasons of construction rather
+ * than convenience:
+ *
+ * - **Guest → sign-in backfill** must START as a guest and BECOME signed in mid-test.
+ *   `storageState` is applied when the context is created and cannot be revised afterwards.
+ * - **A/B attribution** needs a SECOND distinct user in the same browser profile, which is
+ *   one more than `storageState` can express.
+ *
+ * So `guestTest` opens with no session at all and hands the test `mintUser` (create a
+ * throwaway user on demand, torn down with the test) and `session.signInAs` / `session.reset`
+ * (put that user's cookies on the live context, or take every cookie away). The minting and
+ * teardown code is shared with `test` rather than forked — a second sign-up path would be a
+ * second thing to keep in step with `@supabase/ssr`.
+ *
+ * ## What `signInAs` does and does not simulate
+ *
+ * The app's only sign-in is Google OAuth, which cannot be driven from a test: it is a
+ * third-party consent screen on a domain we do not control, behind bot detection. What CAN be
+ * reproduced exactly is its OUTCOME. `/auth/callback` calls `exchangeCodeForSession`, and
+ * `hooks.server.ts` writes whatever cookies `@supabase/ssr` emits for the resulting session;
+ * this module runs the same library over the same callback shape and puts the same cookies on
+ * the context. Everything downstream of the cookie — `safeGetSession`, the layout's
+ * `data.user`, the mount drain, RLS on every write — is then the real code path, reached by a
+ * real full page load, which is exactly how a returning OAuth user arrives.
+ *
+ * Not covered, and not claimed to be: the redirect chain to Google and back, the PKCE
+ * exchange, and `/auth/callback` itself. Those are `src/routes/auth/`'s to prove.
+ *
  * This file deliberately does NOT match Playwright's `**\/*.e2e.{ts,js}` testMatch glob:
  * it is a fixture module, not a spec. Keep it that way.
  */
@@ -64,6 +95,13 @@ export interface AuthUser {
 	/** Path to the generated `storageState` file. Consumed by the `storageState` fixture. */
 	storageStatePath: string;
 	/**
+	 * The same session as `storageStatePath`, in the shape `context.addCookies` takes — the
+	 * only way to hand a session to a context that already exists. `storageState` is fixed at
+	 * context creation, so a test that signs in midway, or that swaps one user for another,
+	 * has to go through here.
+	 */
+	cookies: PlaywrightCookie[];
+	/**
 	 * Mark the given 0-BASED passage positions complete by inserting real `chunk_attempts`
 	 * rows; the trigger then produces the rollups. The rollups are never written directly —
 	 * they have no client write policy, and going through the trigger is what makes a resume
@@ -80,6 +118,9 @@ interface RecordedCookie {
 	value: string;
 	options: CookieOptions;
 }
+
+/** Exactly what `BrowserContext.addCookies` and a `storageState` file both accept. */
+type PlaywrightCookie = Parameters<BrowserContext['addCookies']>[0][number];
 
 /**
  * Sign a throwaway user up and capture the cookies `@supabase/ssr` writes for its session.
@@ -126,36 +167,48 @@ async function signUpRecordingCookies(): Promise<{
 }
 
 /**
- * Serialise recorded cookies as a Playwright `storageState` file, scoped to the app's host.
+ * Translate recorded cookies into Playwright's cookie shape, scoped to the app's host.
  *
  * The domain is the app's HOSTNAME, never `host:port`: cookies are not port-scoped, and
  * Playwright rejects a domain carrying one.
+ *
+ * One shape feeds both consumers — the `storageState` file the original fixture writes and
+ * the `context.addCookies` call the mid-test sign-in makes — so the two can never disagree
+ * about what a session looks like.
  */
-async function writeStorageState(cookies: RecordedCookie[], appUrl: URL): Promise<string> {
+function toPlaywrightCookies(cookies: RecordedCookie[], appUrl: URL): PlaywrightCookie[] {
+	return cookies.map(({ name, value, options }) => ({
+		name,
+		value,
+		domain: appUrl.hostname,
+		path: options.path ?? '/',
+		// Playwright wants seconds since epoch, or -1 for a session cookie.
+		expires: options.maxAge ? Math.floor(Date.now() / 1000) + options.maxAge : -1,
+		// Both match `@supabase/ssr`'s defaults, which is what `hooks.server.ts` writes:
+		// the browser client reads the cookie from `document.cookie`, so it cannot be
+		// httpOnly, and a local stack is plain http.
+		httpOnly: false,
+		secure: false,
+		sameSite: 'Lax' as const
+	}));
+}
+
+async function writeStorageState(cookies: PlaywrightCookie[]): Promise<string> {
 	const directory = await mkdtemp(join(tmpdir(), 'typefy-e2e-auth-'));
 	const path = join(directory, 'storage-state.json');
-	const state = {
-		cookies: cookies.map(({ name, value, options }) => ({
-			name,
-			value,
-			domain: appUrl.hostname,
-			path: options.path ?? '/',
-			// Playwright wants seconds since epoch, or -1 for a session cookie.
-			expires: options.maxAge ? Math.floor(Date.now() / 1000) + options.maxAge : -1,
-			// Both match `@supabase/ssr`'s defaults, which is what `hooks.server.ts` writes:
-			// the browser client reads the cookie from `document.cookie`, so it cannot be
-			// httpOnly, and a local stack is plain http.
-			httpOnly: false,
-			secure: false,
-			sameSite: 'Lax' as const
-		})),
-		origins: []
-	};
-	await writeFile(path, JSON.stringify(state), 'utf8');
+	await writeFile(path, JSON.stringify({ cookies, origins: [] }), 'utf8');
 	return path;
 }
 
-async function createAuthenticatedUser(baseURL: string): Promise<AuthUser> {
+/**
+ * Sign a throwaway user up and return everything a test can do with it: read its rows, seed
+ * its progress, hand its session to a context, or open a whole browser on it.
+ *
+ * Exported so a spec can mint a SECOND user — the A/B attribution criterion needs two
+ * distinct accounts in one browser profile, which no `storageState`-shaped fixture can hold.
+ * Pair it with {@link disposeUser}; the fixtures below do that for you.
+ */
+export async function mintUser(baseURL: string): Promise<AuthUser> {
 	if (!isLocalStack) {
 		throw new Error(
 			`refusing to create a throwaway user against a non-local Supabase (${SUPABASE_URL})`
@@ -163,13 +216,15 @@ async function createAuthenticatedUser(baseURL: string): Promise<AuthUser> {
 	}
 
 	const { id, email, client, cookies } = await signUpRecordingCookies();
-	const storageStatePath = await writeStorageState(cookies, new URL(baseURL));
+	const playwrightCookies = toPlaywrightCookies(cookies, new URL(baseURL));
+	const storageStatePath = await writeStorageState(playwrightCookies);
 
 	return {
 		id,
 		email,
 		client,
 		storageStatePath,
+		cookies: playwrightCookies,
 		async completePassages(bookSlug, positions) {
 			const book = await readSeededBook(client, bookSlug);
 			// Sequential: the two rollup upserts run inside the trigger for every insert, and
@@ -196,28 +251,89 @@ async function createAuthenticatedUser(baseURL: string): Promise<AuthUser> {
 }
 
 /**
+ * Delete the throwaway auth user (which cascades to `profiles`, `chunk_attempts` and both
+ * rollups) and remove its temp state file. When the secret key cannot be read the user is
+ * left behind and `npm run db:reset` clears it — the same tolerance `rls.e2e.ts` already
+ * accepts, for the same reason (the key is machine-specific).
+ */
+export async function disposeUser(user: AuthUser): Promise<void> {
+	await deleteUsers(user.id);
+	await rm(dirname(user.storageStatePath), { recursive: true, force: true });
+}
+
+/**
  * `authUser` creates the user; `storageState` — Playwright's own option fixture, which the
  * built-in `context` depends on — is overridden to point at the file `authUser` produced, so
  * every page in the test opens already signed in.
- *
- * Teardown deletes the auth user with the local secret key, which cascades to `profiles`,
- * `chunk_attempts` and both rollups, and removes the temp state file. When the key cannot be
- * read the user is left behind and `npm run db:reset` clears it — the same tolerance
- * `rls.e2e.ts` already accepts, for the same reason (the key is machine-specific).
  */
 export const test = base.extend<{ authUser: AuthUser }>({
 	authUser: async ({ baseURL }, use) => {
 		expect(baseURL, 'playwright.config.ts must define use.baseURL').toBeTruthy();
-		const user = await createAuthenticatedUser(baseURL!);
+		const user = await mintUser(baseURL!);
 		try {
 			await use(user);
 		} finally {
-			await deleteUsers(user.id);
-			await rm(dirname(user.storageStatePath), { recursive: true, force: true });
+			await disposeUser(user);
 		}
 	},
 	storageState: async ({ authUser }, use) => {
 		await use(authUser.storageStatePath);
+	}
+});
+
+/**
+ * Switches the live browser context between sessions. This is the seam `storageState` cannot
+ * reach: it is read once, when the context is created.
+ */
+export interface SessionControl {
+	/**
+	 * Make the browser this user's. Every existing cookie is cleared first, so signing in as
+	 * B genuinely REPLACES A rather than layering a second session cookie over the first —
+	 * which is also what makes the A/B attribution test honest.
+	 *
+	 * The cookies only take effect on the next document load; the caller navigates.
+	 */
+	signInAs(user: AuthUser): Promise<void>;
+	/** Take every cookie away: the browser is a guest again, as after `/auth/signout`. */
+	reset(): Promise<void>;
+}
+
+/**
+ * The guest-first fixture. No `storageState` override, so the browser opens with no session
+ * at all — and `mintUser` / `session` are what let a test acquire one partway through.
+ *
+ * Users minted here are torn down when the test ends, however many were made.
+ */
+export const guestTest = base.extend<{
+	/** Create a throwaway user, registered for teardown. Call it twice for an A/B test. */
+	mintUser: () => Promise<AuthUser>;
+	session: SessionControl;
+}>({
+	mintUser: async ({ baseURL }, use) => {
+		expect(baseURL, 'playwright.config.ts must define use.baseURL').toBeTruthy();
+		const minted: AuthUser[] = [];
+		try {
+			await use(async () => {
+				const user = await mintUser(baseURL!);
+				minted.push(user);
+				return user;
+			});
+		} finally {
+			// Sequential and error-tolerant by way of `disposeUser`, which never throws: one
+			// failed teardown must not strand the other user's rows.
+			for (const user of minted) await disposeUser(user);
+		}
+	},
+	session: async ({ context }, use) => {
+		await use({
+			async signInAs(user) {
+				await context.clearCookies();
+				await context.addCookies(user.cookies);
+			},
+			async reset() {
+				await context.clearCookies();
+			}
+		});
 	}
 });
 
