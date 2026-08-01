@@ -655,7 +655,13 @@ test.describe('windowed reading (spec #18)', () => {
 		 * (`src/routes/layout.css` and `src/lib/theme/palettes.ts`, asserted by `theme.spec.ts`),
 		 * so changing it restyles every surface in the product across four palettes — a decision
 		 * for whoever owns the palette, not a fix a test author should guess at. Reported
-		 * separately rather than patched quietly.
+		 * separately rather than patched quietly: **issue #21**
+		 * (https://github.com/fedesanchezvidarte/typefy/issues/21) carries the measurements, the
+		 * affected surfaces and `#756955` as a warm-light starting point.
+		 *
+		 * **Delete this carve-out when #21 is fixed.** It is a dated exception to an a11y gate,
+		 * not a standing policy, and the moment the token clears AA it starts hiding real
+		 * regressions instead of a known one.
 		 *
 		 * The carve-out is by RULE NAME and nothing else, which is what keeps it from becoming a
 		 * blanket. Still failing this gate, on every state below: any `critical` violation of any
