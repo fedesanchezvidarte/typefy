@@ -142,6 +142,32 @@ describe('chunkParagraphs — invariants', () => {
 		}
 	});
 
+	/*
+	 * Found on the first real ingestion: Don Quijote produced a 7-character chunk, because a
+	 * chapter heading was followed by a 2,700-character sentence it could not join. Emitting
+	 * the heading alone gives a stub passage AND an over-long one; absorbing it gives only the
+	 * over-long one, which was unavoidable anyway.
+	 */
+	it('absorbs a stub into an oversized following unit rather than emitting both', () => {
+		const heading = 'Capitulo IX';
+		const monster = `${'palabra '.repeat(400).trim()}.`;
+		const chunks = chunkParagraphs(`${heading}\n\n${monster}`);
+		expect(chunks[0].startsWith(heading)).toBe(true);
+		expect(chunks[0].length).toBeGreaterThan(DEFAULT_TARGET.max);
+		expect(chunks.every((chunk) => chunk.length > heading.length)).toBe(true);
+	});
+
+	it('still emits a stub when the following unit fits on its own', () => {
+		// One sentence, so it cannot repack: long enough that the stub does not fit with it,
+		// short enough that it needs no absorbing.
+		const stub = 'Short.';
+		const sentence = `${'a'.repeat(DEFAULT_TARGET.max - 2)}.`;
+		expect(sentence.length).toBeLessThanOrEqual(DEFAULT_TARGET.max);
+		expect(stub.length + 1 + sentence.length).toBeGreaterThan(DEFAULT_TARGET.max);
+
+		expect(chunkParagraphs(`${stub}\n\n${sentence}`)).toEqual([stub, sentence]);
+	});
+
 	it('honours an explicit target', () => {
 		const chunks = chunkParagraphs(paragraph(1200), { min: 100, max: 200 });
 		for (const chunk of chunks.slice(0, -1)) {

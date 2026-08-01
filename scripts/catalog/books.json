@@ -1,0 +1,29 @@
+{
+	"$comment": "The catalog's source of truth (spec #17 §2). Ingestion reads this and never invents metadata. Each entry's sourceUrl and license are verified by hand against the source; a cover, when present, requires coverLicense and coverSource because Gutenberg's text is public domain but its scanned cover art often is not. Add a book: add an entry, run `npm run ingest -- --slug <slug> --target local --dry-run`, read the committed report, then ingest and publish.",
+	"books": [
+		{
+			"slug": "pride-and-prejudice",
+			"title": "Pride and Prejudice",
+			"author": "Jane Austen",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/1342/pg1342.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "It is a truth universally acknowledged"
+			}
+		},
+		{
+			"slug": "don-quijote",
+			"title": "Don Quijote",
+			"author": "Miguel de Cervantes Saavedra",
+			"language": "es",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/2000/pg2000.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "En un lugar de la Mancha"
+			}
+		}
+	]
+}

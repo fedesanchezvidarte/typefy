@@ -70,6 +70,41 @@ describe('normalizeCharacters — typographic folding', () => {
 	it('normalises carriage returns so line handling never sees CRLF', () => {
 		expect(normalizeCharacters('a\r\nb\rc')).toBe('a\nb\nc');
 	});
+
+	/*
+	 * Real English prose carries French loanwords, and real Spanish prose carries the odd
+	 * French or Portuguese name. Found in Pride and Prejudice on the first ingestion run:
+	 * théâtre, tête-à-tête, manœuvre. Folding these to their base letters is what the
+	 * keyboard-reachability rule demands — the alternative is a passage nobody can complete.
+	 */
+	it('folds a diacritic that is not part of the Spanish set to its base letter', () => {
+		expect(normalizeCharacters('tête-à-tête')).toBe('tete-a-tete');
+	});
+
+	/*
+	 * The rule is about the keyboard, not about the word's language of origin: a character in
+	 * the allowed set survives wherever it appears. So `théâtre` keeps its `é` — which a
+	 * Spanish keyboard produces — and loses only its `â`, giving the mixed-looking but fully
+	 * typeable `théatre`. Folding the `é` too would mean maintaining a notion of which
+	 * language a word belongs to, which ingestion has no way to know and no reason to.
+	 */
+	it('folds only the characters outside the set, not the whole word', () => {
+		expect(normalizeCharacters('théâtre')).toBe('théatre');
+	});
+
+	it('keeps Spanish diacritics while folding the others in the same word', () => {
+		expect(normalizeCharacters('añoraré êxito')).toBe('añoraré exito');
+	});
+
+	it('expands ligatures rather than dropping them', () => {
+		expect(normalizeCharacters('manœuvre')).toBe('manoeuvre');
+		expect(normalizeCharacters('Æsop')).toBe('AEsop');
+		expect(normalizeCharacters('straße')).toBe('strasse');
+	});
+
+	it('folds uppercase diacritics too', () => {
+		expect(normalizeCharacters('ÊTRE')).toBe('ETRE');
+	});
 });
 
 describe('isAllowed', () => {

@@ -133,9 +133,48 @@ export function normalizeCharacters(text: string): string {
 	let out = '';
 	for (const character of normalized) {
 		const folded = FOLDINGS.get(character);
-		out += folded === undefined ? character : folded;
+		if (folded !== undefined) {
+			out += folded;
+			continue;
+		}
+		out += isAllowed(character) ? character : foldLatin(character);
 	}
 	return out;
+}
+
+/** Ligatures, which decomposition cannot expand — `œ` is one code point, not `o` + `e`. */
+const LIGATURES: ReadonlyMap<string, string> = new Map([
+	['œ', 'oe'],
+	['Œ', 'OE'],
+	['æ', 'ae'],
+	['Æ', 'AE'],
+	['ß', 'ss']
+]);
+
+/**
+ * Last resort for a letter outside the allowed set: strip its diacritics.
+ *
+ * Real English prose carries French loanwords and real Spanish prose carries foreign names —
+ * `théâtre`, `tête-à-tête`, `manœuvre` all appear in Pride and Prejudice, found on the first
+ * ingestion run. Keeping them would leave passages nobody can complete, since none of those
+ * letters is on an English or Spanish keyboard; dropping them would mangle words. Folding to
+ * the base letter keeps the word readable and typeable, which is the trade ADR-0013 makes
+ * throughout — `source_url` is the fidelity story, not the stored text.
+ *
+ * Spanish diacritics never reach here: they are allowed, so they are returned before this is
+ * called. NFD decomposition then combining-mark removal is general — it needs no table and
+ * handles any Latin diacritic a source happens to contain.
+ *
+ * A character that is not a decomposable letter is returned unchanged, for `findDisallowed`
+ * to report: silently deleting something unrecognised is how text gets quietly corrupted.
+ */
+function foldLatin(character: string): string {
+	const ligature = LIGATURES.get(character);
+	if (ligature !== undefined) {
+		return ligature;
+	}
+	const stripped = character.normalize('NFD').replace(/\p{Mn}/gu, '');
+	return stripped !== '' && [...stripped].every(isAllowed) ? stripped : character;
 }
 
 /** One character outside the allowed set, with everything needed to find it in the source. */

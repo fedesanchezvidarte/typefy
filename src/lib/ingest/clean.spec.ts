@@ -46,6 +46,31 @@ describe('cleanSource — boilerplate', () => {
 		expect(cleanSource('Just a plain text.\n')).toBe('Just a plain text.');
 	});
 
+	/*
+	 * Gutenberg's start marker is followed by front matter — title page, contents, preface —
+	 * so the marker alone leaves a table of contents as passage 1. `startAtMarker` names the
+	 * body's real first line and KEEPS it, which the exclusive form would have deleted.
+	 */
+	it('keeps the line named by startAtMarker, dropping only what precedes it', () => {
+		const raw = ['CONTENTS', 'Chapter one .... 1', '', 'It is a truth universally.', 'More.'].join(
+			'\n'
+		);
+		expect(cleanSource(raw, { startAtMarker: 'It is a truth universally' })).toBe(
+			'It is a truth universally. More.'
+		);
+	});
+
+	it('falls back to the whole text when startAtMarker is not found', () => {
+		expect(cleanSource('Only this.', { startAtMarker: 'absent' })).toBe('Only this.');
+	});
+
+	it('applies startAtMarker together with the default end marker', () => {
+		const raw = gutenberg(['Front matter.', '', 'BODY BEGINS here.', 'And continues.'].join('\n'));
+		expect(cleanSource(raw, { startAtMarker: 'BODY BEGINS' })).toBe(
+			'BODY BEGINS here. And continues.'
+		);
+	});
+
 	it('does not treat a mention of the marker inside the body as a second boundary', () => {
 		const cleaned = cleanSource(gutenberg('Body one.\n\nBody two.'));
 		expect(cleaned).toBe('Body one.\n\nBody two.');
@@ -108,5 +133,42 @@ describe('cleanSource — normalization', () => {
 
 	it('returns an empty string for input that is entirely boilerplate or blank', () => {
 		expect(cleanSource('   \n\n   ')).toBe('');
+	});
+});
+
+/*
+ * Gutenberg's plain-text edition carries two kinds of markup that are not part of the book:
+ * underscores standing in for italics, and bracketed illustration captions. Both were found in
+ * Pride and Prejudice on the first ingestion run — the captions were also the sole source of
+ * the middle-dot characters the allowed-set check rejected.
+ */
+describe('cleanSource — Gutenberg markup', () => {
+	it('unwraps underscore italics rather than making the typist produce them', () => {
+		expect(cleanSource('a _coup de theatre_ indeed')).toBe('a coup de theatre indeed');
+	});
+
+	it('drops an illustration caption entirely', () => {
+		expect(cleanSource('Before.\n\n[Illustration: PRIDE AND PREJUDICE]\n\nAfter.')).toBe(
+			'Before.\n\nAfter.'
+		);
+	});
+
+	it('drops an illustration caption that spans several lines', () => {
+		const raw = 'Before.\n\n[Illustration:\n   a caption\n   over lines]\n\nAfter.';
+		expect(cleanSource(raw)).toBe('Before.\n\nAfter.');
+	});
+
+	it('drops a bare illustration marker', () => {
+		expect(cleanSource('Before.\n\n[Illustration]\n\nAfter.')).toBe('Before.\n\nAfter.');
+	});
+
+	it('leaves ordinary bracketed text alone', () => {
+		expect(cleanSource('He paused [as usual] and went on.')).toBe(
+			'He paused [as usual] and went on.'
+		);
+	});
+
+	it('leaves an underscore-free line untouched', () => {
+		expect(cleanSource('A plain sentence.')).toBe('A plain sentence.');
 	});
 });

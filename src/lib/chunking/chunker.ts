@@ -172,6 +172,15 @@ export function chunkParagraphs(text: string, target: SizeTarget = DEFAULT_TARGE
 			current = `${current} ${unit}`;
 			continue;
 		}
+		// The unit does not fit. Normally `current` is emitted and the unit starts the next
+		// chunk — but when `current` is a stub and the unit is oversized anyway, that produces
+		// a stub passage *followed by* an over-long one, which is worse on both counts. Real
+		// case: Don Quijote's chapter headings, where a 7-character "Capítulo" was pushed out
+		// alone because the sentence after it runs to 2,700 characters. Absorb the stub.
+		if (current.length < target.min && unit.length > target.max) {
+			current = `${current} ${unit}`;
+			continue;
+		}
 		chunks.push(current);
 		current = unit;
 	}

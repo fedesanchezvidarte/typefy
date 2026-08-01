@@ -17,6 +17,7 @@ Thumbs.db
 .env.*
 !.env.example
 !.env.test
+!.env.ingest.example
 
 # Vite
 vite.config.js.timestamp-*
@@ -29,3 +30,6 @@ test-results
 
 # Playwright
 playwright-report
+
+# Ingestion source cache (scripts/ingest.ts)
+.cache

@@ -12,10 +12,21 @@ import { normalizeCharacters } from './characters.js';
  * what a source got wrong, and a cleaner that threw could not produce one.
  */
 
-/** Per-book escape hatch for sources whose boilerplate does not match the usual markers. */
+/**
+ * Per-book escape hatch for sources whose boilerplate does not match the usual markers.
+ *
+ * Two start forms, because the two jobs are genuinely different. `startMarker` names a
+ * *delimiter* and drops its line — right for a boilerplate banner. `startAtMarker` names the
+ * body's **first line** and keeps it — right for skipping front matter, where the line you
+ * search for is the text itself. Using the exclusive form there would delete the novel's
+ * opening sentence, which is exactly the kind of silent loss the committed report exists to
+ * catch.
+ */
 export interface CleaningOverrides {
 	/** Everything up to and including the first line containing this is dropped. */
 	startMarker?: string;
+	/** Everything before the first line containing this is dropped; that line is kept. */
+	startAtMarker?: string;
 	/** Everything from the first line containing this onward is dropped. */
 	endMarker?: string;
 }
@@ -48,13 +59,20 @@ function findMarkerLine(lines: readonly string[], markers: readonly string[]): n
  * boilerplate does not truncate itself.
  */
 function stripBoilerplate(lines: readonly string[], overrides: CleaningOverrides): string[] {
-	const startMarkers = overrides.startMarker
-		? [overrides.startMarker]
-		: [DEFAULT_START, DEFAULT_START_ALT];
 	const endMarkers = overrides.endMarker ? [overrides.endMarker] : [DEFAULT_END, DEFAULT_END_ALT];
 
-	const start = findMarkerLine(lines, startMarkers);
-	const from = start === -1 ? 0 : start + 1;
+	let from: number;
+	if (overrides.startAtMarker) {
+		// Inclusive: the matched line is the body's first line, so keep it.
+		const at = findMarkerLine(lines, [overrides.startAtMarker]);
+		from = at === -1 ? 0 : at;
+	} else {
+		const startMarkers = overrides.startMarker
+			? [overrides.startMarker]
+			: [DEFAULT_START, DEFAULT_START_ALT];
+		const start = findMarkerLine(lines, startMarkers);
+		from = start === -1 ? 0 : start + 1;
+	}
 
 	const endOffset = findMarkerLine(lines.slice(from), endMarkers);
 	const to = endOffset === -1 ? lines.length : from + endOffset;
@@ -79,8 +97,31 @@ function stripBoilerplate(lines: readonly string[], overrides: CleaningOverrides
  *
  * Returns `''` when nothing survives; the caller decides whether that is an error.
  */
+/**
+ * Gutenberg's plain-text editions carry markup that is not part of the book:
+ *
+ * - `[Illustration: ...]` captions, which may span several lines and describe a plate the
+ *   text edition does not have. In Pride and Prejudice these were also the sole source of the
+ *   decorative middle-dot characters the allowed-set check rejected.
+ * - `_underscores_` standing in for italics. The underscore is printable ASCII, so the
+ *   allowed-set check waves it through — but a typist would have to reproduce a typesetting
+ *   convention rather than the prose.
+ *
+ * Only `[Illustration...]` is removed, never brackets in general: bracketed asides occur in
+ * real prose and are the author's.
+ */
+const ILLUSTRATION = /\[Illustration[^\]]*\]/gi;
+
+function stripGutenbergMarkup(text: string): string {
+	return text.replace(ILLUSTRATION, '').replaceAll('_', '');
+}
+
 export function cleanSource(raw: string, overrides: CleaningOverrides = {}): string {
-	const lines = stripBoilerplate(normalizeCharacters(raw).split('\n'), overrides);
+	const bounded = stripBoilerplate(normalizeCharacters(raw).split('\n'), overrides).join('\n');
+	// Markup is stripped AFTER the boilerplate bounds are found (the markers are line-shaped)
+	// and BEFORE paragraphs are grouped, so a caption spanning lines is gone before the blank
+	// line either side of it would have made it a paragraph of its own.
+	const lines = stripGutenbergMarkup(bounded).split('\n');
 
 	const paragraphs: string[] = [];
 	let current: string[] = [];
