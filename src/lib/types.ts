@@ -1,6 +1,35 @@
 export type Language = 'en' | 'es';
 
 /**
+ * What `/type?lang=` selects (spec #19): a content language, or `all`. Derived from
+ * `Language` because it filters over exactly that vocabulary — a third content language would
+ * become a third filter option by construction.
+ *
+ * It is NOT a UI locale. The two coincide on two strings today and stay independent by rule
+ * (CONTEXT.md); `defaultLanguageFilter` maps between them explicitly rather than asserting
+ * that the coincidence is an identity.
+ */
+export type LanguageFilter = Language | 'all';
+
+/**
+ * One user's `book_progress` rollup for one book, as the library reads it (spec #19).
+ *
+ * Declared here rather than beside the query so `src/lib/library/` — which selects over it —
+ * never has to import from `$lib/server/`. Dependencies point one way.
+ */
+export interface BookActivity {
+	chunksCompleted: number;
+	/**
+	 * `book_progress.last_active_at`; null for a rollup row the trigger has not timestamped.
+	 *
+	 * It is set from the attempt row's `created_at`, so for a DRAINED buffered attempt it marks
+	 * the drain moment rather than the typing moment (ADR-0010's 2c amendment). Ordering by it
+	 * is therefore "most recently persisted", which can differ from "most recently typed".
+	 */
+	lastActiveAt: string | null;
+}
+
+/**
  * Book metadata without chunk content — what the `/type` picker needs (spec #7:
  * the book list loads metadata only, no chunk text). `id` is the book's slug.
  */
