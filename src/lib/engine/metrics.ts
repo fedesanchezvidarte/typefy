@@ -27,8 +27,26 @@ const ZERO_SNAPSHOT: MetricsSnapshot = {
  * Computes gross WPM and Accuracy (raw) over a contiguous slice of a keystroke log.
  * `endTime` enables live metrics (elapsed = endTime − first stroke); omitted, elapsed
  * spans first → last stroke in the slice.
+ *
+ * `excludeMs` discounts dead time from the span before the gross-WPM formula runs — time
+ * the session was blocked on the delivery layer rather than on the typist (spec #18: the
+ * engine's `awaiting` state; see `SessionState.awaitingMs`). A 40-second wait for a window
+ * falls *inside* the first→last stroke span and nothing in the log marks it, so the
+ * discount has to be carried alongside the log and applied here. It defaults to 0, which
+ * leaves every existing caller and every existing metrics test untouched.
+ *
+ * It lives in this module rather than in `session.ts` deliberately: the alternative was
+ * recomputing WPM there, which would put a second copy of the gross-WPM formula in a second
+ * module — the one thing this module exists to prevent. Recorded honestly in the ADR-0004
+ * amendment as a delivery-layer concern that reached the metrics module.
+ *
+ * `accuracyRaw` and `typedChars` have no time term and are untouched by the discount.
  */
-export function computeMetrics(slice: readonly Keystroke[], endTime?: number): MetricsSnapshot {
+export function computeMetrics(
+	slice: readonly Keystroke[],
+	endTime?: number,
+	excludeMs = 0
+): MetricsSnapshot {
 	if (slice.length === 0) {
 		return ZERO_SNAPSHOT;
 	}
@@ -39,7 +57,9 @@ export function computeMetrics(slice: readonly Keystroke[], endTime?: number): M
 
 	const firstStroke = slice[0].timestamp;
 	const lastStroke = endTime ?? slice[slice.length - 1].timestamp;
-	const elapsedMs = lastStroke - firstStroke;
+	// Floored at 0: a discount larger than the span (a session that waited longer than it
+	// typed) must report 0 elapsed and 0 WPM, never negative time and never negative speed.
+	const elapsedMs = Math.max(lastStroke - firstStroke - Math.max(excludeMs, 0), 0);
 
 	return {
 		grossWpm: elapsedMs > 0 ? typedChars / 5 / (elapsedMs / 60_000) : 0,
