@@ -35,6 +35,25 @@ export function anonClient(): AnyClient {
 }
 
 /**
+ * A client holding the local secret key — the role `scripts/ingest.ts` writes content as.
+ *
+ * Only for arranging fixtures that no client role is allowed to create, such as an
+ * **unpublished** book (spec #17). Never use it to assert that something is readable: it
+ * bypasses RLS, so every check it satisfies is vacuous. Assertions belong to `anonClient()`
+ * and to a signed-up user.
+ *
+ * Returns `null` when the key cannot be read, so callers skip rather than fail — same
+ * contract as {@link localSecretKey}.
+ */
+export function secretClient(): AnyClient | null {
+	const secret = localSecretKey();
+	if (!secret) return null;
+	return createClient<Database>(SUPABASE_URL, secret, {
+		auth: { persistSession: false, autoRefreshToken: false }
+	});
+}
+
+/**
  * The local secret key, used only to delete the throwaway users afterwards. It is
  * machine-specific, so it is read from the running stack rather than hardcoded; when it
  * cannot be read the tests still run and simply leave their users behind (a `db:reset`

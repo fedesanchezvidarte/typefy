@@ -1,0 +1,16 @@
+-- Phase 3a — let ingestion COUNT what a destructive re-chunk would destroy (spec #17 §6).
+--
+-- `ingest --allow-shrink` deletes trailing chunks, and `chunk_attempts.chunk_id` cascades, so
+-- the script reports how many recorded attempts and how many distinct users the deletion would
+-- take with it before doing anything. That report is the entire safety mechanism.
+--
+-- It was silently broken: `service_role` had no SELECT grant on `chunk_attempts` (2b granted
+-- insert+select to `authenticated` only), so the count query failed and the guard reported
+-- "0 attempts across 0 users" for a chunk that genuinely had one. A safety check that fails
+-- toward "deleting this is free" is worse than no check at all.
+--
+-- SELECT only, deliberately. Ingestion must never be able to write, alter or delete a user's
+-- attempt history: `chunk_attempts` is append-only by structure (2b), and the offline pipeline
+-- has no business touching progress at all. Verified: as `service_role`, an insert into
+-- `chunk_attempts` is refused 403 both before and after this migration.
+grant select on chunk_attempts to service_role;

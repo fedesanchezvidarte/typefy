@@ -12,7 +12,14 @@ description: "Patterns for Typefy core logic in src/lib/ — the pure typing eng
 ```
 src/lib/
   engine/          → pure typing engine (ADR-0004): state machine, metrics
-  chunking/        → paragraph chunking with size target (ADR-0005); shared with scripts/ingest.ts
+  chunking/        → paragraph chunking with size target (ADR-0005); consumed by scripts/ingest.ts.
+                     `chunker.ts` (not `chunk.ts` — `engine/chunk.ts` already exists and the two
+                     are unrelated: one is the typing state machine, this one is text splitting)
+  ingest/          → source-shaped, ingestion-only pure modules (spec #17): `characters.ts` (the
+                     typeable set + folding, ADR-0013), `clean.ts`, `manifest.ts`, `report.ts`.
+                     Separate from chunking/ because chunking is a domain concept with its own ADR
+                     and a plausible second consumer (custom user text), while these describe what
+                     a downloaded source looks like
   progress/        → progress sync (ADR-0010, ADR-0012): resume.ts is pure (resolves the start index);
                      client.ts is a browser-side service (records a chunk attempt), same injected-client
                      convention as server/
@@ -43,6 +50,11 @@ Routes call services; services call pure modules; pure modules call nothing abov
 ## TDD (ADR-0009 — non-negotiable for engine code)
 
 Engine, metrics, chunking, and the ingestion cleaner are built test-first: write the failing Vitest test, make it pass, refactor. Never write engine logic ahead of its test. See the `testing-patterns` skill.
+
+Two lessons from building the ingestion modules this way (spec #17), both worth repeating:
+
+- **Assert against reality, not only against invented input.** The load-bearing test of `ingest/characters.ts` is that the *existing* Phase 1 fixtures pass its allowed-set check unchanged — which makes the rule a description of what hand-cleaning already produced rather than a constraint invented later. Synthetic cases alone would not have caught anything.
+- **A test whose premise is wrong fails honestly, so check the premise first.** Three separate expectations here were wrong rather than the code (three ~215-char paragraphs cannot fit in one 600-char chunk; a multi-sentence paragraph repacks instead of staying one unit; an allowed character survives inside a foreign word). Each now asserts its own premise before the behaviour, so a later change breaks it for the real reason.
 
 ## General conventions
 

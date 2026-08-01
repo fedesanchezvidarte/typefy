@@ -25,7 +25,8 @@
 		"db:reset": "supabase db reset",
 		"db:push": "supabase db push",
 		"db:seed:generate": "tsx scripts/generate-seed.ts",
-		"db:types": "supabase gen types typescript --local > src/lib/database.types.ts && prettier --write src/lib/database.types.ts"
+		"db:types": "supabase gen types typescript --local > src/lib/database.types.ts && prettier --write src/lib/database.types.ts",
+		"ingest": "tsx scripts/ingest.ts"
 	},
 	"lint-staged": {
 		"*.{js,ts,svelte,json,md,css,html,yaml,yml}": "prettier --write"
