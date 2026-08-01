@@ -63,6 +63,7 @@ export type Database = {
 					chunk_count: number;
 					cover_url: string | null;
 					created_at: string;
+					featured: boolean;
 					id: string;
 					language: string;
 					license: string | null;
@@ -76,6 +77,7 @@ export type Database = {
 					chunk_count?: number;
 					cover_url?: string | null;
 					created_at?: string;
+					featured?: boolean;
 					id?: string;
 					language: string;
 					license?: string | null;
@@ -89,6 +91,7 @@ export type Database = {
 					chunk_count?: number;
 					cover_url?: string | null;
 					created_at?: string;
+					featured?: boolean;
 					id?: string;
 					language?: string;
 					license?: string | null;
@@ -268,7 +271,10 @@ export type Database = {
 			[_ in never]: never;
 		};
 		Functions: {
-			[_ in never]: never;
+			first_incomplete_chunk_index: {
+				Args: { p_book_id: string };
+				Returns: number;
+			};
 		};
 		Enums: {
 			[_ in never]: never;

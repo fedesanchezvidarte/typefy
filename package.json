@@ -32,6 +32,7 @@
 		"*.{js,ts,svelte,json,md,css,html,yaml,yml}": "prettier --write"
 	},
 	"devDependencies": {
+		"@axe-core/playwright": "^4.12.1",
 		"@eslint/js": "^10.0.1",
 		"@inlang/paraglide-js": "^2.18.2",
 		"@playwright/test": "^1.60.0",
@@ -41,6 +42,7 @@
 		"@tailwindcss/vite": "^4.3.0",
 		"@types/node": "^24",
 		"@vitest/browser-playwright": "^4.1.8",
+		"axe-core": "^4.12.1",
 		"eslint": "^10.4.1",
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.19.0",

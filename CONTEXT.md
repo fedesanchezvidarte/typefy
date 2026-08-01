@@ -22,9 +22,11 @@ guest's and a transiently failed write's are held in the local **attempt buffer*
 Phase 3 is in progress. **3a** (spec #17) is complete: the offline **ingestion** pipeline, the
 book **manifest**, the committed **ingestion reports**, the **typeable character set**
 ([ADR-0013](docs/adr/0013-typeable-character-set.md)) and **publication gating** — plus a
-deliberately short three-chunk fixture book for the edges 3b needs. Two full-length books are
-ingested but **unpublished**, because the read path still loads every chunk of a book in one
-query: that is what **3b** (spec #18) replaces with windowed reads before publishing them.
+deliberately short three-chunk fixture book for the edges 3b needs. **3b** (spec #18) replaces the
+whole-book read that kept 3a's two full-length books **unpublished**: text is now delivered in
+**windows** through a public chunks endpoint, resume is computed in the database, the engine gained
+an **awaiting** state, and the landing hero reads a **featured book**. Publishing those two books is
+the deliberate step that follows, once every gate is green.
 
 Phased roadmap:
 
@@ -59,6 +61,23 @@ Use these terms as defined here; do not drift to synonyms.
 - **Passage** — The user-facing name for a chunk (`pasaje` in the ES UI). `chunk` stays the term in
   code, schema, engine and tests; the UI never says "chunk" — and never "page", which would be a false
   claim about the book's real pagination. Paraglide keys use `passage_*`.
+- **Window** — A contiguous run of **chunks** addressed by absolute index: the unit a typeable text is
+  delivered in since Phase 3b (spec #18). Ten chunks (~5 KB) per window; the typing screen
+  server-renders the first one from the resume index and fetches the rest from
+  `GET /api/books/[slug]/chunks?from=&limit=`. Windows are **not grid-aligned** — `from` is wherever
+  the session starts, not the origin of a fixed block containing it — which is what makes
+  `?passage=N` beyond the first window open the window containing N, with no alignment arithmetic
+  anywhere. Every window echoes the book's authoritative chunk count alongside its chunks, so a
+  session holding a stale bound after a re-ingest reconciles instead of waiting for a passage that
+  will never exist. Defined in `src/lib/reading/window.ts`
+  ([ADR-0006](docs/adr/0006-books-chunks-data-model.md)).
+- **Prefetch** — The background fetch of the next **window**, issued once the active passage is
+  within `PREFETCH_THRESHOLD` (3) chunks of the loaded end and the text holds more than is loaded.
+  **Single-flight**: one request at a time, and a later trigger joins the one in flight rather than
+  issuing a duplicate. It **never blocks typing** — it runs while the user types the passages already
+  in hand, and a failure costs nothing but a retry on the next completion. Three passages is roughly
+  a minute of typing: enough cover for a slow request, short enough that a session never holds
+  windows it will not reach.
 - **Character state** — Each character in a chunk is in one of: `pending`, `correct`, `corrected`,
   `incorrect`.
 - **Corrected (yellow)** — A character that was mistyped and then fixed with backspace. Visually
@@ -87,7 +106,12 @@ Use these terms as defined here; do not drift to synonyms.
   word / line / page; default: word).
 - **Zen mode** — No WPM/accuracy tracking; only text completion %.
 - **Session** — Short typing stretch (one or a few chunks). Long texts are consumed in mini sessions, not
-  in one sitting.
+  in one sitting. Since Phase 3b (spec #18) a session is in exactly one of three named states:
+  `active` (a passage is loaded and typeable), **`awaiting`** (the next passage's **window** has not
+  arrived yet) and `finished`. `awaiting` is the engine's first state the user **cannot leave by
+  typing** — only a delivered window leaves it — and the time spent in it is discounted from the
+  session's cumulative WPM, because it is dead time the delivery layer owes rather than the typist
+  ([ADR-0004](docs/adr/0004-typing-engine-model.md)).
 - **Ingestion** — Offline process that downloads a public-domain text, cleans it, normalizes it to
   the **typeable character set**, splits it into paragraphs → chunks and writes it to the database.
   Lives in `scripts/ingest.ts` (the only part that touches the network, the filesystem or the
@@ -116,6 +140,13 @@ Use these terms as defined here; do not drift to synonyms.
   reaches through to its book, so an unpublished book's chunks are unreadable even by a direct
   `book_id` query. The service role bypasses RLS, which is how ingestion writes a book before
   anyone can read it.
+- **Featured book** — The **book** the landing hero types, flagged by `books.featured` and written
+  from the **manifest** by ingestion, never by a client. **At most one per content language**,
+  enforced by the partial unique index `books_featured_per_language_idx` — the database, not a
+  convention, is what lets the hero read it with a single-row query. The hero loads that book's
+  **first chunk only** and reports a chunk count of 1: it is a one-passage typeable text drawn from a
+  book, not a book with the rest missing. Added in Phase 3b (spec #18), closing the gap 3a left when
+  the manifest gained the flag but the schema had nowhere to put it.
 - **Typeable character set** — The characters stored text may contain: printable ASCII, the
   newline, and `á é í ó ú ü ñ Á É Í Ó Ú Ü Ñ ¿ ¡` — what an English or Spanish keyboard produces.
   Ingestion folds everything else into it (curly quotes → `"`, dashes → `-`, `…` → `...`, exotic
@@ -159,7 +190,14 @@ Use these terms as defined here; do not drift to synonyms.
   ([ADR-0012](docs/adr/0012-client-trusted-progress-writes.md)'s Phase 2c amendment).
 - **Resume** — Opening a book starts the session at the **first incomplete passage**: the lowest chunk
   index with no completed attempt on record for this user (gaps count — passages 1 and 3 done, 2 not,
-  resumes at 2). A `?passage=N` query param overrides the computed index, 1-based to match the number
+  resumes at 2). Since Phase 3b (spec #18) that index is computed **in the database**, by the
+  `first_incomplete_chunk_index` SQL function — not by scanning a client-side chunk array, which is
+  exactly the array **windowed** reads no longer produce. The function is `SECURITY DEFINER` so it can
+  read a book's whole chunk list while the caller is only ever sent a **window** of it; it derives the
+  user from `auth.uid()` rather than taking one as an argument, and it answers only for **published**
+  books. Every unknowable case collapses to the same 0 — fully complete, no progress, unknown book,
+  unpublished book — which is honest precisely because there is no "finished" state.
+  A `?passage=N` query param overrides the computed index, 1-based to match the number
   the meta line displays; anything invalid — non-numeric, zero, negative, fractional, or beyond the
   book's chunk count — silently falls back to the computed index rather than erroring. A fully
   completed book resumes at the first passage (index 0) — there is no "finished" state. Guests always

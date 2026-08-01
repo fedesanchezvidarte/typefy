@@ -8,7 +8,7 @@
 			"language": "en",
 			"sourceUrl": "https://www.gutenberg.org/cache/epub/1342/pg1342.txt",
 			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
-			"featured": false,
+			"featured": true,
 			"cleaning": {
 				"startAtMarker": "It is a truth universally acknowledged"
 			}
@@ -20,7 +20,7 @@
 			"language": "es",
 			"sourceUrl": "https://www.gutenberg.org/cache/epub/2000/pg2000.txt",
 			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
-			"featured": false,
+			"featured": true,
 			"cleaning": {
 				"startAtMarker": "En un lugar de la Mancha"
 			}

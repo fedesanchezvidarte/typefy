@@ -83,13 +83,22 @@ export async function listBooks(client: Client): Promise<TypeableTextSummary[]> 
 }
 
 /**
- * One book and all its chunks (ordered by index) in a single query, or `null` if no book
- * has that slug — the route turns `null` into a 404.
+ * One book's METADATA, or `null` if no book has that slug — the route turns `null` into a
+ * 404. The typing route's first read, and the only book read on the typing path: chunks
+ * arrive separately through `getChunkWindow` (spec #18).
+ *
+ * No `published_at` filter, deliberately: the publication-gating RLS policy makes an
+ * unpublished book indistinguishable from a nonexistent one for `anon` and `authenticated`
+ * alike. Relying on the policy here rather than on a query filter is the point — it is what
+ * makes the guarantee hold for every caller, not just this one.
  */
-export async function getBookBySlug(client: Client, slug: string): Promise<TypeableText | null> {
+export async function getBookSummaryBySlug(
+	client: Client,
+	slug: string
+): Promise<TypeableTextSummary | null> {
 	const { data, error } = await client
 		.from('books')
-		.select(`${BOOK_SUMMARY_COLUMNS}, chunks(${CHUNK_COLUMNS})`)
+		.select(BOOK_SUMMARY_COLUMNS)
 		.eq('slug', slug)
 		.maybeSingle();
 	if (error) {
@@ -98,14 +107,63 @@ export async function getBookBySlug(client: Client, slug: string): Promise<Typea
 	if (!data) {
 		return null;
 	}
-	return toTypeableText(data as unknown as BookWithChunksRow);
+	return toSummary(data as BookSummaryRow);
 }
 
 /**
- * The landing hero's book (spec #9): the first seeded book in the given content
- * language, with all its chunks — the hero passage responds on the first
- * keystroke, so it must be real typeable text, not copy. `null` when no book
- * exists in that language (the route falls back before erroring).
+ * A bounded run of chunks, ordered by index (spec #18). `from`/`limit` are ABSOLUTE and
+ * already clamped by the caller (`clampWindow` in `$lib/reading/window`); this function
+ * does not know what a window is, which is what makes it testable against arbitrary ranges
+ * and what keeps the window policy in one place.
+ *
+ * `book` is the summary the caller already holds, because a chunk needs BOTH identifiers:
+ * `book.bookId` (the uuid) addresses `chunks.book_id`, and `book.id` (the slug) is what
+ * `Chunk.textId` points at. The two are never interchanged.
+ *
+ * A zero limit short-circuits to `[]` without a query: an empty window is a legitimate
+ * answer ("the book exists, that range of it does not"), not a round trip.
+ */
+export async function getChunkWindow(
+	client: Client,
+	book: Pick<TypeableTextSummary, 'id' | 'bookId'>,
+	from: number,
+	limit: number
+): Promise<Chunk[]> {
+	if (limit <= 0) {
+		return [];
+	}
+	const { data, error } = await client
+		.from('chunks')
+		.select(CHUNK_COLUMNS)
+		.eq('book_id', book.bookId)
+		.gte('index', from)
+		.lt('index', from + limit)
+		.order('index');
+	if (error) {
+		throw error;
+	}
+	// Sorted defensively so ordering never depends on the query's row order.
+	return [...(data as ChunkContentRow[])]
+		.sort((a, b) => a.index - b.index)
+		.map((chunk) => toChunk(book.id, chunk));
+}
+
+/**
+ * The landing hero's typeable text (spec #18 §7): the FEATURED book in this content
+ * language, with its FIRST CHUNK ONLY — the hero passage responds on the first keystroke,
+ * so it must be real typeable text, not copy, but the hero never needs a second passage.
+ * `null` when no featured book exists in that language (the route falls back to the other
+ * language before erroring).
+ *
+ * `.maybeSingle()` is correct rather than lucky here: `books_featured_per_language_idx` is
+ * a partial unique index, so the database — not a convention — guarantees at most one row.
+ *
+ * The returned `TypeableText` reports **`chunkCount: chunks.length`** (1 in practice), NOT
+ * `books.chunk_count`. This is deliberate and load-bearing: `LandingHero` loops on the
+ * session reaching `finished`, which only fires when `nextIndex >= chunkCount`, so a
+ * truncated book claiming 2,000 chunks would try to open a chunk it does not hold on the
+ * very first completion. The hero is a one-passage typeable text that happens to be drawn
+ * from a book — not a book with 1,999 chunks missing.
  */
 export async function getHeroBook(
 	client: Client,
@@ -115,8 +173,8 @@ export async function getHeroBook(
 		.from('books')
 		.select(`${BOOK_SUMMARY_COLUMNS}, chunks(${CHUNK_COLUMNS})`)
 		.eq('language', language)
-		.order('title')
-		.limit(1)
+		.eq('featured', true)
+		.eq('chunks.index', 0)
 		.maybeSingle();
 	if (error) {
 		throw error;
@@ -124,5 +182,6 @@ export async function getHeroBook(
 	if (!data) {
 		return null;
 	}
-	return toTypeableText(data as unknown as BookWithChunksRow);
+	const text = toTypeableText(data as unknown as BookWithChunksRow);
+	return { ...text, chunkCount: text.chunks.length };
 }

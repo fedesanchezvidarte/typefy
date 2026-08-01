@@ -248,13 +248,34 @@ async function writeBook(
 				language: entry.language,
 				chunk_count: chunks.length,
 				source_url: entry.sourceUrl,
-				license: entry.license
+				license: entry.license,
+				// The landing hero's book (spec #18 §7). The manifest validator already refuses
+				// two featured entries in one language; `books_featured_per_language_idx` is the
+				// database's own copy of that rule, and it is what catches the case the manifest
+				// cannot see — a book featured by an EARLIER ingest that this run does not touch.
+				featured: entry.featured
 			},
 			{ onConflict: 'slug' }
 		)
 		.select('id')
 		.single();
-	if (bookError) fail(`${entry.slug}: writing the book row failed — ${bookError.message}`);
+	if (bookError) {
+		// Moving the hero between books FAILS LOUDLY rather than auto-unfeaturing the incumbent.
+		// Silently clearing another book's flag would make ingesting one book mutate a different
+		// one, and would change the landing page as a side effect of an unrelated re-ingest —
+		// exactly the kind of surprise the shrink guard above exists to prevent. The operator
+		// unfeatures the current holder in the manifest and re-ingests it: one extra command,
+		// and both halves of the change are visible in the manifest diff.
+		if (bookError.code === '23505' && bookError.message.includes('featured')) {
+			fail(
+				`${entry.slug}: another book is already featured for language "${entry.language}".\n` +
+					`  Refusing to move the landing hero as a side effect of this ingest.\n` +
+					`  Set "featured": false on the current holder in scripts/catalog/books.json,\n` +
+					`  re-ingest THAT book, then re-run this one.`
+			);
+		}
+		fail(`${entry.slug}: writing the book row failed — ${bookError.message}`);
+	}
 
 	const bookId = book!.id as string;
 

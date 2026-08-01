@@ -157,3 +157,46 @@ describe('computeMetrics — same function over word, chunk, and session slices'
 		expect(metrics.accuracyRaw).toBeCloseTo(0.75, 5);
 	});
 });
+
+describe('computeMetrics — excludeMs, the awaiting-time discount (spec #18)', () => {
+	/** 4 correct chars over 6s → 0.8 words / 0.1 min = 8 WPM before any discount. */
+	const log = typeLog('abcd', 'abcd', 0, 2000);
+
+	it('defaults to 0, leaving every existing caller untouched', () => {
+		expect(computeMetrics(log, undefined, 0)).toEqual(computeMetrics(log));
+	});
+
+	it('subtracts dead time from elapsedMs', () => {
+		expect(computeMetrics(log, undefined, 2000).elapsedMs).toBe(4000);
+	});
+
+	it('raises gross WPM by exactly the time it removed', () => {
+		const metrics = computeMetrics(log, undefined, 2000);
+		expect(metrics.grossWpm).toBeCloseTo(4 / 5 / (4000 / 60_000), 5);
+	});
+
+	it('leaves typedChars and accuracyRaw untouched — neither has a time term', () => {
+		const discounted = computeMetrics(log, undefined, 3000);
+		const plain = computeMetrics(log);
+		expect(discounted.typedChars).toBe(plain.typedChars);
+		expect(discounted.accuracyRaw).toBe(plain.accuracyRaw);
+	});
+
+	it('applies to the live-metrics endTime span too', () => {
+		expect(computeMetrics(log, 10_000, 4000).elapsedMs).toBe(6000);
+	});
+
+	it('floors elapsedMs at 0 when the discount exceeds the span, and reports 0 WPM', () => {
+		const metrics = computeMetrics(log, undefined, 999_999);
+		expect(metrics.elapsedMs).toBe(0);
+		expect(metrics.grossWpm).toBe(0);
+	});
+
+	it('ignores a negative discount rather than inflating the span', () => {
+		expect(computeMetrics(log, undefined, -5000)).toEqual(computeMetrics(log));
+	});
+
+	it('returns the zero snapshot for an empty slice whatever the discount', () => {
+		expect(computeMetrics([], undefined, 5000)).toEqual(computeMetrics([]));
+	});
+});

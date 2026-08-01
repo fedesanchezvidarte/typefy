@@ -154,11 +154,20 @@ assertion.
 The trigger this ADR sets is specific: *the first leaderboard, public completion counter, or any
 statistic that compares one user's numbers against another's*. Nothing in Phase 2c is comparative.
 Progress remains strictly private under RLS — every read is still scoped to `auth.uid()`, and the
-buffer adds **no read path at all**, only a deferred write. The blast radius of a fabricated metric
+buffer itself adds **no read path**, only a deferred write. The blast radius of a fabricated metric
 is still exactly one account. The buffer changes *when* a metric is asserted and *by whom*, not *who
 can see it*, and widening the write surface is not the condition the trigger names. A comparative
 feature built on this data would be exactly as unsafe as it was before Phase 2c — no more, no less,
 and still blocked behind the same reopening.
+
+**Correction (2026-08-01, Phase 3b — spec #18).** The paragraph above originally read "the buffer adds
+**no read path at all**". That blanket claim is no longer true and has been narrowed to the buffer
+itself. Phase 3b added `GET /api/books/[slug]/progress`, which is the **first per-user progress read
+outside a load function**. It changes nothing in this ADR's Decision or trust model: the user is
+derived from `auth.uid()`, the read is RLS-scoped to that user, the response is `private, no-store`,
+and it returns only this caller's own completed chunk ids within one **window**. Progress is still
+strictly private and nothing is comparative, so the revisit trigger remains untripped — but the
+sentence is corrected here rather than left to be discovered later as a contradiction.
 
 ## Alternatives considered
 
