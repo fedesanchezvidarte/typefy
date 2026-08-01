@@ -1,18 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { load, type TypingPageData } from './+page.server';
+import { WINDOW_SIZE } from '$lib/reading/window';
 
 /**
- * `/type/[slug]` load tests (spec #12, §3 Resume + §4 Display). The injected Supabase
- * client is mocked — a real DB call must never reach a unit test (testing-patterns).
+ * `/type/[slug]` load tests (spec #12 §3 Resume + §4 Display, rebased on spec #18's windowed
+ * reads). The injected Supabase client is mocked — a real DB call must never reach a unit
+ * test (testing-patterns).
  *
- * The two progress reads run concurrently under one `Promise.all`, so the stub is keyed
- * on the `from(...)` table and builds a FRESH builder per call: `chunk_progress` and
- * `book_progress` must be able to answer differently, and neither may see the other's
- * recorded state.
+ * Two things the stub does deliberately:
  *
- * The exhaustive `?passage=N` matrix lives in `src/lib/progress/resume.spec.ts`. What is
- * proved here is only that the route CONSUMES the param — no pre-validation, no 400 —
- * and that a guest issues no progress query at all.
+ * - It is keyed on the `from(...)` table and builds a FRESH builder per call, because the
+ *   reads that share a `Promise.all` must be able to answer differently and neither may see
+ *   the other's recorded state.
+ * - The `chunks` builder **honours the range it is given**: it reads back the `gte`/`lt`
+ *   bounds the service applied and returns exactly the rows in them, out of a synthetic book
+ *   of `chunkCount` chunks. Returning a fixed array regardless would make every windowing
+ *   assertion here vacuous — the point is that the load asks for the right range.
+ *
+ * Resume itself is now a `SECURITY DEFINER` SQL function, so what is provable here is that
+ * the load CALLS it with the book's uuid and feeds its answer to `resolveStartIndex`. The
+ * function's own behaviour (gaps, fully complete, unpublished) is pinned by the database
+ * tests. The exhaustive `?passage=N` matrix lives in `src/lib/progress/resume.spec.ts`.
  */
 
 interface QueryCall {
@@ -22,23 +30,52 @@ interface QueryCall {
 
 type Result = { data: unknown; error: unknown };
 
-function mockSupabase(resultsByTable: Record<string, Result>) {
-	const calls: QueryCall[] = [];
+/** Chunk uuids derived from the index, deliberately unlike the index itself. */
+function chunkId(index: number): string {
+	return `cccccccc-0000-0000-0000-${String(index).padStart(12, '0')}`;
+}
 
-	function builderFor(table: string) {
-		const result = resultsByTable[table] ?? { data: [], error: null };
+function chunkRow(index: number) {
+	return {
+		id: chunkId(index),
+		index,
+		content: `Passage ${index + 1}.`,
+		char_count: 11
+	};
+}
+
+interface MockOptions {
+	book?: Result;
+	/** Length of the synthetic book the `chunks` table serves ranges out of. */
+	chunkCount?: number;
+	chunksError?: unknown;
+	chunkProgress?: Result;
+	bookProgress?: Result;
+	rpc?: Result;
+}
+
+function mockSupabase(options: MockOptions) {
+	const calls: QueryCall[] = [];
+	const chunkCount = options.chunkCount ?? DEFAULT_CHUNK_COUNT;
+
+	function recorder(
+		builder: Record<string, unknown>,
+		method: string,
+		onCall?: (args: unknown[]) => void
+	) {
+		return (...args: unknown[]) => {
+			calls.push({ method, args });
+			onCall?.(args);
+			return builder;
+		};
+	}
+
+	/** Answers the configured `{ data, error }` however it is filtered. */
+	function staticBuilder(result: Result) {
 		const builder: Record<string, unknown> = {};
-		const record =
-			(method: string) =>
-			(...args: unknown[]) => {
-				calls.push({ method, args });
-				return builder;
-			};
-		builder.select = record('select');
-		builder.eq = record('eq');
-		builder.not = record('not');
-		builder.order = record('order');
-		builder.limit = record('limit');
+		for (const method of ['select', 'eq', 'not', 'gte', 'lt', 'order', 'limit']) {
+			builder[method] = recorder(builder, method);
+		}
 		builder.maybeSingle = (...args: unknown[]) => {
 			calls.push({ method: 'maybeSingle', args });
 			return Promise.resolve(result);
@@ -50,69 +87,93 @@ function mockSupabase(resultsByTable: Record<string, Result>) {
 		return builder;
 	}
 
+	/** Serves the rows in `[gte, lt)`, so a window assertion means something. */
+	function chunksBuilder() {
+		const range = { from: 0, to: chunkCount };
+		const builder: Record<string, unknown> = {};
+		for (const method of ['select', 'eq', 'order', 'limit', 'not']) {
+			builder[method] = recorder(builder, method);
+		}
+		builder.gte = recorder(builder, 'gte', (args) => {
+			if (args[0] === 'index') range.from = args[1] as number;
+		});
+		builder.lt = recorder(builder, 'lt', (args) => {
+			if (args[0] === 'index') range.to = args[1] as number;
+		});
+		builder.then = (
+			onFulfilled: (value: unknown) => unknown,
+			onRejected?: (reason: unknown) => unknown
+		) => {
+			const rows = [];
+			for (let index = Math.max(range.from, 0); index < Math.min(range.to, chunkCount); index++) {
+				rows.push(chunkRow(index));
+			}
+			const result = options.chunksError
+				? { data: null, error: options.chunksError }
+				: { data: rows, error: null };
+			return Promise.resolve(result).then(onFulfilled, onRejected);
+		};
+		return builder;
+	}
+
 	const client = {
 		from: (table: string, ...rest: unknown[]) => {
 			calls.push({ method: 'from', args: [table, ...rest] });
-			return builderFor(table);
+			if (table === 'chunks') {
+				return chunksBuilder();
+			}
+			const results: Record<string, Result> = {
+				books: options.book ?? { data: bookRow(chunkCount), error: null },
+				chunk_progress: options.chunkProgress ?? { data: [], error: null },
+				book_progress: options.bookProgress ?? { data: null, error: null }
+			};
+			return staticBuilder(results[table] ?? { data: [], error: null });
+		},
+		rpc: (fn: string, args: unknown) => {
+			calls.push({ method: 'rpc', args: [fn, args] });
+			return Promise.resolve(options.rpc ?? { data: 0, error: null });
 		}
 	};
 
 	const tablesQueried = () =>
 		calls.filter((c) => c.method === 'from').map((c) => c.args[0] as string);
+	const rpcCalls = () => calls.filter((c) => c.method === 'rpc');
 
-	return { client, calls, tablesQueried };
+	return { client, calls, tablesQueried, rpcCalls };
 }
 
 const USER = { id: '11111111-1111-1111-1111-111111111111' };
 const BOOK_UUID = 'aaaaaaaa-0000-0000-0000-000000000001';
 const SLUG = 'pride-and-prejudice';
+const DEFAULT_CHUNK_COUNT = 5;
 
-/** Chunk uuids at array positions 0..4, deliberately unrelated to their index. */
-const CHUNK_IDS = [
-	'cccccccc-0000-0000-0000-00000000000a',
-	'cccccccc-0000-0000-0000-00000000000b',
-	'cccccccc-0000-0000-0000-00000000000c',
-	'cccccccc-0000-0000-0000-00000000000d',
-	'cccccccc-0000-0000-0000-00000000000e'
-];
+/** The metadata-only row `getBookSummaryBySlug` reads — no embedded chunks any more. */
+function bookRow(chunkCount: number) {
+	return {
+		id: BOOK_UUID,
+		slug: SLUG,
+		title: 'Pride and Prejudice',
+		author: 'Jane Austen',
+		language: 'en',
+		chunk_count: chunkCount,
+		cover_url: null
+	};
+}
 
-const BOOK_ROW = {
-	id: BOOK_UUID,
-	slug: SLUG,
-	title: 'Pride and Prejudice',
-	author: 'Jane Austen',
-	language: 'en',
-	chunk_count: CHUNK_IDS.length,
-	cover_url: null,
-	chunks: CHUNK_IDS.map((id, index) => ({
-		id,
-		index,
-		content: `Passage ${index + 1}.`,
-		char_count: 11
-	}))
-};
-
-/** `chunk_progress` rows as the read service sees them, for the given array positions. */
-function completedRows(positions: readonly number[]) {
-	return positions.map((position) => ({ chunk_id: CHUNK_IDS[position] }));
+/** `chunk_progress` rows as the read service sees them, for the given chunk indices. */
+function completedRows(indices: readonly number[]) {
+	return indices.map((index) => ({ chunk_id: chunkId(index) }));
 }
 
 function loadEvent(
-	options: {
+	options: MockOptions & {
 		user?: { id: string } | null;
 		slug?: string;
 		passage?: string | null;
-		book?: Result;
-		chunkProgress?: Result;
-		bookProgress?: Result;
 	} = {}
 ) {
 	const slug = options.slug ?? SLUG;
-	const supabase = mockSupabase({
-		books: options.book ?? { data: BOOK_ROW, error: null },
-		chunk_progress: options.chunkProgress ?? { data: [], error: null },
-		book_progress: options.bookProgress ?? { data: null, error: null }
-	});
+	const supabase = mockSupabase(options);
 
 	// A real URL, so `url.searchParams` behaves exactly as SvelteKit hands it to the load
 	// (including `?passage=` decoding to the empty string rather than null).
@@ -152,11 +213,12 @@ describe('/type/[slug] load — unknown slug', () => {
 		await expect(load(event)).rejects.toMatchObject({ status: 404 });
 	});
 
-	it('issues no progress query for an unknown slug — the 404 happens first', async () => {
+	it('issues no further query for an unknown slug — the 404 happens first', async () => {
 		const { event, supabase } = loadEvent({ user: USER, book: { data: null, error: null } });
 
 		await expect(load(event)).rejects.toMatchObject({ status: 404 });
 		expect(supabase.tablesQueried()).toEqual(['books']);
+		expect(supabase.rpcCalls()).toEqual([]);
 	});
 });
 
@@ -171,16 +233,27 @@ describe('/type/[slug] load — guest', () => {
 		expect(data.chunksCompleted).toBe(0);
 	});
 
-	it('issues ZERO progress queries (spec #12 acceptance criterion)', async () => {
+	it('issues ZERO progress queries and never calls the resume RPC', async () => {
 		const { event, supabase } = loadEvent({ user: null });
 
 		await load(event);
 
 		// Asserted positively against the recorded calls: an empty result is not proof.
 		const tables = supabase.tablesQueried();
-		expect(tables).toEqual(['books']);
+		expect(tables).toEqual(['books', 'chunks']);
 		expect(tables).not.toContain('chunk_progress');
 		expect(tables).not.toContain('book_progress');
+		// The RPC is granted to `authenticated` only — a guest calling it gets an error, not 0.
+		expect(supabase.rpcCalls()).toEqual([]);
+	});
+
+	it('still gets the first window of text', async () => {
+		const { event } = loadEvent({ user: null });
+
+		const data = await runLoad(event);
+
+		expect(data.window.from).toBe(0);
+		expect(data.window.chunks.map((chunk) => chunk.index)).toEqual([0, 1, 2, 3, 4]);
 	});
 
 	it('still honours ?passage=N for a guest', async () => {
@@ -189,33 +262,162 @@ describe('/type/[slug] load — guest', () => {
 		const data = await runLoad(event);
 
 		expect(data.startIndex).toBe(3);
-		expect(supabase.tablesQueried()).toEqual(['books']);
+		expect(data.window.from).toBe(3);
+		expect(supabase.tablesQueried()).toEqual(['books', 'chunks']);
 	});
 
-	it('returns the book itself', async () => {
+	it('returns the book as metadata only — the chunks live in the window', async () => {
 		const { event } = loadEvent({ user: null });
 
 		const data = await runLoad(event);
 
 		expect(data.book.id).toBe(SLUG);
 		expect(data.book.bookId).toBe(BOOK_UUID);
-		expect(data.book.chunks).toHaveLength(5);
+		expect(data.book.chunkCount).toBe(DEFAULT_CHUNK_COUNT);
+		expect(data.book).not.toHaveProperty('chunks');
 	});
 });
 
 describe('/type/[slug] load — resume for a signed-in user', () => {
-	it('opens at passage 4 when passages 1-3 are complete', async () => {
-		const { event } = loadEvent({
-			user: USER,
-			chunkProgress: { data: completedRows([0, 1, 2]), error: null }
-		});
+	it('calls the resume function with the book uuid, never the slug', async () => {
+		const { event, supabase } = loadEvent({ user: USER });
+
+		await load(event);
+
+		expect(supabase.rpcCalls()).toEqual([
+			{ method: 'rpc', args: ['first_incomplete_chunk_index', { p_book_id: BOOK_UUID }] }
+		]);
+	});
+
+	it('opens where the resume function says', async () => {
+		const { event } = loadEvent({ user: USER, rpc: { data: 3, error: null } });
 
 		const data = await runLoad(event);
 
 		expect(data.startIndex).toBe(3);
 	});
 
-	it('opens at the gap when passages 1 and 3 are complete but 2 is not', async () => {
+	it('opens a fully completed book at passage 1 — there is no "finished" state', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			rpc: { data: 0, error: null },
+			chunkProgress: { data: completedRows([0, 1, 2, 3, 4]), error: null }
+		});
+
+		const data = await runLoad(event);
+
+		expect(data.startIndex).toBe(0);
+	});
+
+	it('clamps a resume index that a shrunk book no longer holds', async () => {
+		// `chunk_count` and the RPC are read in the same request but not the same statement;
+		// a re-ingest between them must not open a session on a chunk that is gone.
+		const { event } = loadEvent({ user: USER, chunkCount: 3, rpc: { data: 9, error: null } });
+
+		const data = await runLoad(event);
+
+		expect(data.startIndex).toBe(2);
+	});
+
+	it('reads both rollup tables exactly once, plus the window', async () => {
+		const { event, supabase } = loadEvent({ user: USER });
+
+		await load(event);
+
+		expect(supabase.tablesQueried().slice(1).sort()).toEqual([
+			'book_progress',
+			'chunk_progress',
+			'chunks'
+		]);
+	});
+});
+
+describe('/type/[slug] load — the first window', () => {
+	it('serves at most WINDOW_SIZE chunks however long the book is', async () => {
+		const { event } = loadEvent({ user: USER, chunkCount: 500 });
+
+		const data = await runLoad(event);
+
+		expect(data.window.chunks).toHaveLength(WINDOW_SIZE);
+		expect(data.window.chunks.at(-1)?.index).toBe(WINDOW_SIZE - 1);
+	});
+
+	it('echoes the book’s authoritative chunkCount, not the window length', async () => {
+		const { event } = loadEvent({ user: USER, chunkCount: 500 });
+
+		const data = await runLoad(event);
+
+		expect(data.window.chunkCount).toBe(500);
+	});
+
+	it('opens AT the start index rather than at a grid-aligned origin', async () => {
+		const { event } = loadEvent({ user: USER, chunkCount: 500, rpc: { data: 47, error: null } });
+
+		const data = await runLoad(event);
+
+		expect(data.window.from).toBe(47);
+		expect(data.window.chunks.map((chunk) => chunk.index)).toEqual([
+			47, 48, 49, 50, 51, 52, 53, 54, 55, 56
+		]);
+	});
+
+	it('loads the window containing N for a ?passage=N beyond the first window', async () => {
+		const { event } = loadEvent({ user: USER, chunkCount: 500, passage: '120' });
+
+		const data = await runLoad(event);
+
+		expect(data.startIndex).toBe(119);
+		expect(data.window.from).toBe(119);
+		expect(data.window.chunks[0].index).toBe(119);
+		expect(data.window.chunks).toHaveLength(WINDOW_SIZE);
+	});
+
+	it('serves a short tail without asking for chunks past the end', async () => {
+		const { event } = loadEvent({ user: USER, chunkCount: 5, rpc: { data: 3, error: null } });
+
+		const data = await runLoad(event);
+
+		expect(data.window.chunks.map((chunk) => chunk.index)).toEqual([3, 4]);
+	});
+
+	it('serves an empty window when the book has no chunks at all', async () => {
+		const { event } = loadEvent({ user: USER, chunkCount: 0 });
+
+		const data = await runLoad(event);
+
+		expect(data.startIndex).toBe(0);
+		expect(data.window).toEqual({ from: 0, chunks: [], chunkCount: 0 });
+	});
+});
+
+describe('/type/[slug] load — completedChunkIds', () => {
+	it('contains only ids inside the window', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			chunkCount: 500,
+			// 3 and 7 are in the first window; 42 and 300 are the same user's progress elsewhere.
+			chunkProgress: { data: completedRows([3, 7, 42, 300]), error: null }
+		});
+
+		const data = await runLoad(event);
+
+		expect(data.completedChunkIds).toEqual([chunkId(3), chunkId(7)]);
+	});
+
+	it('is scoped to the window the session actually opened at', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			chunkCount: 500,
+			passage: '101', // startIndex 100 → window 100..109
+			chunkProgress: { data: completedRows([0, 100, 109, 110]), error: null }
+		});
+
+		const data = await runLoad(event);
+
+		expect(data.completedChunkIds).toEqual([chunkId(100), chunkId(109)]);
+	});
+
+	it('returns an array, not a Set, and survives a JSON round trip', async () => {
 		const { event } = loadEvent({
 			user: USER,
 			chunkProgress: { data: completedRows([0, 2]), error: null }
@@ -223,46 +425,15 @@ describe('/type/[slug] load — resume for a signed-in user', () => {
 
 		const data = await runLoad(event);
 
-		expect(data.startIndex).toBe(1);
-	});
-
-	it('opens a fully completed book at passage 1', async () => {
-		const { event } = loadEvent({
-			user: USER,
-			chunkProgress: { data: completedRows([0, 1, 2, 3, 4]), error: null }
-		});
-
-		const data = await runLoad(event);
-
-		// There is no "you have finished" state in this spec.
-		expect(data.startIndex).toBe(0);
-	});
-
-	it('opens at passage 1 when nothing is complete', async () => {
-		const { event } = loadEvent({ user: USER, chunkProgress: { data: [], error: null } });
-
-		const data = await runLoad(event);
-
-		expect(data.startIndex).toBe(0);
-	});
-
-	it('reads both rollup tables exactly once', async () => {
-		const { event, supabase } = loadEvent({ user: USER });
-
-		await load(event);
-
-		expect(supabase.tablesQueried().slice(1).sort()).toEqual(['book_progress', 'chunk_progress']);
+		// A Set does not survive SvelteKit's load serialisation — it would arrive empty.
+		expect(Array.isArray(data.completedChunkIds)).toBe(true);
+		expect(JSON.parse(JSON.stringify(data)).completedChunkIds).toEqual([chunkId(0), chunkId(2)]);
 	});
 });
 
 describe('/type/[slug] load — ?passage override', () => {
 	it('lets ?passage=3 override a different computed index', async () => {
-		const { event } = loadEvent({
-			user: USER,
-			// Gap at position 1, so the computed index is 1 — NOT the override's 2.
-			chunkProgress: { data: completedRows([0, 2]), error: null },
-			passage: '3'
-		});
+		const { event } = loadEvent({ user: USER, rpc: { data: 1, error: null }, passage: '3' });
 
 		const data = await runLoad(event);
 
@@ -291,45 +462,13 @@ describe('/type/[slug] load — ?passage override', () => {
 	] as const;
 
 	it.each(INVALID)('falls back to the computed index for a %s passage param', async (_, value) => {
-		const { event } = loadEvent({
-			user: USER,
-			// Computed index is 1 (gap at position 1).
-			chunkProgress: { data: completedRows([0, 2]), error: null },
-			passage: value
-		});
+		const { event } = loadEvent({ user: USER, rpc: { data: 1, error: null }, passage: value });
 
 		const data = await runLoad(event);
 
 		// No throw, no error status: a stale hand-edited link must still open the book.
 		expect(data.startIndex).toBe(1);
 		expect(data.book.id).toBe(SLUG);
-	});
-});
-
-describe('/type/[slug] load — serialisable payload', () => {
-	it('returns completedChunkIds as an array, not a Set', async () => {
-		const { event } = loadEvent({
-			user: USER,
-			chunkProgress: { data: completedRows([0, 2]), error: null }
-		});
-
-		const data = await runLoad(event);
-
-		// A Set does not survive SvelteKit's load serialisation — it would arrive empty.
-		expect(Array.isArray(data.completedChunkIds)).toBe(true);
-		expect(data.completedChunkIds instanceof Set).toBe(false);
-		expect([...data.completedChunkIds].sort()).toEqual([CHUNK_IDS[0], CHUNK_IDS[2]].sort());
-	});
-
-	it('survives a JSON round trip with its ids intact', async () => {
-		const { event } = loadEvent({
-			user: USER,
-			chunkProgress: { data: completedRows([1]), error: null }
-		});
-
-		const data = await runLoad(event);
-
-		expect(JSON.parse(JSON.stringify(data)).completedChunkIds).toEqual([CHUNK_IDS[1]]);
 	});
 });
 
@@ -380,5 +519,20 @@ describe('/type/[slug] load — errors', () => {
 		});
 
 		await expect(load(event)).rejects.toEqual({ message: 'connection refused' });
+	});
+
+	it('propagates a DB error from the window read', async () => {
+		const { event } = loadEvent({ user: USER, chunksError: { message: 'read timeout' } });
+
+		await expect(load(event)).rejects.toEqual({ message: 'read timeout' });
+	});
+
+	it('propagates an error from the resume RPC rather than silently starting at 0', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			rpc: { data: null, error: { message: 'permission denied for function' } }
+		});
+
+		await expect(load(event)).rejects.toEqual({ message: 'permission denied for function' });
 	});
 });
