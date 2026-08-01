@@ -42,6 +42,8 @@ interface MockOptions {
 	chunkCount?: number;
 	/** Overrides a chunk's text, to prove the ETag tracks content. */
 	contentFor?: (index: number) => string;
+	/** A failure on the CHUNK read specifically — the book was found, its text was not. */
+	chunksError?: unknown;
 }
 
 function mockSupabase(options: MockOptions) {
@@ -77,6 +79,12 @@ function mockSupabase(options: MockOptions) {
 			onFulfilled: (value: unknown) => unknown,
 			onRejected?: (reason: unknown) => unknown
 		) => {
+			if (options.chunksError) {
+				return Promise.resolve({ data: null, error: options.chunksError }).then(
+					onFulfilled,
+					onRejected
+				);
+			}
 			const rows = [];
 			for (let index = Math.max(range.from, 0); index < Math.min(range.to, chunkCount); index++) {
 				rows.push({ id: chunkId(index), index, content: content(index), char_count: 11 });
@@ -390,5 +398,52 @@ describe('GET /api/books/[slug]/chunks — conditional requests', () => {
 		const { event } = requestEvent({ query: '?from=0&limit=5', headers: { 'if-none-match': '*' } });
 
 		expect((await GET(event)).status).toBe(304);
+	});
+});
+
+/**
+ * The error path. Neither read is wrapped in a `try`, and that is deliberate: a database
+ * that is failing is not a book that is missing, and answering 404 would tell a CDN to
+ * remember it. Pinned because the difference is invisible until it happens — a swallowed
+ * error here caches "no such book" for five minutes over a blip.
+ */
+describe('GET /api/books/[slug]/chunks — a failing database', () => {
+	it('propagates a failure reading the book instead of answering 404', async () => {
+		const { event } = requestEvent({
+			book: { data: null, error: { message: 'connection terminated' } }
+		});
+
+		await expect(GET(event)).rejects.toMatchObject({ message: 'connection terminated' });
+	});
+
+	it('propagates a failure reading the chunks instead of serving a short window', async () => {
+		// The nastier half: the book read succeeded, so a handler that treated a chunk error
+		// as "no rows" would answer 200 with an empty window — and cache it for five minutes,
+		// against an ETag computed over the emptiness.
+		const { event } = requestEvent({ chunksError: { message: 'statement timeout' } });
+
+		await expect(GET(event)).rejects.toMatchObject({ message: 'statement timeout' });
+	});
+});
+
+describe('GET /api/books/[slug]/chunks — the ETag is over the answer, not the request', () => {
+	it('gives one validator to two requests that clamp to the same range', async () => {
+		// `limit=10` and `limit=5000` are different requests and the same window. The ETag is
+		// computed from the CLAMPED bounds, so both name the same entity and a cache that
+		// stored one can revalidate the other. Computing it from the raw query would mint a
+		// second validator for byte-identical content and quietly halve the hit rate.
+		const asked = await GET(requestEvent({ query: '?from=0&limit=10' }).event);
+		const overAsked = await GET(requestEvent({ query: `?from=0&limit=5000` }).event);
+
+		expect(overAsked.headers.get('etag')).toBe(asked.headers.get('etag'));
+		expect(await body(overAsked)).toEqual(await body(asked));
+	});
+
+	it('gives an empty window its own validator rather than reusing the full one', async () => {
+		const full = await GET(requestEvent({ query: '?from=0&limit=10' }).event);
+		const past = await GET(requestEvent({ query: '?from=999&limit=10' }).event);
+
+		expect(past.status).toBe(200);
+		expect(past.headers.get('etag')).not.toBe(full.headers.get('etag'));
 	});
 });

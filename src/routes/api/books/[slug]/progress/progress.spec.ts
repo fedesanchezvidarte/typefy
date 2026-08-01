@@ -41,6 +41,8 @@ interface MockOptions {
 	chunkCount?: number;
 	/** Chunk indices this user has completed, anywhere in the book. */
 	completed?: readonly number[];
+	/** A failure on the per-user progress read specifically. */
+	progressError?: unknown;
 }
 
 function mockSupabase(options: MockOptions) {
@@ -93,10 +95,14 @@ function mockSupabase(options: MockOptions) {
 			onFulfilled: (value: unknown) => unknown,
 			onRejected?: (reason: unknown) => unknown
 		) =>
-			Promise.resolve({
-				data: (options.completed ?? []).map((index) => ({ chunk_id: chunkId(index) })),
-				error: null
-			}).then(onFulfilled, onRejected);
+			Promise.resolve(
+				options.progressError
+					? { data: null, error: options.progressError }
+					: {
+							data: (options.completed ?? []).map((index) => ({ chunk_id: chunkId(index) })),
+							error: null
+						}
+			).then(onFulfilled, onRejected);
 		return builder;
 	}
 
@@ -290,5 +296,48 @@ describe('GET /api/books/[slug]/progress — caching', () => {
 
 		expect(bad.headers.get('cache-control')).toBe('no-store');
 		expect(missing.headers.get('cache-control')).toBe('no-store');
+	});
+});
+
+/**
+ * The error path. A failure here is cosmetic to the CLIENT — `TypingSession` swallows a bad
+ * response and some completion markers stay missing until the next load — but that is the
+ * client's decision to make, and it can only make it if the endpoint tells the truth. An
+ * error answered as `completedChunkIds: []` would be indistinguishable from "you have
+ * completed nothing here", which is a different and wrong statement.
+ */
+describe('GET /api/books/[slug]/progress — a failing database', () => {
+	it('propagates a failure reading the book instead of answering 404', async () => {
+		const { event } = requestEvent({
+			user: USER,
+			book: { data: null, error: { message: 'connection terminated' } }
+		});
+
+		await expect(GET(event)).rejects.toMatchObject({ message: 'connection terminated' });
+	});
+
+	it('propagates a failure reading progress instead of reporting nothing completed', async () => {
+		const { event } = requestEvent({
+			user: USER,
+			completed: [0, 1],
+			progressError: { message: 'statement timeout' }
+		});
+
+		await expect(GET(event)).rejects.toMatchObject({ message: 'statement timeout' });
+	});
+
+	it('never reaches the progress read for a guest, however broken it is', async () => {
+		// The guest gate sits above both reads, so a database failing on `chunk_progress`
+		// cannot turn a guest's 200 into a 500.
+		const { event, supabase } = requestEvent({
+			user: null,
+			progressError: { message: 'statement timeout' }
+		});
+
+		const response = await GET(event);
+
+		expect(response.status).toBe(200);
+		expect(await body(response)).toEqual({ from: 0, limit: 10, completedChunkIds: [] });
+		expect(supabase.tables).not.toContain('chunk_progress');
 	});
 });
