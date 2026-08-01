@@ -1,6 +1,6 @@
 # ADR-0004 — Typing engine model
 
-**Status:** Accepted (amended 2026-07-20, see below)
+**Status:** Accepted (amended 2026-07-20 and 2026-08-01, see below)
 
 ## Context
 
@@ -53,6 +53,100 @@ Two design decisions made during Phase 1 are folded in as part of the same model
   once fixed, a character carries no visual mark. The `corrected` state remains in the engine — it
   caps raw accuracy, satisfies chunk completion, and enables future error-position features. An
   opt-in "highlight corrections" setting is a candidate for the settings phase.
+
+## Amendment (2026-08-01, Phase 3b implementation — spec #18)
+
+Windowed reads ([ADR-0006](0006-books-chunks-data-model.md)'s Phase 3b amendment) mean the session no
+longer holds the whole text. The engine had assumed it did — `createSession` sized a dense `results`
+array from the chunk list, and "the next chunk" was always in hand. Building the windowed read path
+changed the state model, and the spec mandated recording it here.
+
+### The `awaiting` state, and what it costs
+
+`SessionState.finished: boolean` is replaced by a named `status: 'active' | 'awaiting' | 'finished'`.
+A session enters `awaiting` when it completes a passage whose successor exists in the text
+(`books.chunk_count`) but is not in the loaded **window**.
+
+**`awaiting` is the engine's first state the user cannot leave by typing.** Every prior state of this
+machine transitioned on a keystroke; this one transitions on `window-loaded`, an event from the
+delivery layer. Typing events arriving while `awaiting` return the identical state object — nothing
+enters a log, no metric can move, and nothing is buffered into the chunk that eventually arrives.
+That is a real change to the model this ADR describes, not an implementation detail.
+
+**`activeChunk` becoming nullable is the cost the named state buys down, not something that
+vanished.** It is now `ChunkEngineState | null`, null whenever `status !== 'active'`. The nullability
+is unavoidable: a session with no loaded passage has no chunk state to hold. What the named `status`
+buys is that the nullability is checked in *one* documented place per call site instead of degenerating
+into scattered `activeChunk === null` tests that each have to guess whether null means "waiting" or
+"done" — two conditions that need opposite handling and are indistinguishable from the null alone.
+Recording the trade honestly: one field got weaker so that a boolean pair could not go out of sync.
+
+### `metrics.ts` was touched, and that is a compromise
+
+`computeMetrics` gained a third parameter, `excludeMs`, which discounts dead time from the elapsed
+span before the gross-WPM formula runs. **This puts a delivery-layer concern inside the metrics
+module**, and the 2026-07-20 amendment's framing — metrics as a pure function of a log slice — is now
+one parameter less pure. It is small (defaulted to 0, so every existing caller and test is untouched)
+and it has no effect on `accuracyRaw` or `typedChars`, which carry no time term. But it is a
+concession and it is recorded as one rather than pretended away.
+
+It was still the right trade. The alternative was recomputing WPM in `session.ts` to apply the
+discount there, which puts a second copy of the gross-WPM formula in a second module — the one thing
+`metrics.ts` exists to prevent — or lifting cumulative WPM out of the engine entirely to solve a
+delivery-layer problem, which the spec rejected. A dead-time term on a time-based metric is at least
+about time; a duplicated formula is about nothing.
+
+### How the wait is measured — no clock reached the engine
+
+The pure-reducer rule of the 2026-07-20 amendment holds unbroken: **nothing in `src/lib/engine/` reads
+a clock.** The wait is measured entirely from injected timestamps.
+
+- Entering `awaiting`, `awaitingSince` is stamped from **the completing keystroke event's own
+  timestamp** — the instant the passage finished. The one `ChunkEvent` carrying no timestamp
+  (`restart`) leaves `awaitingSince` null instead, so the wait opens unmeasured rather than at a
+  fabricated instant.
+- `window-loaded` carries its own injected `timestamp`, which closes the wait into the cumulative
+  `awaitingMs`. A window that arrives without the awaited index leaves `awaitingSince` alone rather
+  than restarting it, so a partial delivery cannot erase time already waited.
+- `computeMetrics` subtracts `awaitingMs` from the first→last-stroke span before dividing, floored at
+  zero: a session that waited longer than it typed reports 0 elapsed and 0 WPM, never negative time.
+
+The implementation goes one step further than the design required: `runningMetrics` also discounts the
+**open** wait when an `endTime` is supplied. A UI polling live metrics during a slow fetch would
+otherwise watch WPM decay for a reason that is not the typist's, because `awaitingMs` alone only closes
+the gap after the window lands.
+
+### The session is not re-created per window
+
+An arriving window is *merged* into a `ReadonlyMap<number, Chunk>` keyed by absolute index; the
+session object survives. Re-creating it per window would have been simpler and is wrong: it would
+reset `completedLog`, and `completedLog` is the concatenated keystroke log across passage boundaries —
+which is the definition of the running cumulative WPM this project displays (CONTEXT.md, *WPM*). A
+per-window session would silently redefine the headline metric as "WPM since the last window
+boundary", a number nobody asked for and nobody could have noticed was wrong.
+
+`results` became a sparse `ReadonlyMap<number, ChunkResult>` keyed by absolute index for the same
+reason: the old dense array was sized from the full chunk list. Absolute indices are untouched
+throughout — `activeIndex + 1` on the meta line, `?passage=N`, and the `chunk_id` persisted to
+`chunk_attempts` all still read the same numbers.
+
+### `window-loaded` adopts an authoritative `chunkCount`
+
+The event carries the endpoint's `chunkCount` and the session **always** adopts it, merge path
+included. That is the whole reconciliation mechanism for a re-ingest that changed the book's length
+mid-session: a client holding a stale smaller bound stops ending the session early, and a stale larger
+bound can no longer strand it in permanent `awaiting` — `chunkCount <= activeIndex` while awaiting
+resolves to `finished` and a summary instead of a hang.
+
+### `restart-session` returns to the opening index, not to 0
+
+Previously `restart-session` rebuilt the session at index 0. With windows, index 0 is usually not
+loaded on a resumed session, so restarting a session opened at passage 900 would drop straight into
+`awaiting` for a window nothing is going to request. It now returns to the session's `openingIndex`.
+This is a small **user-visible** change beyond the spec's letter and was approved by the user before
+implementation. It is also what the summary's "Restart session" button already reads as, it keeps
+every needed chunk in hand, and it is identical to the old behaviour for the landing hero and for any
+session opened at passage 1.
 
 ## Pending (post-MVP, already contemplated)
 
