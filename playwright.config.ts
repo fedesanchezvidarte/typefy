@@ -5,6 +5,9 @@ const isCI = !!process.env.CI;
 export default defineConfig({
 	testDir: './e2e',
 	testMatch: '**/*.e2e.{ts,js}',
+	// Retire probe books left behind by a run that never reached its teardown, so every run
+	// starts from the seeded catalog regardless of how the last one ended. See the module.
+	globalSetup: './e2e/support/global-setup.ts',
 	// adapter-vercel's build output requires symlinks that Windows blocks by default,
 	// so local runs use the dev server; CI (Linux) exercises the production build.
 	webServer: isCI
