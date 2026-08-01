@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
-import { getBookBySlug, getHeroBook, listBooks } from './books';
+import { getBookSummaryBySlug, getChunkWindow, getHeroBook, listBooks } from './books';
 
 /**
  * Service tests (spec #7): the injected Supabase client is mocked — a real DB call must
@@ -24,6 +24,8 @@ function mockSupabase(result: { data: unknown; error: unknown }) {
 		};
 	builder.select = record('select');
 	builder.eq = record('eq');
+	builder.gte = record('gte');
+	builder.lt = record('lt');
 	builder.order = record('order');
 	builder.limit = record('limit');
 	builder.maybeSingle = (...args: unknown[]) => {
@@ -151,91 +153,186 @@ describe('listBooks', () => {
 	});
 });
 
-describe('getBookBySlug', () => {
-	const bookRow = {
+describe('getBookSummaryBySlug', () => {
+	const row = {
 		id: 'b0000000-0000-0000-0000-000000000002',
-		slug: 'don-quijote-excerpt',
-		title: 'Don Quijote de la Mancha (fragmento)',
+		slug: 'don-quijote',
+		title: 'Don Quijote de la Mancha',
 		author: 'Miguel de Cervantes',
 		language: 'es',
-		chunk_count: 2,
-		cover_url: null,
-		chunks: [
-			{ id: 'uuid-1', index: 1, content: 'segundo', char_count: 7 },
-			{ id: 'uuid-0', index: 0, content: 'primero', char_count: 7 }
-		]
+		chunk_count: 2000,
+		cover_url: null
 	};
 
-	it('maps a book and its chunks to a full TypeableText, chunks ordered by index', async () => {
-		const { client } = mockSupabase({ data: bookRow, error: null });
-
-		const book = await getBookBySlug(client, 'don-quijote-excerpt');
-
-		expect(book).toEqual({
-			id: 'don-quijote-excerpt',
+	it('maps one book row to a summary, with chunkCount from books.chunk_count', async () => {
+		const { client } = mockSupabase({ data: row, error: null });
+		expect(await getBookSummaryBySlug(client, 'don-quijote')).toEqual({
+			id: 'don-quijote',
 			bookId: 'b0000000-0000-0000-0000-000000000002',
-			title: 'Don Quijote de la Mancha (fragmento)',
+			title: 'Don Quijote de la Mancha',
 			author: 'Miguel de Cervantes',
 			language: 'es',
-			chunkCount: 2,
-			coverUrl: null,
-			chunks: [
-				{ id: 'uuid-0', textId: 'don-quijote-excerpt', index: 0, content: 'primero', charCount: 7 },
-				{ id: 'uuid-1', textId: 'don-quijote-excerpt', index: 1, content: 'segundo', charCount: 7 }
-			]
+			chunkCount: 2000,
+			coverUrl: null
 		});
 	});
 
-	it('maps chunk char_count → charCount and book_id-by-slug into textId', async () => {
-		const { client } = mockSupabase({ data: bookRow, error: null });
-		const book = await getBookBySlug(client, 'don-quijote-excerpt');
-		expect(book?.chunks.every((c) => c.textId === 'don-quijote-excerpt')).toBe(true);
-		expect(book?.chunks[0].charCount).toBe(7);
+	it('never embeds chunks — this is the metadata read that replaced the whole-book one', async () => {
+		const { client, calls } = mockSupabase({ data: row, error: null });
+		await getBookSummaryBySlug(client, 'don-quijote');
+		const select = String(calls.find((c) => c.method === 'select')?.args[0]);
+		expect(select).not.toContain('chunks(');
+		expect(select).not.toContain('content');
 	});
 
 	it('resolves the slug against the books table', async () => {
-		const { client, calls } = mockSupabase({ data: bookRow, error: null });
-		await getBookBySlug(client, 'don-quijote-excerpt');
-		expect(calls.find((c) => c.method === 'eq')?.args).toEqual(['slug', 'don-quijote-excerpt']);
-		expect(calls.find((c) => c.method === 'select')?.args[0]).toContain('chunks(');
+		const { client, calls } = mockSupabase({ data: row, error: null });
+		await getBookSummaryBySlug(client, 'don-quijote');
+		expect(calls.find((c) => c.method === 'from')?.args).toEqual(['books']);
+		expect(calls.find((c) => c.method === 'eq')?.args).toEqual(['slug', 'don-quijote']);
 	});
 
-	it('returns null for an unknown slug (no row)', async () => {
+	it('applies no published_at filter — RLS makes unpublished indistinguishable from unknown', async () => {
+		const { client, calls } = mockSupabase({ data: row, error: null });
+		await getBookSummaryBySlug(client, 'don-quijote');
+		expect(calls.some((c) => JSON.stringify(c.args).includes('published_at'))).toBe(false);
+	});
+
+	it('returns null for an unknown slug (no row) — the route turns that into a 404', async () => {
 		const { client } = mockSupabase({ data: null, error: null });
-		expect(await getBookBySlug(client, 'missing')).toBeNull();
+		expect(await getBookSummaryBySlug(client, 'missing')).toBeNull();
 	});
 
 	it('throws when the database returns an error', async () => {
 		const { client } = mockSupabase({ data: null, error: { message: 'timeout' } });
-		await expect(getBookBySlug(client, 'x')).rejects.toEqual({ message: 'timeout' });
+		await expect(getBookSummaryBySlug(client, 'x')).rejects.toEqual({ message: 'timeout' });
+	});
+});
+
+describe('getChunkWindow', () => {
+	const book = { id: 'don-quijote', bookId: 'b0000000-0000-0000-0000-000000000002' };
+	const rows = [
+		{ id: 'uuid-10', index: 10, content: 'once', char_count: 4 },
+		{ id: 'uuid-9', index: 9, content: 'nine', char_count: 4 }
+	];
+
+	it('maps chunk rows to Chunks with their ABSOLUTE index, ordered by index', async () => {
+		const { client } = mockSupabase({ data: rows, error: null });
+		expect(await getChunkWindow(client, book, 9, 2)).toEqual([
+			{ id: 'uuid-9', textId: 'don-quijote', index: 9, content: 'nine', charCount: 4 },
+			{ id: 'uuid-10', textId: 'don-quijote', index: 10, content: 'once', charCount: 4 }
+		]);
+	});
+
+	it('queries a half-open range on the chunks table: [from, from + limit)', async () => {
+		const { client, calls } = mockSupabase({ data: [], error: null });
+		await getChunkWindow(client, book, 9, 10);
+		expect(calls.find((c) => c.method === 'from')?.args).toEqual(['chunks']);
+		expect(calls.find((c) => c.method === 'eq')?.args).toEqual([
+			'book_id',
+			'b0000000-0000-0000-0000-000000000002'
+		]);
+		expect(calls.find((c) => c.method === 'gte')?.args).toEqual(['index', 9]);
+		expect(calls.find((c) => c.method === 'lt')?.args).toEqual(['index', 19]);
+		expect(calls.find((c) => c.method === 'order')?.args[0]).toBe('index');
+	});
+
+	it('takes bounds as arguments and applies no window policy of its own', async () => {
+		// The clamp lives in src/lib/reading/window.ts; this is the mechanism, so an
+		// arbitrary range must reach the query untouched — that is what makes it testable.
+		const { client, calls } = mockSupabase({ data: [], error: null });
+		await getChunkWindow(client, book, 1500, 4);
+		expect(calls.find((c) => c.method === 'gte')?.args).toEqual(['index', 1500]);
+		expect(calls.find((c) => c.method === 'lt')?.args).toEqual(['index', 1504]);
+	});
+
+	it('returns an empty array without querying for a zero limit — an empty window is not an error', async () => {
+		const { client, calls } = mockSupabase({ data: null, error: { message: 'must not run' } });
+		expect(await getChunkWindow(client, book, 2000, 0)).toEqual([]);
+		expect(calls).toEqual([]);
+	});
+
+	it('returns an empty array when the range holds no rows', async () => {
+		const { client } = mockSupabase({ data: [], error: null });
+		expect(await getChunkWindow(client, book, 1999, 10)).toEqual([]);
+	});
+
+	it('puts the SLUG in textId and the uuid in the query — the two are never interchanged', async () => {
+		const { client } = mockSupabase({ data: rows, error: null });
+		const chunks = await getChunkWindow(client, book, 9, 2);
+		expect(chunks.every((c) => c.textId === 'don-quijote')).toBe(true);
+		expect(chunks.every((c) => c.textId !== book.bookId)).toBe(true);
+	});
+
+	it('throws when the database returns an error', async () => {
+		const { client } = mockSupabase({ data: null, error: { message: 'timeout' } });
+		await expect(getChunkWindow(client, book, 0, 10)).rejects.toEqual({ message: 'timeout' });
 	});
 });
 
 describe('getHeroBook', () => {
 	const bookRow = {
 		id: 'b0000000-0000-0000-0000-000000000002',
-		slug: 'don-quijote-excerpt',
-		title: 'Don Quijote de la Mancha (fragmento)',
+		slug: 'don-quijote',
+		title: 'Don Quijote de la Mancha',
 		author: 'Miguel de Cervantes',
 		language: 'es',
-		chunk_count: 1,
+		chunk_count: 2000,
 		cover_url: null,
 		chunks: [{ id: 'uuid-0', index: 0, content: 'primero', char_count: 7 }]
 	};
 
-	it('resolves the first book in the requested content language, with chunks', async () => {
+	it('resolves the FEATURED book in the requested content language', async () => {
 		const { client, calls } = mockSupabase({ data: bookRow, error: null });
 
 		const book = await getHeroBook(client, 'es');
 
-		expect(book?.id).toBe('don-quijote-excerpt');
-		expect(book?.chunks).toHaveLength(1);
-		expect(calls.find((c) => c.method === 'eq')?.args).toEqual(['language', 'es']);
-		expect(calls.find((c) => c.method === 'limit')?.args).toEqual([1]);
-		expect(calls.find((c) => c.method === 'select')?.args[0]).toContain('chunks(');
+		expect(book?.id).toBe('don-quijote');
+		const eqs = calls.filter((c) => c.method === 'eq').map((c) => c.args);
+		expect(eqs).toContainEqual(['language', 'es']);
+		expect(eqs).toContainEqual(['featured', true]);
 	});
 
-	it('returns null when no book exists in that language', async () => {
+	it('no longer selects the alphabetically first title — featured is the selection rule', async () => {
+		const { client, calls } = mockSupabase({ data: bookRow, error: null });
+		await getHeroBook(client, 'es');
+		expect(calls.find((c) => c.method === 'order')?.args[0]).not.toBe('title');
+	});
+
+	it('loads exactly one chunk, index 0', async () => {
+		const { client, calls } = mockSupabase({ data: bookRow, error: null });
+		const book = await getHeroBook(client, 'es');
+		expect(book?.chunks).toEqual([
+			{ id: 'uuid-0', textId: 'don-quijote', index: 0, content: 'primero', charCount: 7 }
+		]);
+		expect(calls.filter((c) => c.method === 'eq').map((c) => c.args)).toContainEqual([
+			'chunks.index',
+			0
+		]);
+	});
+
+	it('reports chunkCount 1, NOT the book-wide chunk_count', async () => {
+		// Load-bearing: LandingHero loops on `status === "finished"`, which only fires when
+		// nextIndex >= chunkCount. A truncated book reporting 2000 would try to open a chunk
+		// it does not hold on the very first completion. The hero is a one-passage typeable
+		// text drawn from a book — not a book with 1,999 chunks missing.
+		const { client } = mockSupabase({ data: bookRow, error: null });
+		const book = await getHeroBook(client, 'es');
+		expect(book?.chunkCount).toBe(1);
+		expect(book?.chunkCount).not.toBe(bookRow.chunk_count);
+	});
+
+	it('reports chunkCount 0 when the featured book has no chunk at index 0', async () => {
+		// The write window of a non-transactional ingest: chunk_count is upserted before the
+		// rows. The hero must report what it actually holds, not what the column claims.
+		const { client } = mockSupabase({ data: { ...bookRow, chunks: [] }, error: null });
+		const book = await getHeroBook(client, 'es');
+		expect(book?.chunks).toEqual([]);
+		expect(book?.chunkCount).toBe(0);
+	});
+
+	it('returns null when no featured book exists in that language', async () => {
+		// The landing load falls back to the other language rather than erroring.
 		const { client } = mockSupabase({ data: null, error: null });
 		expect(await getHeroBook(client, 'en')).toBeNull();
 	});
