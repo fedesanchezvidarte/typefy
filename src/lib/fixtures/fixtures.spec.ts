@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { donQuijoteExcerpt, fixtureTexts, getFixtureText, prideAndPrejudiceExcerpt } from './index';
+import {
+	donQuijoteExcerpt,
+	fixtureTexts,
+	getFixtureText,
+	prideAndPrejudiceExcerpt,
+	tortoiseAndHare
+} from './index';
 
 /**
  * Fixture validation per spec #5: hand-chunked to ADR-0005 size targets
@@ -70,13 +76,68 @@ describe('ES fixture required characters (spec #5)', () => {
 	});
 });
 
+/*
+ * The short fixture (spec #17 §9) is deliberately outside the 4-6 chunk rule above: its entire
+ * purpose is to be smaller than 3b's 10-chunk window, so the rule that keeps the other two
+ * honest is the wrong rule for it. It keeps every other invariant.
+ */
+describe('short fixture (The Tortoise and the Hare)', () => {
+	it('is 2-3 chunks, so it is smaller than one window', () => {
+		expect(tortoiseAndHare.chunks.length).toBeGreaterThanOrEqual(2);
+		expect(tortoiseAndHare.chunks.length).toBeLessThanOrEqual(3);
+		expect(tortoiseAndHare.chunkCount).toBe(tortoiseAndHare.chunks.length);
+	});
+
+	it('has consistent ids, indexes and counts', () => {
+		tortoiseAndHare.chunks.forEach((chunk, i) => {
+			expect(chunk.index).toBe(i);
+			expect(chunk.id).toBe(`${tortoiseAndHare.id}-${i}`);
+			expect(chunk.textId).toBe(tortoiseAndHare.id);
+			expect(chunk.charCount).toBe(Array.from(chunk.content).length);
+		});
+	});
+
+	it('keeps every chunk in the 400-600 target', () => {
+		for (const chunk of tortoiseAndHare.chunks) {
+			expect(chunk.charCount).toBeGreaterThanOrEqual(400);
+			expect(chunk.charCount).toBeLessThanOrEqual(600);
+		}
+	});
+
+	it('never cuts a sentence', () => {
+		for (const chunk of tortoiseAndHare.chunks) {
+			expect(chunk.content).toMatch(SENTENCE_END);
+		}
+	});
+
+	it('contains only the allowed character set', () => {
+		for (const chunk of tortoiseAndHare.chunks) {
+			expect(chunk.content).toMatch(EN_ALLOWED);
+		}
+	});
+
+	/*
+	 * `getHeroBook` picks the first book by title within a language, so a title sorting before
+	 * the existing English fixture would silently steal the landing hero. 3b (#18) makes the
+	 * hero explicit; until then this ordering is load-bearing.
+	 */
+	it('sorts after the existing English fixture, leaving the landing hero unchanged', () => {
+		const english = fixtureTexts
+			.filter((text) => text.language === 'en')
+			.map((text) => text.title)
+			.sort();
+		expect(english[0]).toBe(prideAndPrejudiceExcerpt.title);
+	});
+});
+
 describe('fixture registry', () => {
-	it('exposes both texts in picker order with one text per content language', () => {
-		expect(fixtureTexts.map((t) => t.language)).toEqual(['en', 'es']);
+	it('exposes the texts in picker order, covering both content languages', () => {
+		expect(fixtureTexts.map((t) => t.language)).toEqual(['en', 'es', 'en']);
 	});
 
 	it('looks texts up by id', () => {
 		expect(getFixtureText('don-quijote-excerpt')).toBe(donQuijoteExcerpt);
+		expect(getFixtureText('tortoise-and-hare')).toBe(tortoiseAndHare);
 		expect(getFixtureText('missing')).toBeUndefined();
 	});
 });

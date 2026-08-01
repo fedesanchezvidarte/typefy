@@ -4,9 +4,12 @@ import { expect, test, type Page } from '@playwright/test';
 // which Playwright's transpiler erases.
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
 import { donQuijoteExcerpt } from '../src/lib/fixtures/es';
+import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
+import { fixtureTexts } from '../src/lib/fixtures/index';
 
 const EN_ID = prideAndPrejudiceExcerpt.id;
 const ES_ID = donQuijoteExcerpt.id;
+const SHORT_ID = tortoiseAndHare.id;
 const EN_CHUNK_0 = prideAndPrejudiceExcerpt.chunks[0].content;
 const ES_CHUNK_0 = donQuijoteExcerpt.chunks[0].content;
 
@@ -41,21 +44,36 @@ async function pickText(page: Page, textId: string, path = '/type') {
 }
 
 test.describe('library grid', () => {
-	test('renders both seeded books as cards; choosing one shows the surface with focus ready', async ({
+	test('renders every seeded book as a card; choosing one shows the surface with focus ready', async ({
 		page
 	}) => {
 		await page.goto('/type');
 		await expect(page.getByTestId('text-picker')).toBeVisible();
 		await expect(page.getByTestId(`text-picker-option-${EN_ID}`)).toBeVisible();
 		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).toBeVisible();
+		await expect(page.getByTestId(`text-picker-option-${SHORT_ID}`)).toBeVisible();
 
-		// Both seeded books have no curated cover art → generated typographic covers.
-		await expect(page.getByTestId('generated-cover')).toHaveCount(2);
+		// Counted from the fixtures rather than hardcoded: spec #17 added a third seeded book
+		// and this assertion is the kind that silently rots into "the number I saw that day".
+		// No seeded book has curated cover art, so each renders a generated typographic cover.
+		// The full-length books ingested by spec #17 are unpublished, so RLS keeps them out of
+		// the catalog entirely — the grid is exactly the seeded fixtures and nothing else.
+		await expect(page.getByTestId('generated-cover')).toHaveCount(fixtureTexts.length);
 
 		await pickText(page, EN_ID);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
 		await expect(meta(page)).toContainText('Passage 1 of 6');
 		await expect(page.getByTestId('typing-input')).toBeFocused();
+	});
+
+	/*
+	 * The short book (spec #17 §9) exists to be smaller than 3b's 10-chunk window. Until that
+	 * lands there is no window to be smaller than, so what this pins now is the part that must
+	 * not change under it: the book opens, reports its real length, and is completable.
+	 */
+	test('the short book opens and reports its full length', async ({ page }) => {
+		await pickText(page, SHORT_ID);
+		await expect(meta(page)).toContainText(`Passage 1 of ${tortoiseAndHare.chunkCount}`);
 	});
 
 	test('cards are reachable keyboard-only (Tab, then Enter starts typing)', async ({ page }) => {

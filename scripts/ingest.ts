@@ -96,9 +96,19 @@ function parseArguments(argv: readonly string[]): Options {
 	};
 }
 
+/** A refusal the operator should read, as opposed to a crash. */
+class IngestError extends Error {}
+
+/**
+ * Stops the run with a message.
+ *
+ * Throws rather than calling `process.exit`. Exiting from inside async work while the Supabase
+ * client still holds open handles aborts Node on Windows with a libuv assertion, which replaced
+ * the intended exit code 1 with 127 — so a refusal looked like a crash, and a CI check on the
+ * exit code would have read it as neither success nor a clean refusal.
+ */
 function fail(message: string): never {
-	console.error(`\n${message}\n`);
-	process.exit(1);
+	throw new IngestError(message);
 }
 
 // ---------------------------------------------------------------------------
@@ -261,11 +271,25 @@ async function writeBook(
 			.select('id')
 			.eq('book_id', bookId)
 			.gte('index', chunks.length);
+		if (doomed.error) {
+			fail(`${entry.slug}: could not list the chunks at risk — ${doomed.error.message}`);
+		}
 		const doomedIds = (doomed.data ?? []).map((row) => row.id as string);
-		const { data: attempts } = await client
+
+		// A failure here must be fatal, never swallowed. This count IS the safety mechanism, and
+		// an error read as an empty result reports "deleting this is free" about a chunk that
+		// may carry a user's history — the one direction a safety check must never fail in.
+		// (It did exactly that until `service_role` was granted SELECT on chunk_attempts.)
+		const { data: attempts, error: attemptsError } = await client
 			.from('chunk_attempts')
 			.select('user_id')
 			.in('chunk_id', doomedIds);
+		if (attemptsError) {
+			fail(
+				`${entry.slug}: could not count the attempts at risk — ${attemptsError.message}\n` +
+					`  Refusing to delete chunks without knowing what it would destroy.`
+			);
+		}
 		const users = new Set((attempts ?? []).map((row) => row.user_id as string));
 
 		const cost =
@@ -314,71 +338,85 @@ async function confirm(question: string): Promise<boolean> {
 // Main
 // ---------------------------------------------------------------------------
 
-const options = parseArguments(process.argv.slice(2));
+async function main(): Promise<void> {
+	const options = parseArguments(process.argv.slice(2));
 
-// 1. Manifest first — before any credential is read.
-if (!existsSync(MANIFEST)) fail(`No manifest at ${MANIFEST}.`);
-const manifest = parseManifest(readFileSync(MANIFEST, 'utf8'));
-if (!manifest.ok) {
-	fail(`Manifest is invalid:\n${manifest.problems.map((problem) => `  - ${problem}`).join('\n')}`);
-}
-
-const selected = options.slug
-	? manifest.books.filter((book) => book.slug === options.slug)
-	: manifest.books;
-if (selected.length === 0) fail(`No manifest entry with slug "${options.slug}".`);
-
-// 2. Pure pipeline. A disallowed character stops the run before anything is written — the
-//    report says exactly which character and where.
-console.log(`Preparing ${selected.length} book(s)…`);
-const prepared: PreparedBook[] = [];
-for (const entry of selected) {
-	console.log(`\n${entry.slug}`);
-	const book = await prepare(entry, options);
-	const path = writeReport(book);
-	console.log(`  ${book.chunks.length} chunks; report → ${path.replace(ROOT, '.')}`);
-	if (book.disallowed.length > 0) {
-		const summary = book.disallowed
-			.map((entry) => `${entry.codePoint} (${entry.occurrences}x)`)
-			.join(', ');
+	// 1. Manifest first — before any credential is read.
+	if (!existsSync(MANIFEST)) fail(`No manifest at ${MANIFEST}.`);
+	const manifest = parseManifest(readFileSync(MANIFEST, 'utf8'));
+	if (!manifest.ok) {
 		fail(
-			`${entry.slug}: ${book.disallowed.length} disallowed character(s): ${summary}\n` +
-				`  See the report. Each one would make its passage impossible to complete.`
+			`Manifest is invalid:\n${manifest.problems.map((problem) => `  - ${problem}`).join('\n')}`
 		);
 	}
-	prepared.push(book);
-}
 
-if (options.dryRun) {
-	console.log('\n--dry-run: reports written, database untouched.');
-	process.exit(0);
-}
+	const selected = options.slug
+		? manifest.books.filter((book) => book.slug === options.slug)
+		: manifest.books;
+	if (selected.length === 0) fail(`No manifest entry with slug "${options.slug}".`);
 
-// 3. Credentials, only now.
-loadEnvFile(ENV_FILE);
-const { url, key } = credentialsFor(options.target);
+	// 2. Pure pipeline. A disallowed character stops the run before anything is written — the
+	//    report says exactly which character and where.
+	console.log(`Preparing ${selected.length} book(s)…`);
+	const prepared: PreparedBook[] = [];
+	for (const entry of selected) {
+		console.log(`\n${entry.slug}`);
+		const book = await prepare(entry, options);
+		const path = writeReport(book);
+		console.log(`  ${book.chunks.length} chunks; report → ${path.replace(ROOT, '.')}`);
+		if (book.disallowed.length > 0) {
+			const summary = book.disallowed
+				.map((entry) => `${entry.codePoint} (${entry.occurrences}x)`)
+				.join(', ');
+			fail(
+				`${entry.slug}: ${book.disallowed.length} disallowed character(s): ${summary}\n` +
+					`  See the report. Each one would make its passage impossible to complete.`
+			);
+		}
+		prepared.push(book);
+	}
 
-// 4. Say what will happen before doing it.
-console.log(`\nTarget: ${options.target} (${url})`);
-for (const book of prepared) {
-	console.log(
-		`  ${book.entry.slug}: ${book.chunks.length} chunks${options.publish ? ' + publish' : ''}`
-	);
-}
-if (options.target === 'prod' && !options.yes) {
-	if (!(await confirm('\nWrite these to PRODUCTION?'))) {
-		console.log('Aborted; nothing written.');
+	if (options.dryRun) {
+		console.log('\n--dry-run: reports written, database untouched.');
 		process.exit(0);
 	}
+
+	// 3. Credentials, only now.
+	loadEnvFile(ENV_FILE);
+	const { url, key } = credentialsFor(options.target);
+
+	// 4. Say what will happen before doing it.
+	console.log(`\nTarget: ${options.target} (${url})`);
+	for (const book of prepared) {
+		console.log(
+			`  ${book.entry.slug}: ${book.chunks.length} chunks${options.publish ? ' + publish' : ''}`
+		);
+	}
+	if (options.target === 'prod' && !options.yes) {
+		if (!(await confirm('\nWrite these to PRODUCTION?'))) {
+			console.log('Aborted; nothing written.');
+			process.exit(0);
+		}
+	}
+
+	// 5. Write.
+	const client = createClient(url, key, { auth: { persistSession: false } });
+	for (const book of prepared) {
+		await writeBook(client, book, options);
+		console.log(`  wrote ${book.entry.slug}`);
+	}
+
+	console.log(
+		`\nDone. ${options.publish ? 'Published.' : 'Unpublished — run with --publish once the report is reviewed.'}`
+	);
 }
 
-// 5. Write.
-const client = createClient(url, key, { auth: { persistSession: false } });
-for (const book of prepared) {
-	await writeBook(client, book, options);
-	console.log(`  wrote ${book.entry.slug}`);
-}
-
-console.log(
-	`\nDone. ${options.publish ? 'Published.' : 'Unpublished — run with --publish once the report is reviewed.'}`
-);
+main().catch((error) => {
+	// A refusal prints its message; anything else is a genuine crash and keeps its stack.
+	if (error instanceof IngestError) {
+		console.error(`\n${error.message}\n`);
+	} else {
+		console.error(error);
+	}
+	process.exitCode = 1;
+});
