@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
+import type { BookActivity } from '$lib/types';
 
 /**
  * Progress read service (spec #12, ADR-0010): plain single-table reads against the two
@@ -45,26 +46,38 @@ export async function getCompletedChunkIds(
 }
 
 /**
- * Book-lifetime completion counts for every book this user has touched, keyed by `books.id`
- * (`TypeableTextSummary.bookId`, not the slug). Books absent from the map have no
+ * Book-lifetime activity for every book this user has touched, keyed by `books.id`
+ * (`TypeableTextSummary.bookId`, **never** the slug). Books absent from the map have no
  * `book_progress` row at all — the caller renders 0 rather than treating absence as an error.
  *
- * A book the user has only attempted without completing anything is present with the value
- * 0, since the trigger writes `chunks_completed = 0` on the first incomplete attempt. Both
+ * A book the user has only attempted without completing anything is present with
+ * `chunksCompleted: 0`, since the trigger writes that on the first incomplete attempt. Both
  * cases collapse to the same rendered 0, which is why the map needs no third state.
+ *
+ * `last_active_at` rides along (spec #19 §5) so the library can order its continue-reading
+ * section: it is **the same single query**, one column wider, not a second round trip. The
+ * ordering and the completed-book exclusion deliberately do NOT happen here — the exclusion
+ * needs `books.chunk_count`, which PostgREST cannot compare against across tables, and
+ * ordering before the exclusion would silently return fewer books than asked for. That
+ * selection is `selectContinueReading`, over data the load already holds.
  */
-export async function getBookCompletionCounts(
+export async function getBookActivity(
 	client: Client,
 	userId: string
-): Promise<ReadonlyMap<string, number>> {
+): Promise<ReadonlyMap<string, BookActivity>> {
 	const { data, error } = await client
 		.from('book_progress')
-		.select('book_id, chunks_completed')
+		.select('book_id, chunks_completed, last_active_at')
 		.eq('user_id', userId);
 	if (error) {
 		throw error;
 	}
-	return new Map(data.map((row) => [row.book_id, row.chunks_completed]));
+	return new Map(
+		data.map((row) => [
+			row.book_id,
+			{ chunksCompleted: row.chunks_completed, lastActiveAt: row.last_active_at }
+		])
+	);
 }
 
 /**
