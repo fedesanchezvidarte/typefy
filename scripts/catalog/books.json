@@ -1,5 +1,6 @@
 {
 	"$comment": "The catalog's source of truth (spec #17 §2). Ingestion reads this and never invents metadata. Each entry's sourceUrl and license are verified by hand against the source; a cover, when present, requires coverLicense and coverSource because Gutenberg's text is public domain but its scanned cover art often is not. Add a book: add an entry, run `npm run ingest -- --slug <slug> --target local --dry-run`, read the committed report, then ingest and publish.",
+	"$coverComment": "Covers (spec #19 §2) are supplied, never generated or transformed by ingestion. Each one was located on Wikimedia Commons, its licence read from that file's own description page, and the file fetched at a Commons-rendered width that already satisfies the 2:3 tolerance, the byte limit and the minimum width — no local cropping and no re-encoding. A book whose art could not be verified as freely licensed, or whose only available rendition failed validation, simply has no `cover` entry and renders GeneratedCover. A mixed shelf is the intended end state, not a gap.",
 	"books": [
 		{
 			"slug": "pride-and-prejudice",
@@ -14,6 +15,75 @@
 			}
 		},
 		{
+			"slug": "frankenstein",
+			"title": "Frankenstein; or, The Modern Prometheus",
+			"author": "Mary Wollstonecraft Shelley",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/84/pg84.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "You will rejoice to hear that no disaster"
+			},
+			"cover": "scripts/catalog/covers/frankenstein.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Christie%27s_auction_scan_of_Frankenstein_1818.jpg"
+		},
+		{
+			"slug": "the-time-machine",
+			"title": "The Time Machine",
+			"author": "H. G. Wells",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/35/pg35.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "The Time Traveller (for so it will be convenient"
+			}
+		},
+		{
+			"slug": "a-christmas-carol",
+			"title": "A Christmas Carol",
+			"author": "Charles Dickens",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/46/pg46.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "MARLEY was dead: to begin with"
+			},
+			"cover": "scripts/catalog/covers/a-christmas-carol.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Charles_Dickens-A_Christmas_Carol-Cloth-First_Edition_1843.jpg"
+		},
+		{
+			"slug": "dr-jekyll-and-mr-hyde",
+			"title": "The Strange Case of Dr. Jekyll and Mr. Hyde",
+			"author": "Robert Louis Stevenson",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/43/pg43.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Mr. Utterson the lawyer was a man of a rugged"
+			},
+			"cover": "scripts/catalog/covers/dr-jekyll-and-mr-hyde.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Jekyll_and_Hyde_Title.jpg"
+		},
+		{
+			"slug": "alice-in-wonderland",
+			"title": "Alice's Adventures in Wonderland",
+			"author": "Lewis Carroll",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/11/pg11.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Alice was beginning to get very tired of sitting"
+			}
+		},
+		{
 			"slug": "don-quijote",
 			"title": "Don Quijote",
 			"author": "Miguel de Cervantes Saavedra",
@@ -23,7 +93,78 @@
 			"featured": true,
 			"cleaning": {
 				"startAtMarker": "En un lugar de la Mancha"
+			},
+			"cover": "scripts/catalog/covers/don-quijote.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:El_ingenioso_hidalgo_don_Quijote_de_la_Mancha.jpg"
+		},
+		{
+			"slug": "niebla",
+			"title": "Niebla",
+			"author": "Miguel de Unamuno",
+			"language": "es",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/49836/pg49836.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Al aparecer Augusto a la puerta de su casa",
+				"endMarker": "ÍNDICE"
+			},
+			"cover": "scripts/catalog/covers/niebla.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:1914,_Niebla_(nivola),_editoral_Renacimiento,_Miguel_de_Unamuno.jpg"
+		},
+		{
+			"slug": "trafalgar",
+			"title": "Trafalgar",
+			"author": "Benito Pérez Galdós",
+			"language": "es",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/16961/pg16961.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Se me permitirá que antes de referir",
+				"endMarker": "FIN DE TRAFALGAR"
 			}
+		},
+		{
+			"slug": "marianela",
+			"title": "Marianela",
+			"author": "Benito Pérez Galdós",
+			"language": "es",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/17340/pg17340.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Se puso el sol"
+			}
+		},
+		{
+			"slug": "el-buscon",
+			"title": "Historia de la vida del Buscón",
+			"author": "Francisco de Quevedo",
+			"language": "es",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/32315/pg32315.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Yo, señora, soy de Segovia"
+			}
+		},
+		{
+			"slug": "lazarillo-de-tormes",
+			"title": "La vida de Lazarillo de Tormes",
+			"author": "Anónimo",
+			"language": "es",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/320/pg320.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Yo por bien tengo que cosas tan señaladas"
+			},
+			"cover": "scripts/catalog/covers/lazarillo-de-tormes.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Lazarillo2.jpg"
 		}
 	]
 }
