@@ -165,8 +165,20 @@ test.describe('first_incomplete_chunk_index', () => {
 	test.afterAll(async () => {
 		// The probe books cannot be torn down — the service role has no DELETE grant on `books`,
 		// deliberately, because deleting one cascades away every user's attempts and rollups.
-		// Deleting the users is enough: chunk_attempts and both rollups cascade with them.
-		await service.from('books').update({ published_at: null }).eq('id', unpublishedBookId);
+		// Deleting the users is enough for the PROGRESS rows: chunk_attempts and both rollups
+		// cascade with them.
+		//
+		// But the books themselves must also be RETIRED, and that means BOTH of them. The
+		// published probe is a real, world-readable catalog entry for as long as it stays
+		// published: `typing.e2e.ts` asserts the grid holds exactly the seeded fixtures, so a
+		// probe left behind here fails a spec in another FILE, on the next run, with an
+		// off-by-one card count and no hint of where the extra book came from. Unpublishing is
+		// the whole teardown a book gets (see `support/probe-books.ts`), and it has to cover
+		// every book this spec published, not only the one whose published state it toggled.
+		await service
+			.from('books')
+			.update({ published_at: null })
+			.in('id', [bookId, unpublishedBookId]);
 		await deleteUsers(alice.id, bob.id);
 	});
 
