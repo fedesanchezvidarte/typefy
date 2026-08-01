@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { applySessionEvent, createSession } from '$lib/engine/session';
+	import { applySessionEvent, createSession, loadedChunks } from '$lib/engine/session';
 	import type { SessionEvent, SessionState } from '$lib/engine/session';
 	import type { TypeableText } from '$lib/types';
 	import TypingSurface from '$lib/components/typing/TypingSurface.svelte';
@@ -17,12 +17,21 @@
 	 * engine as the typing screen but shows no metrics and never reaches a
 	 * summary — completing the final passage loops back to the first. A demo
 	 * that explains the product by being the product.
+	 *
+	 * `book.chunkCount` is read from the hero book rather than written as `1`:
+	 * `getHeroBook` sets it, and hardcoding it here would fabricate a length the
+	 * loop depends on. The hero is the one place a whole `TypeableText` is still
+	 * legitimate (spec #18) — one chunk, no window, so the session can never
+	 * enter `awaiting` and `activeChunk` is never null in practice. The guard
+	 * below is the type-level statement of that, not a fallback with behaviour.
 	 */
-	let session = $state.raw<SessionState>(untrack(() => createSession(book)));
+	let session = $state.raw<SessionState>(
+		untrack(() => createSession(loadedChunks(book.chunks, book.chunkCount)))
+	);
 
 	function dispatch(event: SessionEvent) {
 		let next = applySessionEvent(session, event);
-		if (next.finished) {
+		if (next.status === 'finished') {
 			next = applySessionEvent(next, { type: 'restart-session' }); // loop, no summary
 		}
 		session = next;
@@ -30,13 +39,15 @@
 </script>
 
 <div class="flex w-full justify-center" data-testid="landing-hero">
-	<TypingSurface
-		text={session.activeChunk.text}
-		display={session.activeChunk.display}
-		cursor={session.activeChunk.cursor}
-		passageKey={session.activeIndex}
-		onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}
-		onBackspace={(timestamp) => dispatch({ type: 'backspace', timestamp })}
-		onRestartChunk={() => dispatch({ type: 'restart-chunk' })}
-	/>
+	{#if session.activeChunk}
+		<TypingSurface
+			text={session.activeChunk.text}
+			display={session.activeChunk.display}
+			cursor={session.activeChunk.cursor}
+			passageKey={session.activeIndex}
+			onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}
+			onBackspace={(timestamp) => dispatch({ type: 'backspace', timestamp })}
+			onRestartChunk={() => dispatch({ type: 'restart-chunk' })}
+		/>
+	{/if}
 </div>

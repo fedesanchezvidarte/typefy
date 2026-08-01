@@ -18,10 +18,16 @@
 
 <!-- Fresh session per book: keying on the slug remounts the whole flow on navigation.
      Deliberately keyed on the slug and NOT on `startIndex`, so a `?passage=N` change
-     does not remount and discard an in-flight session. -->
+     does not remount and discard an in-flight session.
+
+     `data.window` is the FIRST window only (spec #18). Windows 2..n never come back
+     through this load — `TypingSession` fetches them from the chunks endpoint into its
+     own state, because any load invalidation here would re-run the book read and
+     re-serialise mid-passage (spec §6). -->
 {#key data.book.id}
 	<TypingSession
 		book={data.book}
+		window={data.window}
 		startIndex={data.startIndex}
 		chunksCompleted={data.chunksCompleted}
 		completedChunkIds={data.completedChunkIds}

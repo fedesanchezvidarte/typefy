@@ -1,8 +1,8 @@
 import { page, userEvent } from 'vitest/browser';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
-import type { TypeableText } from '$lib/types';
+import type { Chunk, ChunkWindow, TypeableTextSummary } from '$lib/types';
 import { ATTEMPT_BUFFER_KEY, type BufferedChunkAttempt } from '$lib/progress/buffer';
 import TypingSession from './TypingSession.svelte';
 
@@ -20,6 +20,14 @@ const backfillChunkAttempt = vi.hoisted(() => vi.fn());
 const getBrowserSupabase = vi.hoisted(() => vi.fn(() => ({ __mock: 'supabase-client' })));
 const goto = vi.hoisted(() => vi.fn());
 const invalidateAll = vi.hoisted(() => vi.fn());
+
+/**
+ * The window path is a plain `fetch` to a first-party endpoint — NOT a Supabase client call
+ * (spec #18 §9, the guest bundle guarantee). So the seam is `fetch` itself, stubbed globally
+ * rather than injected, which is also the only way to prove the component issues nothing at
+ * all when there is nothing to fetch.
+ */
+const fetchMock = vi.hoisted(() => vi.fn<typeof fetch>());
 
 vi.mock('$lib/supabase/browser', () => ({ getBrowserSupabase }));
 // `backfillChunkAttempt` belongs in the factory even though this component never calls it:
@@ -65,24 +73,54 @@ function seedBufferEntry(over: Partial<BufferedChunkAttempt> = {}): BufferedChun
 	return entry;
 }
 
-/** Tiny books: a passage of `a b` completes in three keystrokes, one of them a word boundary. */
-function makeBook(contents: readonly string[]): TypeableText {
+/**
+ * Book METADATA only. Since spec #18 the component is never handed a whole book: the text
+ * arrives as `ChunkWindow`s, and `chunkCount` — the book's real length — is what tells the
+ * session whether there is more of it than it currently holds.
+ */
+function makeBook(chunkCount: number): TypeableTextSummary {
 	return {
 		id: 'test-book',
 		bookId: 'book-uuid',
 		title: 'Test Book',
 		author: 'Test Author',
 		language: 'en',
-		chunkCount: contents.length,
-		coverUrl: null,
-		chunks: contents.map((content, index) => ({
-			id: `chunk-${index}`,
-			textId: 'test-book',
-			index,
-			content,
-			charCount: Array.from(content).length
-		}))
+		chunkCount,
+		coverUrl: null
 	};
+}
+
+/** Chunks at ABSOLUTE indices `from..from + contents.length - 1`. */
+function makeChunks(contents: readonly string[], from = 0): Chunk[] {
+	return contents.map((content, offset) => ({
+		id: `chunk-${from + offset}`,
+		textId: 'test-book',
+		index: from + offset,
+		content,
+		charCount: Array.from(content).length
+	}));
+}
+
+/** A window of `contents` opening at `from`, over a book `chunkCount` passages long. */
+function makeWindow(contents: readonly string[], chunkCount: number, from = 0): ChunkWindow {
+	return { from, chunks: makeChunks(contents, from), chunkCount };
+}
+
+/**
+ * The two props that used to be one. A book short enough to hold whole: every passage is
+ * loaded, `chunkCount` equals what the window carries, so nothing here can prefetch or
+ * await — which is exactly what every test written before spec #18 assumed.
+ */
+function loaded(contents: readonly string[]) {
+	return { book: makeBook(contents.length), window: makeWindow(contents, contents.length) };
+}
+
+/**
+ * A book LONGER than its first window: `contents` is loaded, `chunkCount` says there is more.
+ * This is the shape that makes the prefetch, `awaiting` and the end-of-window state reachable.
+ */
+function windowed(contents: readonly string[], chunkCount: number) {
+	return { book: makeBook(chunkCount), window: makeWindow(contents, chunkCount) };
 }
 
 /** `n` two-word passages: 'a b', 'c d', … — enough to complete without a wall of keystrokes. */
@@ -91,6 +129,27 @@ function passages(n: number): string[] {
 		{ length: n },
 		(_, i) => `${String.fromCharCode(97 + i * 2)} ${String.fromCharCode(98 + i * 2)}`
 	);
+}
+
+/** A 200 with a JSON body, the way the two window endpoints answer. */
+function jsonResponse(body: unknown): Response {
+	return new Response(JSON.stringify(body), {
+		status: 200,
+		headers: { 'content-type': 'application/json' }
+	});
+}
+
+/** The chunks-endpoint requests issued so far, in order. */
+function chunkRequests(): string[] {
+	return fetchMock.mock.calls
+		.map(([input]) => String(input))
+		.filter((url) => url.includes('/chunks?'));
+}
+
+function progressRequests(): string[] {
+	return fetchMock.mock.calls
+		.map(([input]) => String(input))
+		.filter((url) => url.includes('/progress?'));
 }
 
 /** Real keystrokes through the hidden input the typing surface owns — no prop shortcuts. */
@@ -124,17 +183,27 @@ beforeEach(() => {
 	getBrowserSupabase.mockClear();
 	goto.mockClear();
 	invalidateAll.mockClear();
+	// Rejecting by default: a test that does not set up a window is asserting that none is
+	// asked for, and if one is asked for anyway the component must swallow it rather than
+	// surface it. Both properties are checked by this default, not hidden by it.
+	fetchMock.mockReset();
+	fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+	vi.stubGlobal('fetch', fetchMock);
 	// These run in a real browser against a real `localStorage`, and the component now
 	// enqueues into it. Without this, one test's buffered entries survive into the next and
 	// change what its drain trigger does — a shared-state leak, not a flake.
 	localStorage.removeItem(ATTEMPT_BUFFER_KEY);
 });
 
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
 describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)', () => {
 	it('shows the persisted book-lifetime percentage when resuming mid-book, not 0%', async () => {
 		// Resuming at passage 7 of 11 with 6 passages already persisted: 6/11 = 55%.
 		render(TypingSession, {
-			book: makeBook(passages(11)),
+			...loaded(passages(11)),
 			startIndex: 6,
 			chunksCompleted: 6,
 			completedChunkIds: ['chunk-0', 'chunk-1', 'chunk-2', 'chunk-3', 'chunk-4', 'chunk-5'],
@@ -148,7 +217,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 
 	it('advances the displayed figure when a not-previously-completed passage is completed, with no reload', async () => {
 		render(TypingSession, {
-			book: makeBook(passages(4)),
+			...loaded(passages(4)),
 			startIndex: 1,
 			chunksCompleted: 1,
 			completedChunkIds: ['chunk-0'],
@@ -170,7 +239,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 		// Every passage of this book is already persisted as complete: the figure starts at
 		// 100% and re-typing must leave it there, not push it past.
 		render(TypingSession, {
-			book: makeBook(passages(3)),
+			...loaded(passages(3)),
 			startIndex: 0,
 			chunksCompleted: 3,
 			completedChunkIds: ['chunk-0', 'chunk-1', 'chunk-2'],
@@ -196,7 +265,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 		// A stale or inconsistent rollup must not render 167%: the figure is clamped, and a
 		// completion inside the session cannot push it past the clamp either.
 		render(TypingSession, {
-			book: makeBook(passages(3)),
+			...loaded(passages(3)),
 			startIndex: 0,
 			chunksCompleted: 5,
 			completedChunkIds: ['chunk-0', 'chunk-1', 'chunk-2'],
@@ -216,7 +285,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 
 	it('degrades a guest to the session-relative figure and attempts no write at all', async () => {
 		render(TypingSession, {
-			book: makeBook(passages(4)),
+			...loaded(passages(4)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -248,7 +317,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'permanent' });
 
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -278,7 +347,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 
 	it('shows no notice on the summary when every insert saved', async () => {
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -305,7 +374,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		const hrefBefore = window.location.href;
 
 		render(TypingSession, {
-			book: makeBook(passages(3)),
+			...loaded(passages(3)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -349,7 +418,7 @@ describe('TypingSession.svelte — the in-session drain trigger (spec #15 §4, �
 		const buffered = seedBufferEntry();
 
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -380,7 +449,7 @@ describe('TypingSession.svelte — the in-session drain trigger (spec #15 §4, �
 		seedBufferEntry();
 
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -399,7 +468,7 @@ describe('TypingSession.svelte — the in-session drain trigger (spec #15 §4, �
 		// The synchronous `readAll` gate inside `drainOnce` is what keeps the overwhelmingly
 		// common case — an empty buffer — from costing a dynamic import of the Supabase chunk.
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -421,7 +490,7 @@ describe('TypingSession.svelte — the in-session drain trigger (spec #15 §4, �
 		seedBufferEntry();
 
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -447,7 +516,7 @@ describe('TypingSession.svelte — enqueue at the drop points (spec #15 §3)', (
 		const before = Date.now();
 
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -479,7 +548,7 @@ describe('TypingSession.svelte — enqueue at the drop points (spec #15 §3)', (
 		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'transient' });
 
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -496,7 +565,7 @@ describe('TypingSession.svelte — enqueue at the drop points (spec #15 §3)', (
 		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'permanent' });
 
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -512,7 +581,7 @@ describe('TypingSession.svelte — enqueue at the drop points (spec #15 §3)', (
 
 	it('buffers nothing on a successful write', async () => {
 		render(TypingSession, {
-			book: makeBook(passages(2)),
+			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -574,7 +643,7 @@ describe('TypingSession.svelte — a write path that cannot be loaded (spec #15 
 
 		try {
 			render(TypingSession, {
-				book: makeBook(passages(2)),
+				...loaded(passages(2)),
 				startIndex: 0,
 				chunksCompleted: 0,
 				completedChunkIds: [],
@@ -628,7 +697,7 @@ describe('TypingSession.svelte — a write path that cannot be loaded (spec #15 
 describe('TypingSession.svelte — focus and announcement at the completion boundary', () => {
 	it('hands focus from the typing surface to the summary when the session finishes', async () => {
 		render(TypingSession, {
-			book: makeBook(passages(1)),
+			...loaded(passages(1)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -648,7 +717,7 @@ describe('TypingSession.svelte — focus and announcement at the completion boun
 
 	it('returns focus to the typing surface when the summary restarts the session', async () => {
 		render(TypingSession, {
-			book: makeBook(passages(1)),
+			...loaded(passages(1)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -685,7 +754,7 @@ describe('TypingSession.svelte — focus and announcement at the completion boun
 		);
 
 		render(TypingSession, {
-			book: makeBook(passages(1)),
+			...loaded(passages(1)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -718,7 +787,7 @@ describe('TypingSession.svelte — focus and announcement at the completion boun
 describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', () => {
 	it("keeps showing a WPM figure across a passage boundary and at the second passage's first word boundary", async () => {
 		render(TypingSession, {
-			book: makeBook(passages(3)),
+			...loaded(passages(3)),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
@@ -736,5 +805,343 @@ describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', (
 
 		await typeText('c '); // first word boundary of the SECOND passage
 		expect(metaText()).toMatch(/· \d+ wpm ·/);
+	});
+});
+
+/**
+ * Windowed reading: the prefetch, `awaiting`, and the end-of-window state (spec #18 §6, §8).
+ *
+ * Every book below is LONGER than the window it was handed, which is the only way any of
+ * this is reachable. The seam is the global `fetch` — a plain first-party request, never a
+ * Supabase client call, which is itself part of what these tests hold in place (§9).
+ */
+describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
+	/** Eight passages, of which the session is handed the first four. */
+	const all = passages(8);
+
+	/** The chunks endpoint's answer for the second window: passages 4..7. */
+	function secondWindow(): Response {
+		return jsonResponse({ from: 4, chunks: makeChunks(all.slice(4), 4), chunkCount: 8 });
+	}
+
+	it('fires at three passages remaining, and not before', async () => {
+		fetchMock.mockImplementation(async () => secondWindow());
+
+		render(TypingSession, {
+			...windowed(all.slice(0, 4), 8),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		// Four passages loaded and none typed: one more than the threshold, so nothing is asked
+		// for. This is the half of the criterion that a bare "it eventually fetches" would miss.
+		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 1 of 8');
+		expect(chunkRequests()).toEqual([]);
+
+		await typeText('a b'); // passage 1 done → 1, 2, 3 remain loaded → the threshold
+
+		await expect.poll(chunkRequests).toEqual(['/api/books/test-book/chunks?from=4&limit=10']);
+	});
+
+	it('does not block input while the window is in flight', async () => {
+		// A request that never settles. Typing has to carry on regardless — the fetch is behind
+		// the typing path, never in front of it.
+		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+
+		render(TypingSession, {
+			...windowed(all.slice(0, 4), 8),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await typeText('a b'); // opens the prefetch
+		await expect.poll(() => chunkRequests().length).toBe(1);
+
+		await typeText('c d');
+		await typeText('e f');
+
+		// Three passages typed against a request that has not come back, and the fourth is
+		// live and accepting keystrokes.
+		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 4 of 8');
+		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent('g h');
+		expect(page.getByTestId('passage-awaiting').query()).toBeNull();
+	});
+
+	it('is single-flight: overlapping triggers join one request', async () => {
+		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+
+		render(TypingSession, {
+			...windowed(all.slice(0, 4), 8),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await typeText('a b'); // trigger 1: the threshold effect
+		await expect.poll(() => chunkRequests().length).toBe(1);
+
+		await typeText('c d'); // trigger 2: a completion, with the threshold still true
+		window.dispatchEvent(new Event('online')); // trigger 3: connectivity
+		window.dispatchEvent(new Event('online')); // and again, for good measure
+		await tick();
+
+		// One in-flight request, joined by every trigger — the `drainOnce` shape. Without it
+		// these would race four copies of the same window into the reducer.
+		expect(chunkRequests()).toHaveLength(1);
+	});
+
+	it('merges arriving completed ids into the optimistic set rather than replacing it', async () => {
+		fetchMock.mockImplementation(async (input) => {
+			if (String(input).includes('/chunks?')) {
+				return secondWindow();
+			}
+			// The server does not know about `chunk-0` yet — it was completed a moment ago and
+			// its insert is still in flight. Replacing the set with this answer would drop it.
+			return jsonResponse({ from: 4, limit: 4, completedChunkIds: ['chunk-5', 'chunk-6'] });
+		});
+
+		render(TypingSession, {
+			...windowed(all.slice(0, 4), 8),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: 'user-1'
+		});
+
+		await typeText('a b');
+
+		// Three of eight: the two arriving ids ADDED to the one this session advanced
+		// optimistically at the completion instant. A replacement would read 25% — one passage
+		// silently dropped — which is the reading this test exists to fail on.
+		await expect
+			.element(page.getByTestId('passage-meta'))
+			.toHaveTextContent('Passage 2 of 8 · 38%');
+		expect(page.getByTestId('passage-meta').element().textContent).not.toContain('· 25%');
+		expect(progressRequests()).toEqual(['/api/books/test-book/progress?from=4&limit=4']);
+		await settleSaves();
+	});
+
+	it('issues no progress request at all for a guest', async () => {
+		fetchMock.mockImplementation(async () => secondWindow());
+
+		render(TypingSession, {
+			...windowed(all.slice(0, 4), 8),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await typeText('a b');
+		await expect.poll(() => chunkRequests().length).toBe(1);
+		await tick();
+
+		// The window is public and shared-cacheable; progress is private and is not a guest's
+		// concern. The guest gate is the acceptance criterion, not an optimisation.
+		expect(progressRequests()).toEqual([]);
+	});
+
+	it('never invalidates the load, however many windows arrive', async () => {
+		// Spec §6, restating #15 §11: on the typing screen a load invalidation re-runs the book
+		// read and re-serialises mid-passage. Windows arrive through the endpoint into
+		// component state, and nothing else.
+		fetchMock.mockImplementation(async () => secondWindow());
+
+		render(TypingSession, {
+			...windowed(all.slice(0, 4), 8),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await typeText('a b');
+		await typeText('c d');
+		await typeText('e f');
+		await typeText('g h');
+		// Past the window boundary, into chunks only the endpoint could have supplied.
+		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 5 of 8');
+
+		expect(invalidateAll).not.toHaveBeenCalled();
+	});
+
+	it('asks for nothing when the whole book is already loaded', async () => {
+		// The 3-chunk fixture book is shorter than one window (spec §9): it must open, complete
+		// end to end, and never reach for a window that does not exist.
+		render(TypingSession, {
+			...loaded(passages(3)),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await typeText('a b');
+		await typeText('c d');
+		expect(page.getByTestId('passage-awaiting').query()).toBeNull();
+		await typeText('e f');
+
+		await expect.element(page.getByTestId('session-summary')).toBeInTheDocument();
+		expect(chunkRequests()).toEqual([]);
+	});
+});
+
+describe('TypingSession.svelte — awaiting and the end of the window (spec #18 §8)', () => {
+	const all = passages(8);
+
+	/** A book of eight passages holding only the first: the boundary is one passage away. */
+	function oneLoaded() {
+		return windowed(all.slice(0, 1), 8);
+	}
+
+	function awaitingPanel() {
+		return page.getByTestId('passage-awaiting');
+	}
+
+	function statusRegion(): Element | null {
+		return document.querySelector('[data-testid="window-status"]');
+	}
+
+	function statusText(): string {
+		return statusRegion()?.textContent?.trim() ?? '';
+	}
+
+	it('shows the loading state while the window is on its way, without moving focus', async () => {
+		let release!: () => void;
+		fetchMock.mockImplementation(
+			() =>
+				new Promise<Response>((resolve) => {
+					release = () =>
+						resolve(jsonResponse({ from: 1, chunks: makeChunks(all.slice(1), 1), chunkCount: 8 }));
+				})
+		);
+
+		render(TypingSession, {
+			...oneLoaded(),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await typeText('a b'); // the only loaded passage — the session runs out of text
+
+		await expect.element(awaitingPanel()).toHaveAttribute('data-state', 'loading');
+		await expect.element(awaitingPanel()).toHaveTextContent('Loading the next passage');
+		expect(statusText()).toBe('Loading the next passage…');
+		// Not the finished-book summary: the session has more book to go.
+		expect(page.getByTestId('session-summary').query()).toBeNull();
+		// Focus was neither moved nor trapped: the hidden input is still mounted and still has
+		// it, so the moment the window lands the user types on without touching anything.
+		await expect.element(page.getByTestId('typing-surface')).toBeInTheDocument();
+		expect(document.activeElement).toBe(page.getByTestId('typing-input').element());
+
+		release();
+
+		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent('c d');
+		expect(awaitingPanel().query()).toBeNull();
+		expect(statusText()).toBe('');
+		expect(document.activeElement).toBe(page.getByTestId('typing-input').element());
+	});
+
+	it('says so when it has typed to the end of what it holds, distinctly from finishing the book', async () => {
+		// `fetchMock` rejects by default: offline, from before the first keystroke.
+		render(TypingSession, {
+			...oneLoaded(),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		// The live region is in the accessibility tree from mount, EMPTY. Captured now and
+		// compared after the message lands: a region built in the same mutation as its content
+		// is never announced, which is the exact trap spec #15 phase 2c hit.
+		const region = statusRegion();
+		expect(region, 'the live region must exist before the message does').not.toBeNull();
+		expect(region?.getAttribute('role')).toBe('status');
+		expect(region?.getAttribute('aria-live')).toBe('polite');
+
+		// The prefetch has already failed by now, and nothing says so: a failure is never
+		// surfaced mid-passage (spec §6).
+		await expect.poll(() => chunkRequests().length).toBe(1);
+		expect(awaitingPanel().query()).toBeNull();
+		expect(statusText()).toBe('');
+
+		await typeText('a b'); // out of text
+
+		await expect.element(awaitingPanel()).toHaveAttribute('data-state', 'stalled');
+		await expect
+			.element(awaitingPanel())
+			.toHaveTextContent('as far as this book is loaded on this device');
+		await expect
+			.element(page.getByTestId('passage-awaiting-hint'))
+			.toHaveTextContent('as soon as you');
+		// Announced through the region that was already there — the same node, not a new one.
+		expect(statusRegion()).toBe(region);
+		expect(statusText()).toBe("That's as far as this book is loaded on this device.");
+
+		// And distinct from "you finished the book": no summary, no figures, no restart.
+		expect(page.getByTestId('session-summary').query()).toBeNull();
+		expect(page.getByTestId('summary-wpm').query()).toBeNull();
+		expect(page.getByTestId('summary-restart-session').query()).toBeNull();
+	});
+
+	it('clears itself when connectivity returns', async () => {
+		render(TypingSession, {
+			...oneLoaded(),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await typeText('a b');
+		await expect.element(awaitingPanel()).toHaveAttribute('data-state', 'stalled');
+
+		// The network comes back, and the browser says so. Nothing is clicked and nothing is
+		// reloaded: the `online` retry resolves the state on its own (spec §8).
+		fetchMock.mockImplementation(async () =>
+			jsonResponse({ from: 1, chunks: makeChunks(all.slice(1), 1), chunkCount: 8 })
+		);
+		window.dispatchEvent(new Event('online'));
+
+		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent('c d');
+		expect(awaitingPanel().query()).toBeNull();
+		expect(statusText()).toBe('');
+		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 2 of 8');
+	});
+
+	it('retries on the next completion after a failure, and keeps every completed passage buffered', async () => {
+		// Two loaded passages, offline. The first completion's prefetch fails; the second
+		// completion is the retry point (spec §6) — and both passages are buffered, because 2c's
+		// guarantee about completions is untouched by running out of text.
+		render(TypingSession, {
+			...windowed(all.slice(0, 2), 8),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await typeText('a b');
+		await expect.poll(() => chunkRequests().length).toBeGreaterThan(0);
+		const afterFirst = chunkRequests().length;
+
+		await typeText('c d');
+
+		// The completion is a retry point, not a one-shot: a stall is re-attempted every time
+		// the session reaches a boundary, which is what makes the end-of-window state clear
+		// itself on its own the moment the network is back.
+		await expect.poll(() => chunkRequests().length).toBeGreaterThan(afterFirst);
+		await expect.element(awaitingPanel()).toHaveAttribute('data-state', 'stalled');
+		await expect
+			.poll(() => bufferEntries().map((entry) => entry.chunkId))
+			.toEqual(['chunk-0', 'chunk-1']);
 	});
 });

@@ -10,12 +10,20 @@
 	import {
 		applySessionEvent,
 		createSession,
+		loadedChunks,
 		runningMetrics,
 		sessionSummary
 	} from '$lib/engine/session';
 	import type { ChunkResult, SessionEvent, SessionState } from '$lib/engine/session';
+	import type { ChunkEngineState } from '$lib/engine/types';
 	import type { MetricsSnapshot } from '$lib/engine/metrics';
-	import type { TypeableText } from '$lib/types';
+	import type {
+		ChunkWindow,
+		ChunkWindowResponse,
+		TypeableTextSummary,
+		WindowProgressResponse
+	} from '$lib/types';
+	import { shouldPrefetch, WINDOW_SIZE } from '$lib/reading/window';
 	// All three are Supabase-free and therefore STATICALLY importable — that is the whole
 	// point of the split (spec #15 §2/§4). `buffer` + `storage` name no browser global but
 	// `localStorage`; `drain-once` reaches `@supabase/*` and `drain.ts` only through its own
@@ -30,7 +38,19 @@
 	import TypingSurface from './TypingSurface.svelte';
 
 	interface Props {
-		book: TypeableText;
+		/**
+		 * Metadata only. Since spec #18 the component is never handed a whole book — the text
+		 * arrives one `ChunkWindow` at a time, and this carries what the chrome needs
+		 * (`title`, `author`), what the write path needs (`bookId`) and what the window
+		 * endpoint is addressed by (`id`, the slug).
+		 */
+		book: TypeableTextSummary;
+		/**
+		 * The FIRST window, server-rendered by the load and starting AT `startIndex`. Read once
+		 * to seed the session; every later window arrives through the chunks endpoint into
+		 * component state, never through this prop and never through a load invalidation.
+		 */
+		window: ChunkWindow;
 		/** Index the session opens at (resume, or a valid `?passage` override). */
 		startIndex: number;
 		/** Persisted book-lifetime completion count. 0 for guests. */
@@ -53,15 +73,51 @@
 		userId: string | null;
 	}
 
-	let { book, startIndex, chunksCompleted, completedChunkIds, userId }: Props = $props();
+	// `window` is renamed on the way in: a local binding called `window` would shadow the
+	// browser global for this entire script, which is a trap waiting for the first person to
+	// write `window.setTimeout` here. The rename is also honest about the prop's lifetime —
+	// it is the seed, not a live view of what the session holds.
+	let {
+		book,
+		window: initialWindow,
+		startIndex,
+		chunksCompleted,
+		completedChunkIds,
+		userId
+	}: Props = $props();
 
 	// One session per mounted instance. The parent keys this component on the book id, so
 	// `book` never changes here — no mount-time reset that could drop the first keystrokes.
 	// `startIndex` is read once for the same reason: a later `?passage=N` navigation must not
 	// yank a session that is already underway.
-	let session = $state.raw<SessionState>(untrack(() => createSession(book, startIndex)));
+	let session = $state.raw<SessionState>(
+		untrack(() =>
+			createSession(loadedChunks(initialWindow.chunks, initialWindow.chunkCount), startIndex)
+		)
+	);
 	let liveMetrics = $state.raw<MetricsSnapshot | null>(null);
 	let surface = $state<{ focusInput: () => void } | null>(null);
+
+	/**
+	 * The last chunk the session actually had loaded, with the absolute index it was typed
+	 * at. This is what the sheet renders, and it is deliberately NOT `session.activeChunk`.
+	 *
+	 * `activeChunk` goes null the instant the session enters `awaiting`. Rendering from it
+	 * directly would unmount `TypingSurface` at a passage boundary — and with it the hidden
+	 * input that holds focus, which would die on `<body>` and strand a keyboard-only user
+	 * exactly when the app is asking them to wait. Holding the completed passage on screen
+	 * instead keeps the input mounted and focused across the boundary, so when the window
+	 * lands the user simply carries on typing: no focus event, no re-entry, nothing to
+	 * dismiss. That is the whole of the `awaiting` focus criterion (spec #8, phase 8).
+	 *
+	 * Updated in `dispatch`, which is the only place `session` is ever assigned, so it can
+	 * never drift out of step with it.
+	 */
+	let heldView = $state.raw<{ index: number; chunk: ChunkEngineState } | null>(
+		untrack(() =>
+			session.activeChunk ? { index: session.activeIndex, chunk: session.activeChunk } : null
+		)
+	);
 
 	/**
 	 * The optimistically-advanced set of chunk ids completed at least once (spec #12 §4).
@@ -104,6 +160,188 @@
 	// logging (the keystroke log is the single source of truth); only the meta
 	// line's metric segments are subtracted.
 	let zen = $state(false);
+
+	// ── Windowed reading: how far the session is loaded, and how the rest arrives ──────────
+	//
+	// Everything below is a plain `fetch` to a first-party endpoint. Deliberately NOT a
+	// Supabase client call: `@supabase/ssr` and `@supabase/supabase-js` are reached from this
+	// component only through `loadProgressModules()`'s dynamic import, and putting a read on
+	// the window path would make them a mount-time dependency of showing text — the exact
+	// regression the guest bundle guarantee exists to prevent (spec #18 §9).
+	//
+	// And deliberately NOT `invalidateAll()` or any other load invalidation (spec §6,
+	// restating #15 §11): on the typing screen that re-runs the book read and re-serialises
+	// mid-passage. Windows arrive here, into component state, and reach the engine as a
+	// `window-loaded` event.
+
+	/**
+	 * Absolute index one past the last loaded chunk — derived from the engine's own map, so
+	 * "how far is loaded" has exactly one source of truth and it is the reducer's.
+	 *
+	 * Seeded at `activeIndex` rather than 0 so that a session which opened `awaiting` (an
+	 * empty first window) asks for the window it is actually blocked on instead of the
+	 * beginning of the book. Loaded chunks ACCUMULATE and are never evicted — `sessionSummary`
+	 * looks each completed chunk's `charCount` up by absolute index, so dropping a window the
+	 * user has left behind would silently drop it from the summary.
+	 */
+	const loadedEnd = $derived.by(() => {
+		let end = session.activeIndex;
+		for (const index of session.text.chunks.keys()) {
+			if (index + 1 > end) {
+				end = index + 1;
+			}
+		}
+		return end;
+	});
+
+	/**
+	 * The in-flight window fetch, one per component instance — the same single-flight shape
+	 * `drainOnce` established: `??=`-assigned, cleared in `.finally()`, so the four triggers
+	 * below (threshold, `awaiting`, completion, `online`) join one request instead of racing
+	 * four copies of the same window into the reducer.
+	 */
+	let inFlightWindow: Promise<void> | null = null;
+
+	/**
+	 * True when the last window fetch did not deliver and none has succeeded since.
+	 *
+	 * It is NOT an error banner: nothing reads it while the user is still typing (spec §6 —
+	 * a failure is never surfaced mid-passage). It only decides which of two things the
+	 * `awaiting` panel says once the session has actually run out of text: "loading" or "this
+	 * is as far as this device got". A success clears it, which is what makes the
+	 * end-of-window state resolve by itself when connectivity returns (spec §8).
+	 */
+	let windowStalled = $state(false);
+
+	function prefetchWindow(): Promise<void> {
+		return (inFlightWindow ??= runWindowFetch().finally(() => {
+			inFlightWindow = null;
+		}));
+	}
+
+	/**
+	 * One window fetch. **Never rejects and never throws** — it runs behind the typing path
+	 * with nobody awaiting it, and typing must not be able to notice it happened.
+	 */
+	async function runWindowFetch(): Promise<void> {
+		const from = loadedEnd;
+		if (from >= session.text.chunkCount) {
+			// Everything the book has is already loaded. Nothing outstanding, so nothing stalled.
+			windowStalled = false;
+			return;
+		}
+
+		try {
+			// `from` and `limit` are always sent as base-10 digits with `limit >= 1`; the
+			// endpoint 400s on anything else. A `limit` above the maximum is clamped rather
+			// than rejected, so the response's own `from` + `chunks.length` is what the next
+			// request is built from — never this request's numbers.
+			const response = await fetch(
+				`/api/books/${encodeURIComponent(book.id)}/chunks?from=${from}&limit=${WINDOW_SIZE}`
+			);
+			if (!response.ok) {
+				windowStalled = true;
+				return;
+			}
+			const body = (await response.json()) as ChunkWindowResponse;
+
+			// The response's `chunkCount` is adopted wholesale by the reducer — that is how a
+			// session holding a stale bound reconciles when a re-ingest grew or shrank the book
+			// underneath it.
+			dispatch({
+				type: 'window-loaded',
+				chunks: body.chunks,
+				chunkCount: body.chunkCount,
+				timestamp: Date.now()
+			});
+
+			// An empty window below the end of the book delivered nothing and resolved nothing:
+			// treat it as a stall so the session says so rather than waiting forever on a
+			// request that already came back.
+			windowStalled = body.chunks.length === 0 && body.from < body.chunkCount;
+
+			if (userId !== null && body.chunks.length > 0) {
+				void mergeWindowProgress(body.from, body.chunks.length);
+			}
+		} catch {
+			// Offline, a dropped connection, a body that would not parse. Swallowed on purpose:
+			// the next completion or the next `online` event retries, and the user is told
+			// nothing unless and until the session actually runs out of text.
+			windowStalled = true;
+		}
+	}
+
+	/**
+	 * The window's completed ids, from the separate private endpoint (spec #18 §4). Called
+	 * only when signed in — a guest issues no progress request at all.
+	 *
+	 * Merged with `add`, **never by replacing the set**: ids this session added optimistically
+	 * at a completion instant are not in the server's answer yet, and replacing would drop
+	 * them. A failure here is cosmetic by design — some completion markers are missing until
+	 * the next load — and must never stall typing, which is why it is not awaited and never
+	 * throws.
+	 */
+	async function mergeWindowProgress(from: number, limit: number) {
+		try {
+			const response = await fetch(
+				`/api/books/${encodeURIComponent(book.id)}/progress?from=${from}&limit=${limit}`
+			);
+			if (!response.ok) {
+				return;
+			}
+			const body = (await response.json()) as WindowProgressResponse;
+			for (const id of body.completedChunkIds) {
+				completed.add(id);
+			}
+		} catch {
+			// Cosmetic. Nothing to report, nothing to retry — the next load re-seeds the set.
+		}
+	}
+
+	/**
+	 * The retry trigger, shared by "a passage was completed" and the browser's `online` event.
+	 *
+	 * Gated rather than unconditional: firing on every completion would walk the whole book
+	 * down a window at a time, since each success advances `loadedEnd` and the next completion
+	 * would ask for the window after it. So it only fires when there is something to recover
+	 * (a stall), something to wait on (`awaiting`), or something the threshold already wants.
+	 */
+	function retryWindow() {
+		if (
+			windowStalled ||
+			session.status === 'awaiting' ||
+			shouldPrefetch(session.activeIndex, loadedEnd, session.text.chunkCount)
+		) {
+			void prefetchWindow();
+		}
+	}
+
+	/**
+	 * The threshold trigger. `shouldPrefetch` is true from three passages out AND stays true
+	 * once `activeIndex` reaches `loadedEnd`, so this one effect covers both "fetch ahead" and
+	 * "fetch what we are already blocked on" — the awaiting case needs no separate wiring,
+	 * only the same predicate evaluated in the same place.
+	 *
+	 * Nothing here blocks input: the effect fires a promise nobody awaits, and the reducer
+	 * keeps accepting keystrokes for the whole flight.
+	 */
+	$effect(() => {
+		if (shouldPrefetch(session.activeIndex, loadedEnd, session.text.chunkCount)) {
+			void prefetchWindow();
+		}
+	});
+
+	/**
+	 * What the window live region says, and what the awaiting panel shows. Empty whenever the
+	 * session is not waiting — the region itself still renders (see its comment in the markup).
+	 */
+	const windowStatus = $derived(
+		session.status !== 'awaiting'
+			? ''
+			: windowStalled
+				? m.passage_window_end()
+				: m.passage_loading()
+	);
 
 	type ProgressModules = [
 		typeof import('$lib/supabase/browser'),
@@ -268,15 +506,22 @@
 	 */
 	function handleCompletion(previous: SessionState, next: SessionState) {
 		const index = previous.activeIndex;
-		const result = next.results[index];
+		const result = next.results.get(index);
 		// A `restart-*` event reaches the caller's branch too, and so does a stray event
 		// arriving after the session finished. A completion is exactly "a result was frozen
-		// at this index by THIS event" — nothing else writes.
-		if (!result || previous.results[index]) {
+		// at this index by THIS event" — nothing else writes. `results` is a sparse Map keyed
+		// by ABSOLUTE index since spec #18, so this is `get`/`has`, never `[index]`, which
+		// would silently be `undefined` for every index and drop every save.
+		if (!result || previous.results.has(index)) {
 			return;
 		}
 
-		const chunk = previous.text.chunks[index];
+		const chunk = previous.text.chunks.get(index);
+		if (!chunk) {
+			// Unreachable: a chunk cannot complete without having been loaded. Stated rather
+			// than asserted away, because the alternative is a crash on the completion instant.
+			return;
+		}
 		completed.add(chunk.id); // optimistic and unconditional — the Set dedupes
 
 		// The attempt's first keystroke. `previous` is the state before the completing stroke,
@@ -286,7 +531,7 @@
 		// Hoisted above the guest gate (it used to sit below): a buffered guest entry carries
 		// the genuine first-keystroke timestamp too, and it is what the database's unique
 		// index dedupes on. Pure arithmetic over `previous`, so the move changes nothing else.
-		const startedAt = previous.activeChunk.startedAt ?? Date.now() - result.elapsedMs;
+		const startedAt = previous.activeChunk?.startedAt ?? Date.now() - result.elapsedMs;
 
 		// The guest gate. It still sits ABOVE the dynamic import: a guest must issue no request
 		// at all, not a request that fails, and must never fetch the lazy Supabase chunk.
@@ -321,9 +566,15 @@
 			const count = Math.max(completed.size, chunksCompleted);
 			return Math.round((100 * Math.min(count, total)) / total);
 		}
-		const length = session.activeChunk.display.length;
-		const partial = length > 0 ? session.activeChunk.cursor / length : 0;
-		return Math.round((100 * (session.activeIndex + partial)) / total);
+		// Read off `heldView`, not `session.activeChunk`, which is null while awaiting. The
+		// held passage IS the last honest reading: awaiting one, its cursor sits at the end of
+		// the passage just completed, so `index + partial` lands exactly on the index being
+		// awaited. The figure holds instead of collapsing to a wrong number for the duration
+		// of a fetch nobody asked for.
+		const base = heldView ? heldView.index : session.activeIndex;
+		const length = heldView ? heldView.chunk.display.length : 0;
+		const partial = heldView && length > 0 ? heldView.chunk.cursor / length : 0;
+		return Math.round((100 * (base + partial)) / total);
 	});
 
 	/**
@@ -342,11 +593,25 @@
 		const next = applySessionEvent(previous, event);
 		session = next;
 
-		if (next.activeIndex !== previous.activeIndex || next.finished) {
-			handleCompletion(previous, next);
+		// Kept in step with `session` on every event, before any early return below. Null
+		// `activeChunk` (the session is awaiting) leaves the previous passage held.
+		if (next.activeChunk !== null) {
+			heldView = { index: next.activeIndex, chunk: next.activeChunk };
 		}
 
-		if (event.type === 'restart-chunk' || event.type === 'restart-session' || next.finished) {
+		if (next.activeIndex !== previous.activeIndex || next.status === 'finished') {
+			handleCompletion(previous, next);
+			// A completed passage is also the retry point for a window fetch that failed
+			// earlier (spec §6). Gated inside `retryWindow`, so an ordinary completion in the
+			// middle of a loaded window costs nothing.
+			retryWindow();
+		}
+
+		if (
+			event.type === 'restart-chunk' ||
+			event.type === 'restart-session' ||
+			next.status === 'finished'
+		) {
 			liveMetrics = null;
 			return;
 		}
@@ -358,7 +623,9 @@
 				// next keystroke or the completion retries the fetch), and counts nothing here.
 				void loadProgressModules();
 			}
-			const log = next.activeChunk.log;
+			// `?? []` covers the one case the reducer allows: a keystroke arriving while
+			// awaiting is dropped and returns the identical state, whose `activeChunk` is null.
+			const log = next.activeChunk?.log ?? [];
 			const last = log[log.length - 1];
 			if (last?.kind === 'char' && last.expected === ' ') {
 				liveMetrics = runningMetrics(next, Date.now()); // word boundary crossed
@@ -390,8 +657,37 @@
 		'rounded-lg border border-border bg-transparent px-3.5 py-[7px] text-[13px] text-muted transition-colors hover:border-accent hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 </script>
 
+<!--
+	`online` is the second half of the offline story (spec §6, §8). The typing screen is the
+	one place a window can be missing, so it is the one place that has to notice connectivity
+	coming back. `<svelte:window>` rather than a manual `addEventListener` in an `$effect`:
+	Svelte owns the teardown, and the local prop rename above means the global is not shadowed
+	here either way.
+-->
+<svelte:window ononline={retryWindow} />
+
 <main class="mx-auto flex w-full max-w-[860px] flex-col items-center gap-5 px-6 pt-10 pb-24">
-	{#if session.finished}
+	<!--
+		THE WINDOW LIVE REGION. It renders UNCONDITIONALLY, in every state of the session,
+		and only its TEXT changes.
+
+		That is a structural requirement, not styling (spec #18 §8, and the trap spec #15
+		phase 2c already hit on the summary's save notices): a live region inserted into the
+		DOM in the same mutation as its content is not announced at all — the screen reader
+		has nothing registered to watch when the content arrives. Guarding this node with
+		`status === 'awaiting'` would rebuild the region together with its message and
+		reproduce exactly the silence it exists to prevent. So the node is always here; empty,
+		it renders nothing and occupies nothing.
+
+		It is `sr-only` because the same words are already on screen in the awaiting panel
+		below. The panel is NOT a live region and NOT `aria-hidden`: an insertion into a
+		non-live subtree is silent, so nothing is announced twice, and the visible statement
+		still exists in the accessibility tree for anyone browsing rather than listening.
+	-->
+	<p class="sr-only" role="status" aria-live="polite" data-testid="window-status">
+		{windowStatus}
+	</p>
+	{#if session.status === 'finished'}
 		<SessionSummaryView
 			summary={sessionSummary(session)}
 			onRestartSession={restartSession}
@@ -412,18 +708,50 @@
 		>
 			{book.title} · {book.author}
 		</h1>
+		<!--
+			The sheet renders from `heldView`, never from `session.activeChunk` — see its
+			declaration. The surface therefore stays MOUNTED across a window boundary, which is
+			what keeps the hidden input (and focus) alive while the session is awaiting. The
+			passage just completed stays on screen, frozen: `cursor={-1}` puts the caret
+			nowhere, so nothing blinks in a place typing would not go.
+		-->
 		<div class="flex w-full justify-center">
 			<TypingSurface
 				bind:this={surface}
-				text={session.activeChunk.text}
-				display={session.activeChunk.display}
-				cursor={session.activeChunk.cursor}
-				passageKey={session.activeIndex}
+				text={heldView?.chunk.text ?? ''}
+				display={heldView?.chunk.display ?? []}
+				cursor={session.status === 'active' ? (heldView?.chunk.cursor ?? -1) : -1}
+				passageKey={heldView?.index ?? session.activeIndex}
 				onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}
 				onBackspace={(timestamp) => dispatch({ type: 'backspace', timestamp })}
 				onRestartChunk={restartChunk}
 			/>
 		</div>
+		{#if session.status === 'awaiting'}
+			<!--
+				The awaiting panel: the session is between passages, waiting for its window.
+
+				`data-state` is what separates the two readings a stopped session can have —
+				`loading` (a window is on its way) and `stalled` (this device has typed to the
+				end of what it holds, spec §8). Neither is the finished-book summary, which is a
+				different component entirely, with a heading, four figures and its own focus.
+				This is one quiet line in the same muted register as the rest of the chrome, and
+				it takes no focus at all: the input above still has it, so the moment the window
+				lands the user types on without touching anything.
+			-->
+			<div
+				data-testid="passage-awaiting"
+				data-state={windowStalled ? 'stalled' : 'loading'}
+				class="flex w-full max-w-[720px] flex-col gap-1.5 rounded-lg border border-border px-4 py-3 text-center"
+			>
+				<p class="text-sm text-fg">{windowStatus}</p>
+				{#if windowStalled}
+					<p class="text-[13px] text-muted" data-testid="passage-awaiting-hint">
+						{m.passage_window_end_hint()}
+					</p>
+				{/if}
+			</div>
+		{/if}
 		<PassageMeta
 			current={session.activeIndex + 1}
 			total={session.text.chunkCount}
