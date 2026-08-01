@@ -1,18 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { getLocale, overwriteGetLocale } from '$lib/paraglide/runtime';
 import type { TypeableTextSummary } from '$lib/types';
 import { load, type LibraryPageData } from './+page.server';
 
 /**
- * `/type` load tests (spec #12, §4 Display). The injected Supabase client is mocked —
- * a real DB call must never reach a unit test (testing-patterns). Same chainable,
+ * `/type` load tests (spec #12 §4 Display; spec #19 §4). The injected Supabase client is
+ * mocked — a real DB call must never reach a unit test (testing-patterns). Same chainable,
  * thenable query-builder stub as `src/lib/server/progress.spec.ts`, keyed on the
  * `from(...)` table so one load can serve `books` and `book_progress` different rows.
  *
- * The load itself is not re-testing `listBooks` / `getBookCompletionCounts` (those have
- * their own service specs); it is testing the wiring: the map's KEY (the uuid, never the
- * slug), and above all that a GUEST ISSUES NO PROGRESS QUERY — a stated acceptance
- * criterion, asserted positively against the recorded `from` calls rather than inferred
- * from an empty result.
+ * The load itself is not re-testing `listBooks` / `getBookActivity` / `selectContinueReading`
+ * (those have their own specs); it is testing the wiring: the map's KEY (the uuid, never the
+ * slug), the `?lang` resolution the filter control renders, and above all that a GUEST ISSUES
+ * NO PROGRESS QUERY — a stated acceptance criterion, asserted positively against the recorded
+ * `from` calls rather than inferred from an empty result.
  */
 
 interface QueryCall {
@@ -66,6 +67,13 @@ function mockSupabase(resultsByTable: Record<string, Result>) {
 
 const USER = { id: '11111111-1111-1111-1111-111111111111' };
 
+/** The runtime's own resolver, restored after any test that pins the UI locale. */
+const shippedGetLocale = getLocale;
+
+afterEach(() => {
+	overwriteGetLocale(shippedGetLocale);
+});
+
 const PRIDE_UUID = 'aaaaaaaa-0000-0000-0000-000000000001';
 const QUIJOTE_UUID = 'aaaaaaaa-0000-0000-0000-000000000002';
 const UNTOUCHED_UUID = 'aaaaaaaa-0000-0000-0000-000000000003';
@@ -100,18 +108,30 @@ const BOOK_ROWS = [
 	}
 ];
 
+/** The rollup rows one signed-in user has, in `book_progress`'s own column names. */
+function progressRow(bookId: string, chunksCompleted: number, lastActiveAt: string | null = null) {
+	return { book_id: bookId, chunks_completed: chunksCompleted, last_active_at: lastActiveAt };
+}
+
 function loadEvent(
 	options: {
 		user?: { id: string } | null;
 		books?: Result;
 		bookProgress?: Result;
+		/** The raw `?lang` value, exactly as a URL would carry it. */
+		lang?: string | null;
 	} = {}
 ) {
 	const supabase = mockSupabase({
 		books: options.books ?? { data: BOOK_ROWS, error: null },
 		book_progress: options.bookProgress ?? { data: [], error: null }
 	});
+	const url = new URL('http://localhost/type');
+	if (options.lang !== undefined && options.lang !== null) {
+		url.searchParams.set('lang', options.lang);
+	}
 	const event = {
+		url,
 		locals: {
 			supabase: supabase.client,
 			safeGetSession: async () => ({
@@ -162,7 +182,7 @@ describe('/type load — progressByBook for a signed-in user', () => {
 		const { event } = loadEvent({
 			user: USER,
 			bookProgress: {
-				data: [{ book_id: PRIDE_UUID, chunks_completed: 3 }],
+				data: [progressRow(PRIDE_UUID, 3, '2026-07-30T10:00:00Z')],
 				error: null
 			}
 		});
@@ -174,13 +194,13 @@ describe('/type load — progressByBook for a signed-in user', () => {
 		expect(data.progressByBook['pride-and-prejudice']).toBeUndefined();
 	});
 
-	it('carries the counts from getBookCompletionCounts for every rolled-up book', async () => {
+	it('carries the counts from getBookActivity for every rolled-up book', async () => {
 		const { event } = loadEvent({
 			user: USER,
 			bookProgress: {
 				data: [
-					{ book_id: PRIDE_UUID, chunks_completed: 3 },
-					{ book_id: QUIJOTE_UUID, chunks_completed: 4 }
+					progressRow(PRIDE_UUID, 3, '2026-07-30T10:00:00Z'),
+					progressRow(QUIJOTE_UUID, 4, '2026-07-31T10:00:00Z')
 				],
 				error: null
 			}
@@ -198,7 +218,7 @@ describe('/type load — progressByBook for a signed-in user', () => {
 		const { event } = loadEvent({
 			user: USER,
 			bookProgress: {
-				data: [{ book_id: PRIDE_UUID, chunks_completed: 3 }],
+				data: [progressRow(PRIDE_UUID, 3, '2026-07-30T10:00:00Z')],
 				error: null
 			}
 		});
@@ -214,8 +234,8 @@ describe('/type load — progressByBook for a signed-in user', () => {
 			user: USER,
 			bookProgress: {
 				data: [
-					{ book_id: PRIDE_UUID, chunks_completed: 3 },
-					{ book_id: QUIJOTE_UUID, chunks_completed: 0 }
+					progressRow(PRIDE_UUID, 3, '2026-07-30T10:00:00Z'),
+					progressRow(QUIJOTE_UUID, 0, '2026-07-31T10:00:00Z')
 				],
 				error: null
 			}
@@ -277,6 +297,167 @@ describe('/type load — guest', () => {
 		const data = await runLoad(event);
 
 		expect(data.progressByBook).toEqual({});
+	});
+});
+
+describe('/type load — the ?lang filter (spec #19 §4)', () => {
+	/** The `language` predicate `listBooks` applied, or undefined when it filtered nothing. */
+	const languageFiltered = (supabase: ReturnType<typeof mockSupabase>) =>
+		supabase.calls.find((call) => call.method === 'eq' && call.args[0] === 'language')?.args[1];
+
+	it('defaults to the UI locale’s content language when ?lang is absent', async () => {
+		overwriteGetLocale(() => 'es');
+		const { event, supabase } = loadEvent({ user: null });
+
+		const data = await runLoad(event);
+
+		// A visitor sees books they can read without touching a control.
+		expect(data.language).toBe('es');
+		expect(languageFiltered(supabase)).toBe('es');
+	});
+
+	it('defaults to en for the English UI', async () => {
+		overwriteGetLocale(() => 'en');
+		const { event } = loadEvent({ user: null });
+
+		const data = await runLoad(event);
+
+		expect(data.language).toBe('en');
+	});
+
+	it('honours an explicit ?lang over the locale default', async () => {
+		overwriteGetLocale(() => 'en');
+		const { event, supabase } = loadEvent({ user: null, lang: 'es' });
+
+		const data = await runLoad(event);
+
+		expect(data.language).toBe('es');
+		expect(languageFiltered(supabase)).toBe('es');
+	});
+
+	it('applies no language predicate at all for ?lang=all', async () => {
+		overwriteGetLocale(() => 'es');
+		const { event, supabase } = loadEvent({ user: null, lang: 'all' });
+
+		const data = await runLoad(event);
+
+		// `all` must stay reachable: the locale default is a guess, never a constraint.
+		expect(data.language).toBe('all');
+		expect(languageFiltered(supabase)).toBeUndefined();
+	});
+
+	it('falls back silently to the default for an unrecognised ?lang', async () => {
+		overwriteGetLocale(() => 'en');
+		const { event, supabase } = loadEvent({ user: null, lang: 'fr' });
+
+		// No 400 and no error status — a hand-edited or stale link still opens the page,
+		// exactly the posture `?passage=N` takes.
+		const data = await runLoad(event);
+
+		expect(data.language).toBe('en');
+		expect(languageFiltered(supabase)).toBe('en');
+	});
+
+	it('falls back for a value that differs only in case', async () => {
+		overwriteGetLocale(() => 'es');
+		const { event } = loadEvent({ user: null, lang: 'ES' });
+
+		const data = await runLoad(event);
+
+		expect(data.language).toBe('es');
+	});
+
+	it('returns the RESOLVED filter, so the control never renders as “nothing current”', async () => {
+		overwriteGetLocale(() => 'es');
+		const { event } = loadEvent({ user: USER, lang: '' });
+
+		const data = await runLoad(event);
+
+		// The page was reached with a junk param; the control must still mark `es` active.
+		expect(data.language).toBe('es');
+	});
+});
+
+describe('/type load — continueReading (spec #19 §5)', () => {
+	it('returns the in-progress books, most recently active first', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			bookProgress: {
+				data: [
+					progressRow(PRIDE_UUID, 2, '2026-07-29T09:00:00Z'),
+					progressRow(QUIJOTE_UUID, 1, '2026-07-31T09:00:00Z')
+				],
+				error: null
+			}
+		});
+
+		const data = await runLoad(event);
+
+		expect(data.continueReading.map((book: TypeableTextSummary) => book.id)).toEqual([
+			'don-quijote',
+			'pride-and-prejudice'
+		]);
+	});
+
+	it('excludes a completed book — offering a 100% book as “continue” is a false claim', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			bookProgress: {
+				data: [
+					progressRow(PRIDE_UUID, 6, '2026-07-31T09:00:00Z'),
+					progressRow(QUIJOTE_UUID, 1, '2026-07-29T09:00:00Z')
+				],
+				error: null
+			}
+		});
+
+		const data = await runLoad(event);
+
+		expect(data.continueReading.map((book: TypeableTextSummary) => book.id)).toEqual([
+			'don-quijote'
+		]);
+	});
+
+	it('excludes a book opened but with nothing completed', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			bookProgress: { data: [progressRow(QUIJOTE_UUID, 0, '2026-07-31T09:00:00Z')], error: null }
+		});
+
+		const data = await runLoad(event);
+
+		expect(data.continueReading).toEqual([]);
+	});
+
+	it('is empty when the user has touched nothing — no section, no placeholder', async () => {
+		const { event } = loadEvent({ user: USER });
+
+		const data = await runLoad(event);
+
+		expect(data.continueReading).toEqual([]);
+	});
+
+	it('is empty for a guest', async () => {
+		const { event } = loadEvent({ user: null });
+
+		const data = await runLoad(event);
+
+		expect(data.continueReading).toEqual([]);
+	});
+
+	it('hands the grid the very same object, so devalue deduplicates the duplicate card', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			bookProgress: { data: [progressRow(PRIDE_UUID, 2, '2026-07-31T09:00:00Z')], error: null }
+		});
+
+		const data = await runLoad(event);
+
+		// A reference into `books`, never a copy: the book legitimately renders twice on the
+		// page and must cost payload bytes only once.
+		expect(data.continueReading[0]).toBe(
+			data.books.find((book: TypeableTextSummary) => book.id === 'pride-and-prejudice')
+		);
 	});
 });
 
