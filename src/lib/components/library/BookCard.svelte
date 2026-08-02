@@ -18,6 +18,19 @@
 	}
 
 	let { book, progress }: Props = $props();
+
+	/**
+	 * A `cover_url` that 404s must degrade to the generated cover, never a broken-image box
+	 * (spec #19 §3). Per-instance state on purpose: the same book rendered in both the
+	 * continue-reading section and the grid gets two independent flags, and both fail and
+	 * swap on their own. `onerror` cannot fire during SSR, so a dead URL server-renders an
+	 * `<img>` and swaps on the client — the visible artefact is the empty `bg-sheet` frame
+	 * for a frame, not a broken-image glyph, because the frame carries the background.
+	 *
+	 * The fallback is cosmetic, not corrective: the database still holds a dead URL, and
+	 * that is an operator problem (re-ingest).
+	 */
+	let coverFailed = $state(false);
 </script>
 
 <!-- Coherence comes from the frame, not the contents (brief §3): art and
@@ -31,12 +44,13 @@
 	<div
 		class="frame relative aspect-2/3 overflow-hidden rounded-[10px] border border-border bg-sheet"
 	>
-		{#if book.coverUrl}
+		{#if book.coverUrl && !coverFailed}
 			<img
 				src={book.coverUrl}
 				alt={m.library_cover_alt({ title: book.title })}
 				class="absolute inset-0 h-full w-full object-cover"
 				loading="lazy"
+				onerror={() => (coverFailed = true)}
 			/>
 		{:else}
 			<GeneratedCover {book} />

@@ -1,5 +1,6 @@
 import { expect, test } from './fixtures/auth';
 import { isLocalStack, readSeededBook, SUPABASE_URL } from './support/supabase';
+import { gridCard } from './support/library';
 // Fixture contents are imported (not duplicated) so the tests type the exact strings the
 // app renders and address the exact slug the seed holds. The fixture id IS the `books.slug`.
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
@@ -110,11 +111,17 @@ test.describe('display — book-lifetime completion', () => {
 		const percent = Math.round((100 * 3) / book.chunkCount);
 		expect(percent, 'the seeded book should make this an unambiguous 50%').toBe(50);
 
-		await page.goto('/type');
+		// OTHER_BOOK_SLUG is the ES fixture; the default filter on '/type' resolves to 'en'
+		// and would hide it, so both books are asserted under the unfiltered view.
+		await page.goto('/type?lang=all');
 		await expect(page.getByTestId('text-picker')).toBeVisible();
-		await expect(page.getByTestId(`text-picker-option-${BOOK_SLUG}`)).toContainText('50%');
+		// BOOK_SLUG now has progress, so it also renders in the continue-reading section
+		// (spec #19 §5) — the grid card is reached through its own container to avoid
+		// Playwright's strict-mode collision between the two identical cards.
+		await expect(gridCard(page, BOOK_SLUG)).toContainText('50%');
 		// An untouched book has no `book_progress` row at all, which reads as 0 rather than
-		// as a missing value.
+		// as a missing value. It has no continue-reading counterpart, so the bare testid
+		// still resolves to exactly one element.
 		await expect(page.getByTestId(`text-picker-option-${OTHER_BOOK_SLUG}`)).toContainText('0%');
 
 		// The meta line shows the SAME figure, not how far into today's session the user is:
@@ -206,8 +213,8 @@ test.describe('the write path, end to end', () => {
 		await expect(page.getByTestId(META)).toContainText(`Passage 2 of ${book.chunkCount}`);
 		await expect(page.getByTestId(META)).toContainText(`${expectedPercent}%`);
 		await page.goto('/type');
-		await expect(page.getByTestId(`text-picker-option-${BOOK_SLUG}`)).toContainText(
-			`${expectedPercent}%`
-		);
+		// BOOK_SLUG now has progress, so it also renders in continue-reading — scope through
+		// the grid container to avoid the strict-mode collision (spec #19 §5/§6).
+		await expect(gridCard(page, BOOK_SLUG)).toContainText(`${expectedPercent}%`);
 	});
 });

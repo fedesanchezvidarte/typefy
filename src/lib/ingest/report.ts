@@ -1,4 +1,5 @@
 import type { DisallowedCharacter } from './characters.js';
+import type { CoverImage } from './cover.js';
 import { DEFAULT_TARGET, type SizeTarget } from '$lib/chunking/chunker.js';
 
 /**
@@ -14,10 +15,23 @@ import { DEFAULT_TARGET, type SizeTarget } from '$lib/chunking/chunker.js';
  * nothing. The script owns the filesystem.
  */
 
+/**
+ * The validated cover, as the report presents it (spec #19 §2). `license` and `source` are the
+ * manifest's `coverLicense` / `coverSource` — a per-image judgement that is *recorded*, never
+ * inferred from the text's licence, and therefore has to be in the artefact being reviewed.
+ */
+export interface CoverReportEntry {
+	image: CoverImage;
+	license: string;
+	source: string;
+}
+
 export interface ReportInput {
 	slug: string;
 	title: string;
 	sourceUrl: string;
+	/** Absent for a book with no cover — which renders no cover line, not an empty one. */
+	cover?: CoverReportEntry;
 	/** The chunks as they would be written. */
 	chunks: readonly string[];
 	/** Characters outside the allowed set, from `findDisallowed` over the cleaned text. */
@@ -53,6 +67,22 @@ function quotedChunks(chunks: readonly string[]): { label: string; content: stri
 		.map((index) => ({ label: `Chunk ${index}`, content: chunks[index] }));
 }
 
+/**
+ * The cover lines, or none at all. A book with no cover is the intended end state for most of
+ * the catalog, not a gap — so it gets silence rather than an empty field to explain.
+ */
+function coverLines(cover: CoverReportEntry | undefined): string[] {
+	if (!cover) {
+		return [];
+	}
+	const { format, width, height, bytes } = cover.image;
+	return [
+		`- **Cover**: ${format} ${width}x${height}, ${Math.round(bytes / 1024)} KB`,
+		`- **Cover licence**: ${cover.license}`,
+		`- **Cover source**: ${cover.source}`
+	];
+}
+
 /** Builds the committed markdown report for one book. */
 export function buildReport(input: ReportInput): string {
 	const target = input.target ?? DEFAULT_TARGET;
@@ -69,6 +99,7 @@ export function buildReport(input: ReportInput): string {
 		'',
 		`- **Slug**: \`${input.slug}\``,
 		`- **Source**: ${input.sourceUrl}`,
+		...coverLines(input.cover),
 		'',
 		'## Chunks',
 		'',

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
-import { getBookCompletionCount, getBookCompletionCounts, getCompletedChunkIds } from './progress';
+import { getBookActivity, getBookCompletionCount, getCompletedChunkIds } from './progress';
 
 /**
  * Service tests (spec #12, Phase C): the injected Supabase client is mocked — a real DB
@@ -94,47 +94,101 @@ describe('getCompletedChunkIds', () => {
 	});
 });
 
-describe('getBookCompletionCounts', () => {
+describe('getBookActivity', () => {
 	it('maps book_progress rows to a Map keyed by books.id', async () => {
 		const { client } = mockSupabase({
 			data: [
-				{ book_id: 'book-a', chunks_completed: 3 },
-				{ book_id: 'book-b', chunks_completed: 0 }
+				{ book_id: 'book-a', chunks_completed: 3, last_active_at: '2026-07-20T10:00:00Z' },
+				{ book_id: 'book-b', chunks_completed: 0, last_active_at: '2026-07-01T10:00:00Z' }
 			],
 			error: null
 		});
 
-		const counts = await getBookCompletionCounts(client, USER);
+		const activity = await getBookActivity(client, USER);
 
-		expect(counts.get('book-a')).toBe(3);
-		expect(counts.get('book-b')).toBe(0);
-		expect(counts.size).toBe(2);
+		expect(activity.get('book-a')).toEqual({
+			chunksCompleted: 3,
+			lastActiveAt: '2026-07-20T10:00:00Z'
+		});
+		expect(activity.get('book-b')?.chunksCompleted).toBe(0);
+		expect(activity.size).toBe(2);
+	});
+
+	it('keys the map by the uuid, never by the slug', async () => {
+		const { client } = mockSupabase({
+			data: [
+				{
+					book_id: '22222222-2222-2222-2222-222222222222',
+					chunks_completed: 1,
+					last_active_at: null
+				}
+			],
+			error: null
+		});
+
+		const activity = await getBookActivity(client, USER);
+
+		expect(activity.has(BOOK)).toBe(true);
+		expect(activity.has('pride-and-prejudice')).toBe(false);
+	});
+
+	it('carries a null last_active_at through rather than inventing a timestamp', async () => {
+		// The rollup trigger may not have timestamped the row; the selection sorts nulls last
+		// and needs to be able to see one.
+		const { client } = mockSupabase({
+			data: [{ book_id: 'book-a', chunks_completed: 2, last_active_at: null }],
+			error: null
+		});
+
+		expect((await getBookActivity(client, USER)).get('book-a')?.lastActiveAt).toBeNull();
 	});
 
 	it('leaves untouched books out of the map (the caller renders 0)', async () => {
 		const { client } = mockSupabase({
-			data: [{ book_id: 'book-a', chunks_completed: 1 }],
+			data: [{ book_id: 'book-a', chunks_completed: 1, last_active_at: null }],
 			error: null
 		});
 
-		const counts = await getBookCompletionCounts(client, USER);
+		const activity = await getBookActivity(client, USER);
 
-		expect(counts.has('book-never-opened')).toBe(false);
-		expect(counts.get('book-never-opened')).toBeUndefined();
+		expect(activity.has('book-never-opened')).toBe(false);
+		expect(activity.get('book-never-opened')).toBeUndefined();
 	});
 
-	it('reads book_progress scoped to the user only', async () => {
+	it('reads book_progress scoped to the user only, in ONE query', async () => {
 		const { client, calls } = mockSupabase({ data: [], error: null });
 
-		await getBookCompletionCounts(client, USER);
+		await getBookActivity(client, USER);
 
+		expect(calls.filter((c) => c.method === 'from')).toHaveLength(1);
 		expect(calls.find((c) => c.method === 'from')?.args).toEqual(['book_progress']);
 		expect(calls.filter((c) => c.method === 'eq').map((c) => c.args)).toEqual([['user_id', USER]]);
 	});
 
+	it('selects the timestamp alongside the count — a wider row, not a second round trip', async () => {
+		const { client, calls } = mockSupabase({ data: [], error: null });
+
+		await getBookActivity(client, USER);
+
+		const columns = String(calls.find((c) => c.method === 'select')?.args[0])
+			.split(',')
+			.map((column) => column.trim());
+		expect(columns).toEqual(['book_id', 'chunks_completed', 'last_active_at']);
+	});
+
+	it('does not order or limit in the query', async () => {
+		// Ordering and limiting before the completed-book exclusion would silently return fewer
+		// than three, and the exclusion needs books.chunk_count — which is not in this table.
+		const { client, calls } = mockSupabase({ data: [], error: null });
+
+		await getBookActivity(client, USER);
+
+		expect(calls.some((c) => c.method === 'order' || c.method === 'limit')).toBe(false);
+	});
+
 	it('throws when the database returns an error', async () => {
 		const { client } = mockSupabase({ data: null, error: { message: 'connection refused' } });
-		await expect(getBookCompletionCounts(client, USER)).rejects.toEqual({
+		await expect(getBookActivity(client, USER)).rejects.toEqual({
 			message: 'connection refused'
 		});
 	});

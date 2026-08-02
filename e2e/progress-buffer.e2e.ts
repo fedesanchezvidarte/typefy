@@ -1,5 +1,6 @@
 import { expect, guestTest, test } from './fixtures/auth';
 import { isLocalStack, readSeededBook, SUPABASE_URL, type AnyClient } from './support/supabase';
+import { gridCard } from './support/library';
 import type { Page } from '@playwright/test';
 // Imported, never duplicated: the tests type the exact strings the app renders, and address
 // the exact key the app stores under. The fixture id IS the `books.slug`.
@@ -186,7 +187,9 @@ test.describe('offline → online: a completed passage is pending, then lands', 
 		await expect.poll(() => readBuffer(page)).toEqual([]);
 
 		// And the backfill is visible where a user would look for it.
-		await expect(page.getByTestId(`text-picker-option-${BOOK_SLUG}`)).toContainText(`${percent}%`);
+		// BOOK_SLUG now has progress, so it also renders in continue-reading (spec #19 §5) —
+		// scope through the grid container to avoid the strict-mode collision.
+		await expect(gridCard(page, BOOK_SLUG)).toContainText(`${percent}%`);
 	});
 });
 
@@ -344,8 +347,10 @@ guestTest.describe('guest → sign-in: the completed passages backfill', () => {
 			const percent = Math.round((100 * 2) / book.chunkCount);
 			// The card catches up without a manual reload: the mount drain wrote, so it
 			// invalidated (spec §11). Polled through Playwright's own retry, not slept on.
+			// BOOK_SLUG now has progress, so it also renders in continue-reading (spec #19 §5) —
+			// scope through the grid container to avoid the strict-mode collision.
 			await expect(
-				page.getByTestId(`text-picker-option-${BOOK_SLUG}`),
+				gridCard(page, BOOK_SLUG),
 				'the library card should reflect the backfilled passages'
 			).toContainText(`${percent}%`);
 
@@ -441,11 +446,11 @@ guestTest.describe('A → B: one browser, two users', () => {
 			expect(remaining[0].userId).toBe(userA.id);
 			expect(remaining[0].chunkId).toBe(ownedChunkId);
 
-			// B's own view is exactly the one passage it legitimately inherited.
+			// B's own view is exactly the one passage it legitimately inherited. BOOK_SLUG now
+			// has progress, so it also renders in continue-reading (spec #19 §5) — scope
+			// through the grid container to avoid the strict-mode collision.
 			const percent = Math.round((100 * 1) / book.chunkCount);
-			await expect(page.getByTestId(`text-picker-option-${BOOK_SLUG}`)).toContainText(
-				`${percent}%`
-			);
+			await expect(gridCard(page, BOOK_SLUG)).toContainText(`${percent}%`);
 
 			// ── And on the way out, hygiene (§5) ──────────────────────────────────────────
 			// A transition to guest drops every signed-in-authored entry, whoever owns it, so A's

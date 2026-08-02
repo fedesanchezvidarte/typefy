@@ -4,6 +4,9 @@
 
 - **Slug**: `don-quijote`
 - **Source**: https://www.gutenberg.org/cache/epub/2000/pg2000.txt
+- **Cover**: jpeg 500x766, 185 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:El_ingenioso_hidalgo_don_Quijote_de_la_Mancha.jpg
 
 ## Chunks
 

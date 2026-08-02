@@ -85,4 +85,31 @@ describe('buildReport', () => {
 	it('marks the report as generated, so nobody hand-edits it', () => {
 		expect(buildReport(base)).toMatch(/generated/i);
 	});
+
+	// The report is THE review artefact, and a licence claim that never appears in the thing
+	// being reviewed is a claim nobody reviews (spec #19 §2).
+	describe('the cover', () => {
+		const cover = {
+			image: { format: 'png', width: 1000, height: 1500, bytes: 245_760 },
+			license: 'Public domain (published 1894)',
+			source: 'https://www.gutenberg.org/files/1342/1342-h/images/cover.jpg'
+		} as const;
+
+		it('reports the cover format, dimensions and byte size', () => {
+			const report = buildReport({ ...base, cover });
+			expect(report).toMatch(/png/i);
+			expect(report).toContain('1000x1500');
+			expect(report).toContain('240 KB');
+		});
+
+		it('puts the licence claim and its source in front of the reviewer', () => {
+			const report = buildReport({ ...base, cover });
+			expect(report).toContain('Public domain (published 1894)');
+			expect(report).toContain(cover.source);
+		});
+
+		it('renders no cover line at all for a book with no cover', () => {
+			expect(buildReport(base)).not.toMatch(/cover/i);
+		});
+	});
 });

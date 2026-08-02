@@ -21,18 +21,25 @@
  * - `--target` is required and has no default. Against prod the script prints what it will
  *   write and waits for confirmation.
  *
- * The order below is deliberate: **validate the manifest, then read the key**. A malformed
- * manifest fails before any privileged credential is in memory.
+ * The order below is deliberate: **validate the manifest and the covers, then read the key**.
+ * A malformed manifest — or a cover that is the wrong shape, too large, not actually a PNG or
+ * JPEG, or missing entirely — fails before any privileged credential is in memory.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createInterface } from 'node:readline/promises';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseManifest, type BookManifestEntry } from '../src/lib/ingest/manifest.ts';
 import { cleanSource } from '../src/lib/ingest/clean.ts';
 import { findDisallowed } from '../src/lib/ingest/characters.ts';
 import { buildReport } from '../src/lib/ingest/report.ts';
+import {
+	coverContentType,
+	coverObjectPath,
+	validateCover,
+	type CoverImage
+} from '../src/lib/ingest/cover.ts';
 import { chunkParagraphs } from '../src/lib/chunking/chunker.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -40,6 +47,7 @@ const MANIFEST = resolve(ROOT, 'scripts/catalog/books.json');
 const REPORTS = resolve(ROOT, 'scripts/catalog/reports');
 const CACHE = resolve(ROOT, '.cache/sources');
 const ENV_FILE = resolve(ROOT, '.env.ingest');
+const COVERS_BUCKET = 'covers';
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -185,16 +193,82 @@ async function readSource(book: BookManifestEntry, refresh: boolean): Promise<st
 // Preparation — pure pipeline over one book
 // ---------------------------------------------------------------------------
 
+interface PreparedCover {
+	/** Read once, here, and reused for the upload — the bytes validated are the bytes sent. */
+	bytes: Uint8Array;
+	image: CoverImage;
+	license: string;
+	source: string;
+}
+
 interface PreparedBook {
 	entry: BookManifestEntry;
 	chunks: string[];
 	disallowed: ReturnType<typeof findDisallowed>;
+	/** Absent when the manifest entry declares no cover — which CLEARS `cover_url` on write. */
+	cover?: PreparedCover;
+}
+
+/**
+ * The manifest's cover, read and validated — or `undefined` when the entry declares none.
+ *
+ * Runs inside `prepare()`, i.e. **before any credential is read**, which extends the file's
+ * ordering discipline from "a malformed manifest fails before a privileged credential is in
+ * memory" to a malformed cover. A rejection is therefore a refusal with no key loaded, no
+ * client constructed and nothing uploaded.
+ *
+ * The manifest is hand-edited, so the resolved path is asserted to stay inside `ROOT`:
+ * `cover` names a file in this repository, and it must not become a way to read
+ * `../../../.ssh/id_rsa` and post it to Storage. The pairing with `coverLicense` /
+ * `coverSource` is already enforced by `parseManifest`.
+ */
+function readCover(entry: BookManifestEntry): PreparedCover | undefined {
+	if (!entry.cover) {
+		return undefined;
+	}
+
+	const path = resolve(ROOT, entry.cover);
+	if (!path.startsWith(ROOT + sep)) {
+		fail(
+			`${entry.slug}: \`cover\` "${entry.cover}" resolves outside the repository.\n` +
+				`  Covers live in scripts/catalog/covers/ and are committed alongside the manifest.`
+		);
+	}
+	if (!existsSync(path)) {
+		fail(
+			`${entry.slug}: no cover file at ${path.replace(ROOT, '.')}.\n` +
+				`  The manifest names it, so it must be committed — an uncommitted cover makes this\n` +
+				`  ingest unreproducible on another machine.`
+		);
+	}
+
+	const bytes = new Uint8Array(readFileSync(path));
+	const result = validateCover(entry.slug, bytes);
+	if (!result.ok) {
+		fail(
+			`Cover rejected:\n${result.problems.map((problem) => `  - ${problem}`).join('\n')}\n` +
+				`  Ingestion validates covers and never transforms them (spec #19 §2).`
+		);
+	}
+
+	return {
+		bytes,
+		image: result.image,
+		// `parseManifest` guarantees both are present whenever `cover` is.
+		license: entry.coverLicense!,
+		source: entry.coverSource!
+	};
 }
 
 async function prepare(entry: BookManifestEntry, options: Options): Promise<PreparedBook> {
 	const raw = await readSource(entry, options.refresh);
 	const cleaned = cleanSource(raw, entry.cleaning);
-	return { entry, chunks: chunkParagraphs(cleaned), disallowed: findDisallowed(cleaned) };
+	return {
+		entry,
+		chunks: chunkParagraphs(cleaned),
+		disallowed: findDisallowed(cleaned),
+		cover: readCover(entry)
+	};
 }
 
 function writeReport(prepared: PreparedBook): string {
@@ -207,7 +281,18 @@ function writeReport(prepared: PreparedBook): string {
 			title: prepared.entry.title,
 			sourceUrl: prepared.entry.sourceUrl,
 			chunks: prepared.chunks,
-			disallowed: prepared.disallowed
+			disallowed: prepared.disallowed,
+			// The licence claim belongs in the artefact being reviewed; a claim nobody reads is a
+			// claim nobody reviews. Omitted entirely for a book with no cover.
+			...(prepared.cover
+				? {
+						cover: {
+							image: prepared.cover.image,
+							license: prepared.cover.license,
+							source: prepared.cover.source
+						}
+					}
+				: {})
 		}),
 		'utf8'
 	);
@@ -217,6 +302,48 @@ function writeReport(prepared: PreparedBook): string {
 // ---------------------------------------------------------------------------
 // Writing
 // ---------------------------------------------------------------------------
+
+/**
+ * Uploads the cover and writes `books.cover_url` — **always**, to the public URL or to `null`.
+ *
+ * The null branch is the one that is easy to miss: removing `cover` from a manifest entry and
+ * re-ingesting must CLEAR the column, or a cover the maintainer deleted lingers in the catalog
+ * forever. The manifest is the source of truth for what the catalog is, including for the
+ * absence of a cover.
+ *
+ * The object key is derived from the slug (`coverObjectPath`), so a re-ingest overwrites its
+ * own cover and can never touch another book's; `upsert: true` is what makes that overwrite
+ * rather than conflict. The bucket independently enforces the size and MIME limits — but the
+ * readable refusal already happened during `prepare()`, and this is only the backstop.
+ *
+ * Called after the shrink guard on purpose: that guard's whole claim is that it runs before
+ * any write, and an upload ahead of it would quietly make the comment false.
+ */
+async function writeCover(
+	client: SupabaseClient,
+	prepared: PreparedBook,
+	bookId: string
+): Promise<void> {
+	const { entry, cover } = prepared;
+	let coverUrl: string | null = null;
+
+	if (cover) {
+		const path = coverObjectPath(entry.slug, cover.image.format);
+		const { error } = await client.storage.from(COVERS_BUCKET).upload(path, cover.bytes, {
+			upsert: true,
+			contentType: coverContentType(cover.image.format)
+		});
+		if (error) {
+			fail(
+				`${entry.slug}: uploading the cover to ${COVERS_BUCKET}/${path} failed — ${error.message}`
+			);
+		}
+		coverUrl = client.storage.from(COVERS_BUCKET).getPublicUrl(path).data.publicUrl;
+	}
+
+	const { error } = await client.from('books').update({ cover_url: coverUrl }).eq('id', bookId);
+	if (error) fail(`${entry.slug}: writing cover_url failed — ${error.message}`);
+}
 
 /**
  * Writes one book.
@@ -326,6 +453,8 @@ async function writeBook(
 		if (error) fail(`${entry.slug}: deleting trailing chunks failed — ${error.message}`);
 	}
 
+	await writeCover(client, prepared, bookId);
+
 	const rows = chunks.map((content, index) => ({
 		book_id: bookId,
 		index,
@@ -385,6 +514,10 @@ async function main(): Promise<void> {
 		const book = await prepare(entry, options);
 		const path = writeReport(book);
 		console.log(`  ${book.chunks.length} chunks; report → ${path.replace(ROOT, '.')}`);
+		if (book.cover) {
+			const { format, width, height, bytes } = book.cover.image;
+			console.log(`  cover: ${format} ${width}x${height}, ${Math.round(bytes / 1024)} KB`);
+		}
 		if (book.disallowed.length > 0) {
 			const summary = book.disallowed
 				.map((entry) => `${entry.codePoint} (${entry.occurrences}x)`)
@@ -398,7 +531,9 @@ async function main(): Promise<void> {
 	}
 
 	if (options.dryRun) {
-		console.log('\n--dry-run: reports written, database untouched.');
+		// Covers are validated above and are deliberately NOT uploaded here: a dry run touches
+		// no remote state, and Storage is remote state.
+		console.log('\n--dry-run: reports written, database and storage untouched.');
 		process.exit(0);
 	}
 
@@ -409,8 +544,11 @@ async function main(): Promise<void> {
 	// 4. Say what will happen before doing it.
 	console.log(`\nTarget: ${options.target} (${url})`);
 	for (const book of prepared) {
+		// "clearing cover" is worth saying out loud: it is a deletion the manifest asked for by
+		// omission, and the operator should see it before it happens rather than afterwards.
+		const cover = book.cover ? ' + cover' : ' + clearing cover';
 		console.log(
-			`  ${book.entry.slug}: ${book.chunks.length} chunks${options.publish ? ' + publish' : ''}`
+			`  ${book.entry.slug}: ${book.chunks.length} chunks${cover}${options.publish ? ' + publish' : ''}`
 		);
 	}
 	if (options.target === 'prod' && !options.yes) {

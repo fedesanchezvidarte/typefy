@@ -1,6 +1,12 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
-import type { Chunk, Language, TypeableText, TypeableTextSummary } from '$lib/types';
+import type {
+	Chunk,
+	Language,
+	LanguageFilter,
+	TypeableText,
+	TypeableTextSummary
+} from '$lib/types';
 
 /**
  * Books service (spec #7): reads typeable-text content from Supabase and maps rows to
@@ -69,13 +75,26 @@ function toTypeableText(row: BookWithChunksRow): TypeableText {
 	return { ...toSummary(row), chunks };
 }
 
-/** All seeded books as metadata (no chunk content), in a stable display order. */
-export async function listBooks(client: Client): Promise<TypeableTextSummary[]> {
-	const { data, error } = await client
-		.from('books')
-		.select(BOOK_SUMMARY_COLUMNS)
-		.order('language')
-		.order('title');
+/**
+ * All published books as metadata (no chunk content), in a stable display order, optionally
+ * narrowed to one content language (spec #19 §4). Filtering here rather than in the browser is
+ * what makes the first paint already correct — no hydration flash, and no list that visibly
+ * narrows after the user has seen it.
+ *
+ * **The language filter is an ADDITION to the publication gate, never a substitute.** There is
+ * still no `published_at` predicate: RLS owns publication (ADR-0006), which is what makes the
+ * guarantee hold for every caller rather than for this one. Do not "consolidate" the two — a
+ * query filter that looks like a gate becomes the only gate the day someone removes it.
+ */
+export async function listBooks(
+	client: Client,
+	language: LanguageFilter = 'all'
+): Promise<TypeableTextSummary[]> {
+	let query = client.from('books').select(BOOK_SUMMARY_COLUMNS);
+	if (language !== 'all') {
+		query = query.eq('language', language);
+	}
+	const { data, error } = await query.order('language').order('title');
 	if (error) {
 		throw error;
 	}

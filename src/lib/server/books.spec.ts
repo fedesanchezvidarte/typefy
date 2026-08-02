@@ -151,6 +151,58 @@ describe('listBooks', () => {
 		});
 		await expect(listBooks(client)).rejects.toThrow(/Unknown content language "fr"/);
 	});
+
+	// The `?lang` filter (spec #19 §4), applied server-side so the first paint is already
+	// correct — no hydration flash, no list that visibly narrows after the user has seen it.
+	describe('the content-language filter', () => {
+		it('filters on the language when one is asked for', async () => {
+			const { client, calls } = mockSupabase({ data: [], error: null });
+
+			await listBooks(client, 'es');
+
+			expect(calls.filter((c) => c.method === 'eq').map((c) => c.args)).toEqual([
+				['language', 'es']
+			]);
+		});
+
+		it('applies no language predicate for `all`', async () => {
+			const { client, calls } = mockSupabase({ data: [], error: null });
+
+			await listBooks(client, 'all');
+
+			expect(calls.some((c) => c.method === 'eq')).toBe(false);
+		});
+
+		it('defaults to the whole catalog, so existing callers are unchanged', async () => {
+			const { client, calls } = mockSupabase({ data: [], error: null });
+
+			await listBooks(client);
+
+			expect(calls.some((c) => c.method === 'eq')).toBe(false);
+		});
+
+		it('keeps the display order whatever the filter is', async () => {
+			const { client, calls } = mockSupabase({ data: [], error: null });
+
+			await listBooks(client, 'en');
+
+			expect(calls.filter((c) => c.method === 'order').map((c) => c.args)).toEqual([
+				['language'],
+				['title']
+			]);
+		});
+
+		it('never adds a published_at predicate — the filter is not a publication gate', async () => {
+			// RLS owns publication (ADR-0006). A query filter here would look like the same thing
+			// and would silently become the only gate the day someone "consolidated" the two.
+			const { client, calls } = mockSupabase({ data: [], error: null });
+
+			await listBooks(client, 'en');
+
+			const args = JSON.stringify(calls.map((c) => c.args));
+			expect(args).not.toContain('published_at');
+		});
+	});
 });
 
 describe('getBookSummaryBySlug', () => {
