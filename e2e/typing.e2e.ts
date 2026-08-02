@@ -47,7 +47,10 @@ test.describe('library grid', () => {
 	test('renders every seeded book as a card; choosing one shows the surface with focus ready', async ({
 		page
 	}) => {
-		await page.goto('/type');
+		// The language filter (spec #19) defaults to the UI locale's content language, which
+		// would hide the ES fixture on a plain '/type'. This test asserts all three seeded
+		// languages at once, so it explicitly opts into the unfiltered view.
+		await page.goto('/type?lang=all');
 		await expect(page.getByTestId('text-picker')).toBeVisible();
 		await expect(page.getByTestId(`text-picker-option-${EN_ID}`)).toBeVisible();
 		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).toBeVisible();
@@ -302,7 +305,8 @@ test.describe('Spanish characters', () => {
 		expect(aIndex).toBeGreaterThan(iIndex);
 		expect(nIndex).toBeGreaterThan(aIndex);
 
-		await pickText(page, ES_ID);
+		// Default filter on '/type' resolves to 'en'; the ES fixture needs an explicit opt-in.
+		await pickText(page, ES_ID, '/type?lang=all');
 
 		// Typing up to (and past) í delivers the precomposed character: correct.
 		await type(page, ES_CHUNK_0.slice(0, aIndex));
@@ -336,7 +340,8 @@ test.describe('Spanish characters', () => {
 		test.skip(browserName !== 'chromium', 'CDP sessions are chromium-only');
 
 		const aIndex = ES_CHUNK_0.indexOf('á');
-		await pickText(page, ES_ID);
+		// Default filter on '/type' resolves to 'en'; the ES fixture needs an explicit opt-in.
+		await pickText(page, ES_ID, '/type?lang=all');
 		await type(page, ES_CHUNK_0.slice(0, aIndex));
 
 		const cdp = await page.context().newCDPSession(page);
@@ -354,7 +359,8 @@ test.describe('full session (ES text, 5 chunks)', () => {
 		// ~2.6k real keystrokes across 5 chunks: give the test room to breathe.
 		test.setTimeout(240_000);
 
-		await pickText(page, ES_ID);
+		// Default filter on '/type' resolves to 'en'; the ES fixture needs an explicit opt-in.
+		await pickText(page, ES_ID, '/type?lang=all');
 		for (const [index, chunk] of donQuijoteExcerpt.chunks.entries()) {
 			await expect(meta(page)).toContainText(`Passage ${index + 1} of 5`);
 			await type(page, chunk.content);
@@ -388,7 +394,10 @@ test.describe('full session (ES text, 5 chunks)', () => {
 
 test.describe('UI locale vs content language', () => {
 	test('the EN text is typeable from the Spanish UI at /es/type', async ({ page }) => {
-		await pickText(page, EN_ID, '/es/type');
+		// The library filter defaults to the UI locale's content language ('es' here), which
+		// would hide the EN book — so the EN language is picked explicitly. That override is
+		// itself the point of this test: content language and UI locale stay independent.
+		await pickText(page, EN_ID, '/es/type?lang=en');
 		// Spanish UI chrome around English content: locale and text are independent.
 		await expect(meta(page)).toContainText('Pasaje 1 de 6');
 		await type(page, 'It is');

@@ -23,7 +23,10 @@ const CHUNK_0 = prideAndPrejudiceExcerpt.chunks[0].content;
 
 test.describe('a guest', () => {
 	test('opens every book at passage 1, with every progress bar at 0%', async ({ page }) => {
-		await page.goto('/type');
+		// The language filter (spec #19) defaults to the UI locale's content language, which
+		// would hide the ES fixture on a plain '/type'. Both fixture languages are asserted
+		// here, so the unfiltered view is requested explicitly.
+		await page.goto('/type?lang=all');
 		await expect(page.getByTestId('text-picker')).toBeVisible();
 		for (const slug of [BOOK_SLUG, OTHER_BOOK_SLUG]) {
 			await expect(page.getByTestId(`text-picker-option-${slug}`)).toContainText('0%');
