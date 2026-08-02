@@ -19,14 +19,17 @@ on the library card and the typing screen; 2c stops losing the two completions 2
 guest's and a transiently failed write's are held in the local **attempt buffer** and drained into
 `chunk_attempts` once a valid session exists.
 
-Phase 3 is in progress. **3a** (spec #17) is complete: the offline **ingestion** pipeline, the
-book **manifest**, the committed **ingestion reports**, the **typeable character set**
+Phase 3 is complete. **3a** (spec #17) built the offline **ingestion** pipeline, the book
+**manifest**, the committed **ingestion reports**, the **typeable character set**
 ([ADR-0013](docs/adr/0013-typeable-character-set.md)) and **publication gating** — plus a
-deliberately short three-chunk fixture book for the edges 3b needs. **3b** (spec #18) replaces the
+deliberately short three-chunk fixture book for the edges 3b needed. **3b** (spec #18) replaced the
 whole-book read that kept 3a's two full-length books **unpublished**: text is now delivered in
 **windows** through a public chunks endpoint, resume is computed in the database, the engine gained
-an **awaiting** state, and the landing hero reads a **featured book**. Publishing those two books is
-the deliberate step that follows, once every gate is green.
+an **awaiting** state, and the landing hero reads a **featured book**. **3c** (spec #19) closed the
+phase: the catalog reaches its target 12 books (6 `en` / 6 `es`), six of them carrying supplied
+**cover** art in the `covers` Storage bucket and the rest rendering the generated typographic
+cover; the library gained a server-side **language filter** and a **continue reading** section for
+signed-in users.
 
 Phased roadmap:
 
@@ -38,12 +41,13 @@ Phased roadmap:
   and **2c** (local attempt buffer: guest backfill on sign-in + offline retry — spec #15, which
   closes #13). Seeding both Phase 1 fixtures (EN + ES) keeps the UI-locale-vs-content-language
   independence verifiable.
-- **Phase 3** — Ingestion pipeline + catalog of 10-20 books read from the database. Split into
-  **3a** (spec #17 — the offline pipeline, the book manifest and publication gating), **3b**
-  (spec #18 — windowed chunk reads, the chunks endpoint, and publishing the first real books) and
-  **3c** (spec #19 — the catalog: 12 books, covers in Storage, language filter, continue reading).
-  The order is load-bearing: 3b rewrites how the typing screen fetches its text and cannot be
-  honestly tested without the real long books 3a puts in the database.
+- **Phase 3** — ✅ Ingestion pipeline + catalog read from the database. Split into **3a**
+  (spec #17 — the offline pipeline, the book manifest and publication gating), **3b** (spec #18 —
+  windowed chunk reads, the chunks endpoint, and publishing the first real books) and **3c**
+  (spec #19 — the catalog reaches 12 books, 6 `en` / 6 `es`, six with supplied **cover** art in
+  Storage; the library gained a **language filter** and a **continue reading** section). The order
+  was load-bearing: 3b rewrote how the typing screen fetches its text and could not be honestly
+  tested without the real long books 3a put in the database.
 - **Phase 4** — Game modes + polish + E2E coverage.
 
 ## Glossary
@@ -147,6 +151,39 @@ Use these terms as defined here; do not drift to synonyms.
   **first chunk only** and reports a chunk count of 1: it is a one-passage typeable text drawn from a
   book, not a book with the rest missing. Added in Phase 3b (spec #18), closing the gap 3a left when
   the manifest gained the flag but the schema had nowhere to put it.
+- **Cover** — A book's frame art: either *supplied* art, validated and uploaded by ingestion into the
+  public-read, client-unwritable `covers` Storage bucket and recorded in `books.cover_url`, or the
+  *generated* typographic cover (`GeneratedCover.svelte`) composed from the book's own title and
+  author. Both render in the same `aspect-2/3` frame on `BookCard`; a mixed shelf — some books with
+  supplied art, most without — is the intended end state, not a gap. Ingestion validates (format,
+  ~2:3 aspect ratio, byte size) and never transforms — no image-processing dependency in a script
+  whose value is that its logic is pure and testable. A cover's licence is a recorded per-image
+  judgement (`coverLicense`, `coverSource` in the **manifest**), never inferred from the text's own
+  licence — Gutenberg's *text* is public domain, its scanned art frequently is not. A `cover_url`
+  that fails to load degrades to the generated cover; the database still holds the dead URL, which
+  is an operator problem, not a rendering one. Added in Phase 3c (spec #19).
+- **Language filter** — `?lang=en|es|all` on `/type`, resolved server-side in the load and never
+  client-only, so the first paint is already correct. Defaults to the **UI locale**'s matching
+  content language (EN UI → `en`, ES UI → `es`); an unrecognised value falls back to that default
+  **silently**, in the same spirit as `?passage=N` — a stale or hand-edited link still opens the
+  page, never a 400. This does not weaken the locale-independence rule: content language and UI
+  locale remain two different things that happen to share vocabulary, the filter is a guess held in
+  the URL rather than a stored preference, and `all` is always reachable. Added in Phase 3c
+  (spec #19).
+- **Continue reading** — The library's section above the grid, signed-in users only: the 3
+  **in-progress books** (`chunks_completed > 0` and `< chunk_count`) most recently active by
+  `book_progress.last_active_at`, descending, drawn from the already language-filtered list so the
+  section can never contradict the grid below it. A guest issues no progress query at all and the
+  section renders nothing — not an empty state, no section. Fewer than 3 in-progress books renders
+  fewer cards. **Completed books are excluded**: there is no "finished" state and a completed book
+  still resumes at passage 0 (*Resume*), but offering a 100%-complete book as "continue" would be a
+  false claim. The same book can legitimately appear twice on the page — once in this section, once
+  in the grid — since both render the identical `BookCard`. **Ordering caveat**: `last_active_at` is
+  set from the completing attempt row's `created_at`, so for a passage completed offline and held in
+  the **attempt buffer**, it marks the *drain* moment, not the typing moment (2c amendment,
+  ADR-0010). The section's ordering is therefore "most recently **persisted**", which can differ
+  from "most recently typed" — accepted, not worth a schema change, and recorded here so it is not
+  rediscovered as a bug later. Added in Phase 3c (spec #19).
 - **Typeable character set** — The characters stored text may contain: printable ASCII, the
   newline, and `á é í ó ú ü ñ Á É Í Ó Ú Ü Ñ ¿ ¡` — what an English or Spanish keyboard produces.
   Ingestion folds everything else into it (curly quotes → `"`, dashes → `-`, `…` → `...`, exotic

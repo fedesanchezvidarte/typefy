@@ -216,6 +216,66 @@ Both sites carry the rule as a comment; a test that attempts a passage without c
 asserts both paths still call it incomplete is what keeps them agreeing.
 [ADR-0010](0010-progress-data-model.md) is otherwise untouched by this phase.
 
+## Amendment (2026-08-02, Phase 3c implementation — spec #19)
+
+This ADR's original Decision closed with one unclaimed sentence: "Covers can go to Supabase
+Storage." Phase 3c cashes it in, and building it settled four things the sentence left open.
+
+### The `covers` bucket: public read, no write policy at all
+
+A migration-created Storage bucket, `public = true`, with **no** `storage.objects` RLS policy for
+any role. That is not an oversight — it is the storage analogue of `books`/`chunks`'s
+"world-readable, client-unwritable" shape (this ADR's Phase 3a amendment), and the closest thing
+storage has to it. `public = true` on the bucket already grants unauthenticated `GET`/`HEAD` on
+every object it holds, so a `SELECT` policy would add nothing except the ability to **list and
+enumerate** the bucket's contents — a capability nobody asked for. No `INSERT`/`UPDATE`/`DELETE`
+policy exists for `anon` or `authenticated` either, so only the service role can write, exactly
+like a content table. `scripts/ingest.ts` connects with that key under the same rules 3a's RLS-vs-
+grants amendment already fixed: read from `process.env`, populated from a gitignored `.env.ingest`,
+never `import.meta.env`, never a `PUBLIC_` prefix, never in CI.
+
+### Ingestion validates; it does not transform
+
+The same shape as text cleaning, deliberately: `src/lib/ingest/cover.ts` is pure logic (format by
+magic bytes, aspect ratio within ±3% of 2:3, a byte-size ceiling) with no image-processing
+dependency in a script whose whole value is that its logic is testable without a real file. A
+cover that fails validation is a **rejected ingest**, not a resized one — preparing twelve images
+once by hand is cheaper than owning an image pipeline forever, and a pipeline that transforms
+would need a policy on where the model comes from, i.e. exactly what "supplied, not generated"
+in the spec exists to avoid.
+
+**Licensing is not derived from ingestion at all.** The manifest's `coverLicense` and
+`coverSource` fields exist because a book's *text* being public domain (Gutenberg, Cervantes
+Virtual) says nothing about a scanned cover image or a modern edition's artwork — that is a
+human, per-image judgement, recorded next to the book rather than assumed from the text's own
+licence. A book with no clean claim to make simply ships with no `cover` entry and renders the
+generated typographic cover instead — a fully first-class outcome, not a fallback state, since
+`BookCard` gives both the identical frame.
+
+### `cover_url` is written on every ingest — to a URL, or to null
+
+Re-ingesting a book without a `cover` in the manifest **clears** `books.cover_url`, the same way a
+manifest edit that drops a field must be reflected rather than merely not overwritten (this ADR's
+Phase 3a "upserts, never leaves stale data implied" posture, applied here explicitly). The object
+key is derived from the book's slug, so a re-ingest overwrites exactly its own object and can never
+collide with — or orphan — another book's cover.
+
+### No `immutable`, for the Phase 3b reason applied to a new resource
+
+The chunks endpoint's caching amendment rejected `immutable` because a re-ingest changes content at
+a stable id. Covers share the exact shape: the object path is stable (slug-derived) but the bytes
+behind it can change on a re-ingest with a corrected image. The bucket therefore carries no
+`immutable` cache directive, for the same reason and not a new one.
+
+### `cover_url` failing at render time is a UI concern, not a data one
+
+A stored `cover_url` that 404s (a deleted object, a bucket misconfiguration) is not something this
+schema can prevent — it can only make the failure cheap to recover from. `BookCard` degrades to the
+generated cover on the image's own `error` event rather than trusting the stored URL blindly;
+that is a rendering decision documented in `docs/agents/ui-ux-patterns` and the CONTEXT.md *Cover*
+entry, not a schema one, and is recorded here only so a reader of this ADR does not go looking for
+a broken-link check that was never going to live in Postgres.
+
 ## Alternatives considered
 
 - **Text in static repo files** — Acceptable for 20 books, but hundreds of MB blow up the repo and the
