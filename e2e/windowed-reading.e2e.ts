@@ -525,6 +525,64 @@ test.describe('windowed reading (spec #18)', () => {
 			await expect(awaitingPanel(page)).toHaveCount(0);
 			await expect(meta(page)).toContainText(`Passage ${WINDOW_SIZE + 1} of ${long.chunkCount}`);
 		});
+
+		/**
+		 * `awaiting` discounts from the cumulative WPM (CONTEXT.md, Session; ADR-0004) — proved
+		 * with a real gap in `awaiting`, not an inserted row. Spec #26, gap G4.
+		 *
+		 * The engine stamps every keystroke and every window event with `Date.now()` read live
+		 * in the page (`TypingSession.svelte`), so the gap is produced with Playwright's clock
+		 * (`page.clock`) rather than a real sleep: the browser's own `Date.now()` genuinely
+		 * advances by several simulated minutes while the window request sits held open on a
+		 * promise this test controls, and nothing in the test waits on wall-clock time to do it.
+		 * Held-request gate, not `route.abort` — this is "the next window is merely slow", the
+		 * same shape `windowed-reading.e2e.ts`'s prefetch test above already uses, reused here
+		 * for a stall that reaches all the way to `awaiting` instead of resolving before it.
+		 */
+		test('a long stall in awaiting does not decay the cumulative WPM once typing resumes', async ({
+			page
+		}) => {
+			test.setTimeout(120_000);
+			await page.clock.install();
+
+			let release: () => void = () => {};
+			const held = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			await page.route(CHUNKS_ROUTE, async (route: Route) => {
+				await held;
+				await route.continue();
+			});
+
+			await openBook(page, long);
+			await typePassages(page, long, 0, WINDOW_SIZE - 1, HUMAN_ISH_DELAY_MS);
+			// Not `stalled`: the request is genuinely in flight, only held open — the state a
+			// merely-slow network produces, distinct from the failure the sibling tests probe.
+			await expect(awaitingPanel(page)).toHaveAttribute('data-state', 'loading');
+
+			// Five simulated minutes of dead time the delivery layer owes, not the typist — with
+			// zero real wall-clock time spent waiting for it.
+			await page.clock.fastForward('05:00');
+
+			release();
+			await expect(awaitingPanel(page)).toHaveCount(0);
+			await typePassage(page, long.contents[WINDOW_SIZE], HUMAN_ISH_DELAY_MS);
+			await expect(meta(page)).toContainText(`Passage ${WINDOW_SIZE + 2} of ${long.chunkCount}`);
+
+			const metaText = (await meta(page).textContent()) ?? '';
+			const match = metaText.match(/(\d+)\s*wpm/);
+			expect(match, `meta line should report a live wpm figure: "${metaText}"`).not.toBeNull();
+			const wpm = Number(match![1]);
+
+			// A plausibility bound, not an exact figure (CI jitter): every keystroke here was
+			// typed at HUMAN_ISH_DELAY_MS, comfortably under 400 wpm and comfortably over a
+			// crawl. If the five simulated minutes in `awaiting` had leaked into the elapsed
+			// denominator, ~11 passages of real typing spread over five-plus minutes would read
+			// as a single-digit wpm — this bound rules that failure mode out with headroom while
+			// still admitting normal Playwright/CI timing variance on the typing side.
+			expect(wpm, `cumulative wpm should reflect typing time only, got ${wpm}`).toBeGreaterThan(20);
+			expect(wpm).toBeLessThan(1000);
+		});
 	});
 
 	test.describe('a book shorter than one window', () => {

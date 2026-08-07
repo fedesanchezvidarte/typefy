@@ -40,7 +40,14 @@ this glossary has promised since Phase 0 — a Zen passage derives, displays and
 accuracy. **4b** is also complete: every foreground token across all four palettes now clears WCAG AA
 against both `bg` and `sheet`, closing #21; the library gained server-resolved **search** and
 **sort**, composing with the **language filter**; and an accessibility sweep across all four screens
-removed the `color-contrast` axe carve-out for good. 4c still depends on 4a and 4b having landed.
+removed the `color-contrast` axe carve-out for good. Phase 4 is now complete: **4c** (spec #26)
+audited this glossary against the E2E suite and closed the five gaps the audit found — **G1** a
+database-level regression guard that published book content stays within the **typeable character
+set**, **G2** a sub-100-character measured span typed for real never sets a **personal best**, **G3**
+"Zen progress is progress" proven through the library card and a reload rather than only at the
+trigger level, **G4** a long `awaiting` stall no longer decays cumulative WPM, and **G6** a
+`cover_url` that fails to load falls back to the generated cover — plus a CI **coverage-manifest**
+gate that keeps every glossary promise honestly cited against a real E2E test going forward.
 
 Phased roadmap:
 
@@ -59,15 +66,15 @@ Phased roadmap:
   Storage; the library gained a **language filter** and a **continue reading** section). The order
   was load-bearing: 3b rewrote how the typing screen fetches its text and could not be honestly
   tested without the real long books 3a put in the database.
-- **Phase 4** — Modes + polish + E2E coverage. Split into **4a** (✅ spec #24 — **mode** as the
+- **Phase 4** — ✅ Modes + polish + E2E coverage. Split into **4a** (✅ spec #24 — **mode** as the
   measurement axis: honest Zen, span-scoped metrics, nullable metrics and span columns on
   `chunk_attempts`, the 100-character best floor), **4b** (✅ spec #25 — polish: all four palettes
   re-derived to clear WCAG AA, closing #21; server-resolved catalog **search** and **sort** composing
   with the **language filter**; an accessibility sweep across all four screens with the
-  `color-contrast` axe carve-out removed) and **4c** (spec #26 — an E2E gap audit against this
-  glossary and a CI coverage floor). The order is load-bearing the same way Phase 3's was: 4b
-  polishes and 4c covers a typing screen whose measurement axis 4a defines, so both would have to be
-  redone against it otherwise.
+  `color-contrast` axe carve-out removed) and **4c** (✅ spec #26 — an E2E gap audit against this
+  glossary closing five gaps, plus a CI coverage-manifest floor). The order is load-bearing the same
+  way Phase 3's was: 4b polishes and 4c covers a typing screen whose measurement axis 4a defines, so
+  both would have to be redone against it otherwise.
 
 ## Glossary
 

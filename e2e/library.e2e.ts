@@ -1,7 +1,14 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 import { expect, guestTest, test } from './fixtures/auth';
-import { isLocalStack, SUPABASE_URL } from './support/supabase';
+import {
+	isLocalStack,
+	localSecretKey,
+	secretClient,
+	SUPABASE_URL,
+	type AnyClient
+} from './support/supabase';
+import { arrangeProbeBook, retireProbeBook, type ProbeBook } from './support/probe-books';
 import { gridCard, sectionCard } from './support/library';
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
 import { donQuijoteExcerpt } from '../src/lib/fixtures/es';
@@ -260,6 +267,66 @@ test.describe('continue reading', () => {
 		await page.goto('/type?lang=all');
 		await expect(sectionCard(page, EN_ID)).toBeVisible();
 		await expect(sectionCard(page, ES_ID)).toBeVisible();
+	});
+});
+
+/**
+ * Cover fallback on load failure (CONTEXT.md, Cover: "A `cover_url` that fails to load
+ * degrades to the generated cover... the database still holds the dead URL, which is an
+ * operator problem, not a rendering one"). `typing.e2e.ts` already proves every SEEDED book
+ * renders `generated-cover` because none of them carry supplied art at all; what it cannot
+ * prove is the FALLBACK path — a book that DOES carry a `cover_url` whose image request fails.
+ * Spec #26, gap G6.
+ */
+test.describe('cover fallback on load failure', () => {
+	test.skip(
+		!isLocalStack,
+		`refusing to publish a probe book against a non-local Supabase (${SUPABASE_URL})`
+	);
+	test.skip(
+		!localSecretKey(),
+		'needs the local secret key: no client role may publish a book, and none should'
+	);
+
+	const SLUG = 'cover-fallback-probe';
+	const DEAD_COVER_URL = 'https://example.invalid/covers/cover-fallback-probe.jpg';
+
+	let service: AnyClient;
+	let book: ProbeBook;
+
+	test.beforeAll(async () => {
+		service = secretClient()!;
+		book = await arrangeProbeBook(service, {
+			slug: SLUG,
+			title: 'Cover fallback probe',
+			author: 'probe',
+			language: 'en',
+			contents: ['Probe passage for the cover fallback test.']
+		});
+		const { error } = await service
+			.from('books')
+			.update({ cover_url: DEAD_COVER_URL })
+			.eq('slug', SLUG);
+		expect(error, `setting a cover_url on ${SLUG} failed: ${error?.message}`).toBeNull();
+	});
+
+	test.afterAll(async () => {
+		await retireProbeBook(service, SLUG);
+	});
+
+	test('a cover_url whose image request fails falls back to the generated cover, not a broken image', async ({
+		page
+	}) => {
+		await page.route(DEAD_COVER_URL, (route) => route.abort('failed'));
+
+		await gotoLibrary(page, '/type?lang=all');
+		const card = gridCard(page, book.slug);
+		await expect(card).toBeVisible();
+
+		// The generated cover takes over — present, not merely a lack of console noise — and
+		// no broken-image box is left in its place.
+		await expect(card.getByTestId('generated-cover')).toBeVisible();
+		await expect(card.locator('img')).toHaveCount(0);
 	});
 });
 

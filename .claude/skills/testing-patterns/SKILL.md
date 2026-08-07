@@ -49,6 +49,35 @@ Never write engine logic ahead of its test. The delicate cases are the point —
 - Simulate **real typing**: `keyboard.press` sequences including mistakes, backspace, and correction — this is the product's core loop and the portfolio showpiece.
 - Inspect the live page before writing locators — never guess selectors; prefer accessible roles/labels.
 - Cover: type a chunk to completion, make-and-fix errors (yellow state visible), progress persistence after reload (Phase 2+), EN and ES locales.
+- Two valid shapes, not one: browser E2E (a real browser against the real local stack) and
+  **database-level E2E** (assertions driven straight through `supabase-js` against the real local
+  stack, no page ever opened) for behavior that's genuinely end-to-end but has no meaningful
+  browser interaction to drive — e.g. `rls.e2e.ts`, `resume-rpc.e2e.ts`, `catalog-integrity.e2e.ts`.
+  Full layer boundaries (unit vs. component vs. browser-E2E vs. database-E2E) live in
+  `docs/agents/testing-boundaries.md` — read it before deciding where a new test belongs.
+
+### Deterministic waits — no sleeps, ever
+
+Every wait resolves against a real signal, never a fixed duration. The idioms already established
+in the suite (see `docs/agents/testing-boundaries.md` for the full writeup):
+
+- **Held-request gate** via `page.route` — hold a fetch open on a promise the test controls, assert
+  in-flight behavior, then release it.
+- **`expect.poll`** over a `supabase-js` read for state that lands in Postgres asynchronously.
+- **`page.clock`** (`install()` + `fastForward()`) to simulate elapsed time with zero real
+  wall-clock cost — only works when the code under test reads `Date.now()` live in the page.
+  Reference: `e2e/windowed-reading.e2e.ts`'s "a long stall in awaiting does not decay the cumulative
+  WPM once typing resumes" (spec #26, G4).
+- **MutationObserver "never appeared" watches** for negatives about a transient state, where a
+  post-hoc check can't tell "never happened" from "happened and left already" — see
+  `windowed-reading.e2e.ts`'s `watchForAwaiting`/`awaitingSightings`.
+
+### Coverage manifest
+
+A spec that adds a new CONTEXT.md glossary promise adds an entry to `e2e/coverage-manifest.json` in
+the same PR — `covered` with a real citation, or `deferred` with a written reason. Enforced in CI by
+`scripts/check-e2e-coverage.js` ("E2E coverage floor" step). See
+`docs/agents/testing-boundaries.md` for the convention in full.
 
 ## Quality standards
 
