@@ -1,0 +1,505 @@
+[
+	{
+		"id": "typeable-text-abstraction",
+		"glossaryTerm": "Typeable text",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "renders every seeded book as a card; choosing one shows the surface with focus ready"
+			}
+		]
+	},
+	{
+		"id": "book-metadata-on-cards",
+		"glossaryTerm": "Book",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/library.e2e.ts",
+				"testTitleContains": "a book card keeps its accessible name once the grid is filtered, searched and sorted together"
+			}
+		]
+	},
+	{
+		"id": "passage-terminology",
+		"glossaryTerm": "Chunk/Passage",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "renders every seeded book as a card; choosing one shows the surface with focus ready"
+			}
+		]
+	},
+	{
+		"id": "window-delivery-and-passage-param",
+		"glossaryTerm": "Window",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/windowed-reading.e2e.ts",
+				"testTitleContains": "?passage=N beyond the first window opens the window containing N"
+			}
+		]
+	},
+	{
+		"id": "window-stale-bound-reconciliation",
+		"glossaryTerm": "Window",
+		"status": "deferred",
+		"reason": "Requires mid-session test instrumentation in production code to force a re-check on demand; out of scope for a test-only spec (#26 gap G5)."
+	},
+	{
+		"id": "prefetch-threshold-single-flight",
+		"glossaryTerm": "Prefetch",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/windowed-reading.e2e.ts",
+				"testTitleContains": "the prefetch fires at three passages remaining and never blocks input"
+			}
+		]
+	},
+	{
+		"id": "prefetch-failure-retry",
+		"glossaryTerm": "Prefetch",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/windowed-reading.e2e.ts",
+				"testTitleContains": "clears itself once connectivity returns — no reload, no click"
+			}
+		]
+	},
+	{
+		"id": "character-state-machine",
+		"glossaryTerm": "Character state",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "correct → incorrect → backspace → corrected; first-attempt-correct survives retype"
+			}
+		]
+	},
+	{
+		"id": "corrected-counts-as-miss",
+		"glossaryTerm": "Corrected",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "em-dash placeholders until the first word boundary, then numbers; corrected char caps accuracy below 100%"
+			}
+		]
+	},
+	{
+		"id": "completed-chunk-rule",
+		"glossaryTerm": "Completed chunk",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "an unfixed error blocks completion; fixing it completes and auto-advances"
+			}
+		]
+	},
+	{
+		"id": "first-attempt-record-immutable",
+		"glossaryTerm": "First-attempt record",
+		"status": "deferred",
+		"reason": "Engine-internal invariant, not independently observable in the browser beyond what character-state and completed-chunk tests already prove; correctly a unit-test concern."
+	},
+	{
+		"id": "keystroke-log-source-of-truth",
+		"glossaryTerm": "Keystroke log",
+		"status": "deferred",
+		"reason": "Engine-internal; not independently observable at the E2E layer."
+	},
+	{
+		"id": "wpm-live-figure",
+		"glossaryTerm": "WPM",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "em-dash placeholders until the first word boundary, then numbers; corrected char caps accuracy below 100%"
+			}
+		]
+	},
+	{
+		"id": "wpm-per-attempt-persisted",
+		"glossaryTerm": "WPM",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/progress-ui.e2e.ts",
+				"testTitleContains": "completing a passage saves an attempt, rolls it up, and the book reopens at passage 2"
+			}
+		]
+	},
+	{
+		"id": "wpm-running-cumulative",
+		"glossaryTerm": "WPM",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "typing every chunk correctly auto-advances through the session into the summary"
+			}
+		]
+	},
+	{
+		"id": "accuracy-raw-live",
+		"glossaryTerm": "Accuracy (raw)",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "em-dash placeholders until the first word boundary, then numbers; corrected char caps accuracy below 100%"
+			}
+		]
+	},
+	{
+		"id": "mode-persists-reload-nav",
+		"glossaryTerm": "Mode",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/mode.e2e.ts",
+				"testTitleContains": "the toggle writes the cookie; the mode survives a reload and a navigation to another book"
+			}
+		]
+	},
+	{
+		"id": "normal-mode-derives-persists",
+		"glossaryTerm": "Normal mode",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/mode.e2e.ts",
+				"testTitleContains": "a passage typed wholly in Normal is written with figures and measured_ms = elapsed_ms"
+			}
+		]
+	},
+	{
+		"id": "zen-mode-no-derivation",
+		"glossaryTerm": "Zen mode",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/mode.e2e.ts",
+				"testTitleContains": "a Zen cookie reaches the first paint, and hydration never flashes the metrics"
+			}
+		]
+	},
+	{
+		"id": "zen-mixed-session-summary-omits-tiles",
+		"glossaryTerm": "Zen mode",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/mode.e2e.ts",
+				"testTitleContains": "after ANY Zen time the WPM and accuracy tiles are absent — and everything else is not"
+			}
+		]
+	},
+	{
+		"id": "zen-progress-is-progress-via-ui",
+		"glossaryTerm": "Zen mode",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/mode.e2e.ts",
+				"testTitleContains": "Zen progress is progress: the library card and the next visit both reflect a Zen completion"
+			}
+		]
+	},
+	{
+		"id": "measured-span-floor-via-real-typing",
+		"glossaryTerm": "Measured span",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/best-floor.e2e.ts",
+				"testTitleContains": "never sets a best_wpm or best_accuracy_raw, even though the attempt completes with a plausible gross_wpm"
+			}
+		]
+	},
+	{
+		"id": "session-states",
+		"glossaryTerm": "Session",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/windowed-reading.e2e.ts",
+				"testTitleContains": "shows the end-of-window state, distinct from the finished-book summary"
+			}
+		]
+	},
+	{
+		"id": "awaiting-discounts-from-wpm",
+		"glossaryTerm": "awaiting",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/windowed-reading.e2e.ts",
+				"testTitleContains": "a long stall in awaiting does not decay the cumulative WPM once typing resumes"
+			}
+		]
+	},
+	{
+		"id": "ingestion-manifest-report",
+		"glossaryTerm": "Ingestion",
+		"status": "deferred",
+		"reason": "Offline script, not a browser flow; covered by Vitest unit tests on the pure ingestion modules."
+	},
+	{
+		"id": "published-rls-gates-books-chunks",
+		"glossaryTerm": "Published",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/publication.e2e.ts",
+				"testTitleContains": "cannot see an unpublished book"
+			}
+		]
+	},
+	{
+		"id": "published-resume-rpc-gate",
+		"glossaryTerm": "Published",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/resume-rpc.e2e.ts",
+				"testTitleContains": "an unpublished book resumes at 0 for an authenticated caller"
+			}
+		]
+	},
+	{
+		"id": "featured-book-one-passage-hero",
+		"glossaryTerm": "Featured book",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/windowed-reading.e2e.ts",
+				"testTitleContains": "renders the featured book's first chunk and responds to the first keystroke"
+			}
+		]
+	},
+	{
+		"id": "featured-book-one-per-language",
+		"glossaryTerm": "Featured book",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/resume-rpc.e2e.ts",
+				"testTitleContains": "a second featured book in the same language is rejected"
+			}
+		]
+	},
+	{
+		"id": "cover-generated-fallback-absent-art",
+		"glossaryTerm": "Cover",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "renders every seeded book as a card; choosing one shows the surface with focus ready"
+			}
+		]
+	},
+	{
+		"id": "cover-load-failure-fallback",
+		"glossaryTerm": "Cover",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/library.e2e.ts",
+				"testTitleContains": "a cover_url whose image request fails falls back to the generated cover, not a broken image"
+			}
+		]
+	},
+	{
+		"id": "language-filter",
+		"glossaryTerm": "Language filter",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/library.e2e.ts",
+				"testTitleContains": "defaults to the UI locale content language at /type"
+			}
+		]
+	},
+	{
+		"id": "search-title-author",
+		"glossaryTerm": "Language filter (search)",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/library.e2e.ts",
+				"testTitleContains": "matches title and author case-insensitively, resolved server-side with no post-hydration flash"
+			}
+		]
+	},
+	{
+		"id": "sort-title-length",
+		"glossaryTerm": "Language filter (sort)",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/library.e2e.ts",
+				"testTitleContains": "?sort=title reorders the grid with locale-aware collation"
+			}
+		]
+	},
+	{
+		"id": "filter-search-sort-compose",
+		"glossaryTerm": "Language filter",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/library.e2e.ts",
+				"testTitleContains": "changing the sort preserves an active search and language filter"
+			}
+		]
+	},
+	{
+		"id": "continue-reading-section",
+		"glossaryTerm": "Continue reading",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/library.e2e.ts",
+				"testTitleContains": "an in-progress book appears in both the section and the grid, and the two cards do not collide"
+			}
+		]
+	},
+	{
+		"id": "typeable-character-set-published-content",
+		"glossaryTerm": "Typeable character set",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/catalog-integrity.e2e.ts",
+				"testTitleContains": "no published chunk contains a character outside printable ASCII, newline, or the accented/punctuation set"
+			}
+		]
+	},
+	{
+		"id": "progress-sync-append-only-rollups",
+		"glossaryTerm": "Progress/sync",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/progress.e2e.ts",
+				"testTitleContains": "a first completed attempt creates the row with the attempt’s bests and timestamps"
+			}
+		]
+	},
+	{
+		"id": "chunk-attempt-mode-span-columns",
+		"glossaryTerm": "Chunk attempt",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/progress.e2e.ts",
+				"testTitleContains": "the column-level INSERT grant reaches the three new columns, and still not id"
+			}
+		]
+	},
+	{
+		"id": "attempt-buffer-guest-and-transient",
+		"glossaryTerm": "Attempt buffer",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/progress-buffer.e2e.ts",
+				"testTitleContains": "a passage completed offline shows the pending notice and is written when connectivity returns"
+			}
+		]
+	},
+	{
+		"id": "resume-lowest-incomplete-index",
+		"glossaryTerm": "Resume",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/progress-ui.e2e.ts",
+				"testTitleContains": "with a gap — passages 1 and 3 complete, 2 not — the book opens at passage 2"
+			}
+		]
+	},
+	{
+		"id": "resume-fully-completed-book",
+		"glossaryTerm": "Resume",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/progress-ui.e2e.ts",
+				"testTitleContains": "a fully completed book opens at passage 1, showing 100%"
+			}
+		]
+	},
+	{
+		"id": "profile-created-on-signin",
+		"glossaryTerm": "Profile",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/rls.e2e.ts",
+				"testTitleContains": "creating an auth user creates exactly one matching profiles row"
+			}
+		]
+	},
+	{
+		"id": "profile-locale-precedence-signed-in",
+		"glossaryTerm": "Profile",
+		"status": "deferred",
+		"reason": "Guest halves of the locale precedence chain are covered in smoke.e2e.ts; the signed-in profiles.locale link is not a named candidate in spec #26 and has no reported bug behind it. Follow-up issue if it matters."
+	},
+	{
+		"id": "palette-font-independent-axes",
+		"glossaryTerm": "Palette/Font",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/theme.e2e.ts",
+				"testTitleContains": "a font choice applies instantly, survives reload, and never touches the palette"
+			}
+		]
+	},
+	{
+		"id": "contrast-axe-no-carveouts",
+		"glossaryTerm": "Contrast",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/library.e2e.ts",
+				"testTitleContains": "the default filtered library has no serious violations"
+			}
+		]
+	},
+	{
+		"id": "sheet-tonal-rendering",
+		"glossaryTerm": "Sheet",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "corrected renders identically to correct; incorrect carries non-color cues"
+			}
+		]
+	},
+	{
+		"id": "guest-resume-and-buffer",
+		"glossaryTerm": "Guest",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/progress-guest.e2e.ts",
+				"testTitleContains": "opens every book at passage 1, with every progress bar at 0%"
+			}
+		]
+	}
+]

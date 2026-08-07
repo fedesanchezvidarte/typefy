@@ -44,6 +44,9 @@ jobs:
       - name: i18n key parity (EN/ES)
         run: npm run check:i18n
 
+      - name: E2E coverage floor
+        run: node scripts/check-e2e-coverage.js
+
       - name: Lint (Prettier + ESLint)
         run: npm run lint
 

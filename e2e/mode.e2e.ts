@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { guestTest, type AuthUser } from './fixtures/auth';
 import { isLocalStack } from './support/supabase';
+import { gridCard } from './support/library';
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
 import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
 
@@ -324,6 +325,56 @@ test.describe('what a typed passage writes', () => {
 			expect(row.measured_ms).toBeLessThanOrEqual(row.elapsed_ms);
 			// And it is still a real traversal: the wall clock ran.
 			expect(row.elapsed_ms).toBeGreaterThan(0);
+		}
+	);
+
+	/**
+	 * "Zen progress is progress" (CONTEXT.md, Zen mode), proved through the UI rather than only
+	 * at the row — spec #26, gap G3. The test above already pins that the completion writes
+	 * `mode='zen'` with no figures; what it does not touch is whether that write actually moves
+	 * the two things a reader cares about: the book's completion percentage on its library card,
+	 * and where the NEXT visit resumes. A rollup trigger that folded a Zen completion into
+	 * `book_progress.chunks_completed` but a resume function that silently required `gross_wpm`
+	 * to be non-null would pass every test above and still strand a Zen reader on the same
+	 * passage forever.
+	 */
+	guestTest(
+		'Zen progress is progress: the library card and the next visit both reflect a Zen completion',
+		async ({ page, baseURL, mintUser, session }) => {
+			guestTest.skip(!isLocalStack, 'throwaway users are only created against a local stack');
+			guestTest.setTimeout(120_000);
+
+			const user = await mintUser();
+			await session.signInAs(user);
+			await setModeCookie(page, baseURL!, 'zen');
+
+			await openBook(page, SHORT_ID);
+			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
+			await type(page, tortoiseAndHare.chunks[0].content);
+			await expect(meta(page)).toContainText(`Passage 2 of ${tortoiseAndHare.chunkCount}`);
+
+			// Wait for the write to actually land — the library card reads the persisted
+			// rollup, not the session's own optimistic state, so this must be a real row.
+			// `SHORT_ID` is the book's SLUG (what the route and TypeableTextSummary use), not
+			// its `chunk_attempts.book_id` uuid, so — like `readAttempt` above — this is scoped
+			// by the fresh throwaway user rather than by book: a user this test just minted has
+			// exactly one attempt row no matter which book it is against.
+			await expect(async () => {
+				const { data, error } = await user.client.from('chunk_attempts').select('completed');
+				expect(error, `attempt read failed: ${error?.message}`).toBeNull();
+				expect(data).toHaveLength(1);
+			}).toPass({ timeout: 15_000 });
+
+			// The library card: book-lifetime completion, incremented by a Zen completion
+			// exactly like a Normal one (CONTEXT.md, Progress/sync).
+			const percent = Math.round((100 * 1) / tortoiseAndHare.chunkCount);
+			await page.goto('/type?lang=all');
+			await expect(gridCard(page, SHORT_ID)).toContainText(`${percent}%`);
+
+			// The next visit: resume is past the Zen-completed passage, not back at passage 1.
+			await page.goto(`/type/${SHORT_ID}`);
+			await expect(meta(page)).toContainText(`Passage 2 of ${tortoiseAndHare.chunkCount}`);
+			await expect(meta(page)).toContainText(`${percent}%`);
 		}
 	);
 
