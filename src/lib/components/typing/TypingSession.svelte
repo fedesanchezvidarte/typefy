@@ -20,10 +20,15 @@
 	import type {
 		ChunkWindow,
 		ChunkWindowResponse,
+		Mode,
 		TypeableTextSummary,
 		WindowProgressResponse
 	} from '$lib/types';
 	import { shouldPrefetch, WINDOW_SIZE } from '$lib/reading/window';
+	// Supabase-free by construction, and it must stay that way: it is imported STATICALLY
+	// here, so a Supabase import inside it would land in the guest's entry bundle and break
+	// the zero-bytes guarantee `loadProgressModules()` below exists to keep (spec #24 §12).
+	import { modeCookie } from '$lib/mode/mode';
 	// All three are Supabase-free and therefore STATICALLY importable — that is the whole
 	// point of the split (spec #15 §2/§4). `buffer` + `storage` name no browser global but
 	// `localStorage`; `drain-once` reaches `@supabase/*` and `drain.ts` only through its own
@@ -58,6 +63,17 @@
 		/** Chunk ids already completed at least once. Empty for guests. */
 		completedChunkIds: readonly string[];
 		/**
+		 * The measurement axis this session opens in (spec #24), from the `typefy-mode` cookie as
+		 * the route's load read it. **Required, not defaulted**: a future mount site that forgets
+		 * it must fail to compile rather than silently render Normal and start measuring someone
+		 * who asked not to be. The component is mounted in exactly one place today, so the rule
+		 * costs nothing now and buys the guarantee later.
+		 *
+		 * Read ONCE, to seed the reducer. From mount on the axis lives in `session.mode` and the
+		 * toggle owns it — this prop is the starting point, not a binding.
+		 */
+		mode: Mode;
+		/**
 		 * null for a guest — the sole gate on the write path. No insert, no import, no request.
 		 *
 		 * **It can flip to null mid-session** (ADR-0012, Phase 2c amendment). The parent derives it from
@@ -83,16 +99,18 @@
 		startIndex,
 		chunksCompleted,
 		completedChunkIds,
+		mode,
 		userId
 	}: Props = $props();
 
 	// One session per mounted instance. The parent keys this component on the book id, so
 	// `book` never changes here — no mount-time reset that could drop the first keystrokes.
 	// `startIndex` is read once for the same reason: a later `?passage=N` navigation must not
-	// yank a session that is already underway.
+	// yank a session that is already underway. `mode` is seeded the same way and for the same
+	// reason — the reducer is where the axis lives from here on (spec #24 §11).
 	let session = $state.raw<SessionState>(
 		untrack(() =>
-			createSession(loadedChunks(initialWindow.chunks, initialWindow.chunkCount), startIndex)
+			createSession(loadedChunks(initialWindow.chunks, initialWindow.chunkCount), startIndex, mode)
 		)
 	);
 	let liveMetrics = $state.raw<MetricsSnapshot | null>(null);
@@ -156,10 +174,19 @@
 	 */
 	let pendingSaves = $state(0);
 
-	// Zen mode (spec #9): a per-visit presentation toggle — the engine keeps
-	// logging (the keystroke log is the single source of truth); only the meta
-	// line's metric segments are subtracted.
-	let zen = $state(false);
+	/**
+	 * Zen, read off the REDUCER rather than held here (spec #24 §11).
+	 *
+	 * It used to be `let zen = $state(false)` — a per-visit presentation toggle that hid figures
+	 * the engine went on computing, forgot itself on every visit, and was invisible to
+	 * `chunk_attempts`. Mode is now the engine's measurement axis: the reducer decides what is
+	 * measured, so the component must not hold a second opinion about it. One source of truth,
+	 * and it is `session.mode`.
+	 *
+	 * The engine still keeps the keystroke log in Zen; what stops is deriving, displaying and
+	 * persisting WPM and accuracy (§2).
+	 */
+	const zen = $derived(session.mode === 'zen');
 
 	// ── Windowed reading: how far the session is loaded, and how the rest arrives ──────────
 	//
@@ -421,10 +448,20 @@
 			chunkId,
 			bookId: book.bookId,
 			completed: true,
+			// Nullable since spec #24: a traversal with ANY Zen time in it carries no figures at
+			// all. The buffer's guard accepts `null` for exactly these two fields — if it did not,
+			// every guest's Zen completion would read back as malformed and be silently dropped.
 			grossWpm: result.grossWpm,
 			accuracyRaw: result.accuracyRaw,
 			elapsedMs: result.elapsedMs,
 			startedAt,
+			// Always written, even though the buffer tolerates their ABSENCE on read: that
+			// tolerance is for pre-4a entries sitting in browsers today, not a licence for new
+			// entries to omit them (spec #24 §9). A row that carries figures must carry the span
+			// it measured alongside them.
+			mode: result.mode,
+			measuredMs: result.measuredMs,
+			measuredChars: result.measuredChars,
 			bufferedAt: now
 		};
 		enqueue(getAttemptStorage(ATTEMPT_BUFFER_KEY), entry, now);
@@ -469,10 +506,17 @@
 			chunkId,
 			bookId: book.bookId,
 			completed: true,
+			// Nullable metrics plus the span that produced them (spec #24 §5). The engine has
+			// already applied the whole-clean-traversal rule: any Zen time in this passage and
+			// `mode` is `'zen'` with both figures `null`, while `measuredMs`/`measuredChars` still
+			// record what WAS measured. Nothing is recomputed or second-guessed here.
 			grossWpm: result.grossWpm,
 			accuracyRaw: result.accuracyRaw,
 			elapsedMs: result.elapsedMs,
-			startedAt
+			startedAt,
+			mode: result.mode,
+			measuredMs: result.measuredMs,
+			measuredChars: result.measuredChars
 		});
 		if (!outcome.saved) {
 			failedSaves += 1;
@@ -627,7 +671,14 @@
 			// awaiting is dropped and returns the identical state, whose `activeChunk` is null.
 			const log = next.activeChunk?.log ?? [];
 			const last = log[log.length - 1];
-			if (last?.kind === 'char' && last.expected === ' ') {
+			// Gated on the mode as well as the boundary: in Zen nothing is derived at all
+			// (spec #24 §2), so the refresh is simply not taken.
+			//
+			// `liveMetrics` is deliberately NOT nulled on a switch INTO Zen. The last figure is
+			// still the last true reading of this session's measured spans, and the meta line
+			// does not show it in Zen anyway — nulling would only make `—` flash on the return to
+			// Normal, before the next word boundary produces a fresh one.
+			if (next.mode === 'normal' && last?.kind === 'char' && last.expected === ' ') {
 				liveMetrics = runningMetrics(next, Date.now()); // word boundary crossed
 			}
 		}
@@ -644,9 +695,21 @@
 		surface?.focusInput();
 	}
 
+	/**
+	 * The mode switch (spec #24 §11). Three things, in this order.
+	 *
+	 * 1. **Dispatch.** The reducer opens or closes the unmeasured span at this instant, so
+	 *    measurement stops and resumes exactly where the user asked — mid-word, mid-passage or
+	 *    between passages. It touches nothing else: not the active chunk, not the log, not the
+	 *    status. `session.mode` is then the new value, which is what `zen` reads.
+	 * 2. **Persist**, from `session.mode` rather than from the local expression, so the cookie
+	 *    can only ever record what the reducer actually accepted.
+	 * 3. **Focus.** Toggling chrome must not strand a keyboard-only user, exactly as before.
+	 */
 	function toggleZen() {
-		zen = !zen;
-		surface?.focusInput(); // toggling chrome must not strand focus either
+		dispatch({ type: 'set-mode', mode: zen ? 'normal' : 'zen', timestamp: Date.now() });
+		document.cookie = modeCookie(session.mode);
+		surface?.focusInput();
 	}
 
 	function pickAnother() {

@@ -170,6 +170,8 @@ function loadEvent(
 		user?: { id: string } | null;
 		slug?: string;
 		passage?: string | null;
+		/** The `typefy-mode` cookie's raw value; omitted means the cookie is absent. */
+		modeCookie?: string;
 	} = {}
 ) {
 	const slug = options.slug ?? SLUG;
@@ -183,6 +185,11 @@ function loadEvent(
 	const event = {
 		params: { slug },
 		url,
+		// Only `get` is stubbed: the load READS the mode cookie and never writes one — the
+		// toggle owns the write, client-side (spec #24 §10).
+		cookies: {
+			get: (name: string) => (name === 'typefy-mode' ? options.modeCookie : undefined)
+		},
 		locals: {
 			supabase: supabase.client,
 			safeGetSession: async () => ({
@@ -490,6 +497,42 @@ describe('/type/[slug] load — chunksCompleted', () => {
 		const data = await runLoad(event);
 
 		expect(data.chunksCompleted).toBe(0);
+	});
+});
+
+/**
+ * The mode cookie, read server-side (spec #24 §10). What matters here is that the value
+ * reaches the payload at the FIRST paint — a client-only read would render a metrics row and
+ * then visibly strip it on hydration — and that a guest and a signed-in user get the same
+ * answer from the same cookie, with no profile column and no precedence rule.
+ */
+describe('/type/[slug] load — the mode cookie', () => {
+	it('returns the cookie value', async () => {
+		const { event } = loadEvent({ user: USER, modeCookie: 'zen' });
+
+		expect((await runLoad(event)).mode).toBe('zen');
+	});
+
+	it('defaults to normal when there is no cookie — no cookie means no explicit choice', async () => {
+		const { event } = loadEvent({ user: USER });
+
+		expect((await runLoad(event)).mode).toBe('normal');
+	});
+
+	it('falls back to normal for an unrecognised value, silently', async () => {
+		// The `?passage=N` spirit: a stale or hand-edited cookie must still open the book.
+		const { event } = loadEvent({ user: USER, modeCookie: 'sprint' });
+
+		expect((await runLoad(event)).mode).toBe('normal');
+	});
+
+	it('answers a guest identically, and still issues no progress query', async () => {
+		const { event, supabase } = loadEvent({ user: null, modeCookie: 'zen' });
+
+		const data = await runLoad(event);
+
+		expect(data.mode).toBe('zen');
+		expect(supabase.tablesQueried()).toEqual(['books', 'chunks']);
 	});
 });
 

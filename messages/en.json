@@ -64,6 +64,7 @@
 	"unit_wpm": "wpm",
 	"summary_passages": "Passages",
 	"summary_time": "Time",
+	"summary_zen_note": "Zen mode: this session wasn't measured.",
 	"summary_type_again": "Type it again",
 	"summary_back_to_library": "Back to library",
 	"summary_save_pending": [

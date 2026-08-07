@@ -1,12 +1,13 @@
 import type { PageServerLoad } from './$types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
-import type { ChunkWindow, TypeableTextSummary } from '$lib/types';
+import type { ChunkWindow, Mode, TypeableTextSummary } from '$lib/types';
 import { error } from '@sveltejs/kit';
 import { getBookSummaryBySlug, getChunkWindow } from '$lib/server/books';
 import { getBookCompletionCount, getCompletedChunkIds } from '$lib/server/progress';
 import { resolveStartIndex } from '$lib/progress/resume';
 import { clampWindow, WINDOW_SIZE } from '$lib/reading/window';
+import { MODE_COOKIE, parseMode } from '$lib/mode/mode';
 
 /**
  * One book's METADATA and the FIRST WINDOW of its chunks (spec #18). An unknown slug is a
@@ -53,6 +54,15 @@ export interface TypingPageData {
 	/** Completed ids among `window.chunks` only. A `Set` does not survive load serialisation. */
 	completedChunkIds: string[];
 	chunksCompleted: number;
+	/**
+	 * The measurement axis this session opens in (spec #24 §10), from the `typefy-mode` cookie.
+	 *
+	 * Read HERE rather than in `hooks.server.ts` — see `$lib/mode/mode.ts` for the argument.
+	 * The short version: exactly one route uses it, there is no chrome attribute to stamp
+	 * before paint, and the thing §10 actually protects against is rendering a metrics row and
+	 * then visibly stripping it on hydration, which a load read fixes at the same first paint.
+	 */
+	mode: Mode;
 }
 
 /**
@@ -61,13 +71,18 @@ export interface TypingPageData {
  * concrete type and checking it against `PageServerLoad` keeps both — the route
  * contract AND a return type the load's tests can actually hold to.
  */
-export const load = (async ({ params, locals, url }): Promise<TypingPageData> => {
+export const load = (async ({ params, locals, url, cookies }): Promise<TypingPageData> => {
 	const book = await getBookSummaryBySlug(locals.supabase, params.slug);
 	if (!book) {
 		error(404, 'Book not found');
 	}
 
 	const passage = url.searchParams.get('passage');
+	// No cookie means no explicit choice, so `normal` applies — the theme contract, verbatim.
+	// An unrecognised value falls back the same way and silently, in the `?passage=N` spirit:
+	// a stale hand-edited cookie must still open the book. Identical for guests and signed-in
+	// users; mode has no profile column and no precedence rule (§10).
+	const mode = parseMode(cookies.get(MODE_COOKIE)) ?? 'normal';
 	const { user } = await locals.safeGetSession();
 
 	if (!user) {
@@ -79,7 +94,8 @@ export const load = (async ({ params, locals, url }): Promise<TypingPageData> =>
 			window: await readWindow(locals.supabase, book, startIndex),
 			startIndex,
 			completedChunkIds: [],
-			chunksCompleted: 0
+			chunksCompleted: 0,
+			mode
 		};
 	}
 
@@ -109,7 +125,8 @@ export const load = (async ({ params, locals, url }): Promise<TypingPageData> =>
 		completedChunkIds: window.chunks
 			.filter((chunk) => completed.has(chunk.id))
 			.map((chunk) => chunk.id),
-		chunksCompleted
+		chunksCompleted,
+		mode
 	};
 }) satisfies PageServerLoad;
 

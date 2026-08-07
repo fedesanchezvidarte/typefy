@@ -23,7 +23,13 @@
      `data.window` is the FIRST window only (spec #18). Windows 2..n never come back
      through this load — `TypingSession` fetches them from the chunks endpoint into its
      own state, because any load invalidation here would re-run the book read and
-     re-serialise mid-passage (spec §6). -->
+     re-serialise mid-passage (spec §6).
+
+     `data.mode` is the cookie's value as the server read it (spec #24 §10). It SEEDS the
+     session and is not a live binding: the toggle owns the axis from mount on, and writes
+     the cookie so the next load agrees. Navigating to another book remounts through this
+     `{#key}`, which is what makes the choice survive the navigation. -->
+
 {#key data.book.id}
 	<TypingSession
 		book={data.book}
@@ -31,6 +37,7 @@
 		startIndex={data.startIndex}
 		chunksCompleted={data.chunksCompleted}
 		completedChunkIds={data.completedChunkIds}
+		mode={data.mode}
 		{userId}
 	/>
 {/key}

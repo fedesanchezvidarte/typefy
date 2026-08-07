@@ -64,6 +64,7 @@
 	"unit_wpm": "ppm",
 	"summary_passages": "Pasajes",
 	"summary_time": "Tiempo",
+	"summary_zen_note": "Modo zen: esta sesión no se midió.",
 	"summary_type_again": "Escríbelo otra vez",
 	"summary_back_to_library": "Volver a la biblioteca",
 	"summary_save_pending": [
