@@ -31,6 +31,14 @@ phase: the catalog reaches its target 12 books (6 `en` / 6 `es`), six of them ca
 cover; the library gained a server-side **language filter** and a **continue reading** section for
 signed-in users.
 
+Phase 4 is split into **4a** (spec #24 — mode as the measurement axis), **4b** (spec #25 — polish:
+palette contrast, catalog search and sort, accessibility sweep) and **4c** (spec #26 — E2E coverage
+audited against this glossary, with a CI floor). **4a** is complete and opens the phase: **mode** is
+now a first-class concept the engine, the schema and the persistence layer all carry, measurement is
+scoped to the **measured span** rather than to one whole passage, and **Zen mode** finally means what
+this glossary has promised since Phase 0 — a Zen passage derives, displays and persists no WPM and no
+accuracy. 4b and 4c both depend on it landing first.
+
 Phased roadmap:
 
 - **Phase 0** — ✅ Scaffolding + baseline i18n: SvelteKit+TS, Tailwind, Vitest/Playwright,
@@ -48,7 +56,13 @@ Phased roadmap:
   Storage; the library gained a **language filter** and a **continue reading** section). The order
   was load-bearing: 3b rewrote how the typing screen fetches its text and could not be honestly
   tested without the real long books 3a put in the database.
-- **Phase 4** — Game modes + polish + E2E coverage.
+- **Phase 4** — Modes + polish + E2E coverage. Split into **4a** (✅ spec #24 — **mode** as the
+  measurement axis: honest Zen, span-scoped metrics, nullable metrics and span columns on
+  `chunk_attempts`, the 100-character best floor), **4b** (spec #25 — polish: palette contrast,
+  catalog search and sort, an accessibility sweep) and **4c** (spec #26 — an E2E gap audit against
+  this glossary and a CI coverage floor). The order is load-bearing the same way Phase 3's was: 4b
+  polishes and 4c covers a typing screen whose measurement axis 4a defines, so both would have to be
+  redone against it otherwise.
 
 ## Glossary
 
@@ -106,9 +120,50 @@ Use these terms as defined here; do not drift to synonyms.
   complete but diverge mid-chunk: a total-length denominator would render live accuracy as ~5% at the
   first keystroke. The `corrected` state counts as a miss even though it is visually resolved.
   (Implemented in `src/lib/engine/metrics.ts`.)
-- **Normal mode** — Tracks WPM + accuracy, with live metrics (update granularity configurable by
-  word / line / page; default: word).
-- **Zen mode** — No WPM/accuracy tracking; only text completion %.
+- **Mode** — The **measurement** axis, and only that. It answers exactly one question — *is this
+  stretch of typing being measured?* — with exactly two values, **Normal mode** and **Zen mode**.
+  It is not a presentation: a future page-view is a **separate axis** added beside it, never a third
+  value inside it, the same discipline [ADR-0011](docs/adr/0011-two-axis-theming.md) applies to
+  palette and typeface ([ADR-0014](docs/adr/0014-mode-measurement-axis.md)). Persisted in one cookie
+  (`typefy-mode`, `src/lib/mode/mode.ts`), written client-side by the toggle on the typing screen and
+  read server-side in that route's load, following the contract the theming cookies already
+  establish: no cookie means no explicit choice and the default applies. **Guests and signed-in users
+  behave identically** — no profile column, no precedence rule. Since Phase 4a (spec #24) the engine,
+  `chunk_attempts` and the rollups all carry it.
+- **Normal mode** — The **mode** axis's default value: typing that **is** measured. WPM and accuracy
+  are derived from the **keystroke log**, shown live on the typing screen (refreshed at each word
+  boundary) and persisted on the **chunk attempt**. A traversal typed wholly in Normal is the only
+  one that writes figures, and its `measured_ms` equals its `elapsed_ms`.
+- **Zen mode** — The **mode** axis's other value: typing that is **not** measured. The engine still
+  records the **keystroke log** — it costs nothing, and keeping it is what makes switching back
+  mid-passage work at all — but for a Zen stretch **nothing is derived, displayed or persisted**: no
+  WPM, no accuracy, on the meta line or in the database. Zen time is discounted from elapsed by the
+  same mechanism `awaiting` time already is, and the two are kept **disjoint** so no millisecond is
+  ever discounted twice ([ADR-0004](docs/adr/0004-typing-engine-model.md)'s Phase 4a amendment).
+  Switching is free at any moment — mid-word, mid-passage, between passages — and measurement stops
+  and resumes on the switch in both directions. **Zen progress is progress**: completion, resume,
+  book percentages and continue reading behave identically in both modes, and a user who reads a
+  whole book in Zen has read a whole book. A session containing *any* Zen time shows no WPM and no
+  accuracy tile on its summary — **absent, not blanked**, since a tile advertising the number Zen
+  refused is worse than no tile. Until Phase 4a (spec #24) this entry was a promise the code never
+  kept: Zen was a per-visit toggle that hid figures the engine went on computing and wrote anyway.
+- **Measured span** — A contiguous stretch of typing performed in **Normal mode**, and the unit
+  measurement is scoped to since Phase 4a (spec #24). A traversal or a **session** may contain
+  several, separated by Zen stretches; every figure is computed over the measured spans only, with
+  Zen characters and **first-attempt records** excluded from the counts and Zen time from elapsed.
+  **Two levels of honesty, deliberately different.** The live and session figures cover every
+  measured span, so someone who types half a session in Zen and switches back sees a real figure for
+  the half that was measured. A persisted **chunk attempt** instead requires a *whole clean
+  traversal*: any Zen time in that passage and the row carries no figures at all. Each row records
+  its span either way, in `measured_ms` (≤ `elapsed_ms`, equal exactly when the traversal was wholly
+  Normal) and `measured_chars`, so "what did this number measure?" is answerable from the row rather
+  than assumed from its type. A measured span shorter than `BEST_MEASURED_CHARS_FLOOR` — **100
+  characters**, ≈20 words, `src/lib/progress/client.ts`, enforced by the rollup trigger — is stored
+  and counted like any other but never sets a `best_*`. Chunks are 400-600 characters
+  ([ADR-0005](docs/adr/0005-paragraph-chunking.md)), so a genuine passage clears the floor
+  comfortably; what it stops is a short sprint at the tail of an otherwise-Zen passage banking an
+  unbeatable rate. It is a **sanity floor, never an anti-cheat** — `measured_chars` is client-asserted
+  exactly like `gross_wpm` ([ADR-0012](docs/adr/0012-client-trusted-progress-writes.md)).
 - **Session** — Short typing stretch (one or a few chunks). Long texts are consumed in mini sessions, not
   in one sitting. Since Phase 3b (spec #18) a session is in exactly one of three named states:
   `active` (a passage is loaded and typeable), **`awaiting`** (the next passage's **window** has not
@@ -205,11 +260,23 @@ Use these terms as defined here; do not drift to synonyms.
   chance to persist: a completion that cannot be written then — a guest's, or a transiently failed
   write's — is held in the **attempt buffer** and drained into the same table later. So a persisted
   attempt keeps the genuine first-keystroke `started_at` but may carry rollup timestamps that mark
-  the *drain* moment rather than the typing moment (ADR-0010's Phase 2c amendment).
+  the *drain* moment rather than the typing moment (ADR-0010's Phase 2c amendment). Since Phase 4a
+  (spec #24) **`best_wpm` and `best_accuracy_raw` have a floor**: an attempt sets neither unless it
+  completed, carries non-NULL metrics, and its **measured span** reaches
+  `BEST_MEASURED_CHARS_FLOOR` (100 characters). Everything else about a rollup is mode-blind —
+  `attempt_count` and `last_attempt_at` move on every insert, `first_completed_at` on any completed
+  attempt, and `chunks_completed` counts a Zen completion exactly like a Normal one.
 - **Chunk attempt** — One traversal of one chunk from first keystroke to completion. The atomic unit of
   persisted progress: each completed attempt appends an immutable row (gross WPM, accuracy, elapsed) to
   the history. Distinct from **Session** (a typing stretch of one or more chunks) and from the engine's
-  in-memory session state.
+  in-memory session state. Since Phase 4a (spec #24) the row also records **what it measured** —
+  its **mode**, `measured_ms` and `measured_chars` — and **gross WPM and accuracy are nullable**.
+  They are NULL under the *whole-clean-traversal rule*: a row carries figures only if the entire
+  traversal was typed in Normal, so any Zen time at all — even an instantaneous toggle that accrued
+  no milliseconds — writes `mode = 'zen'` with both metrics NULL while the span columns still record
+  what was measured. A partial figure filed as *that passage's* result is the thing the rule refuses,
+  because `chunk_attempts` is what `best_*` and every future stats screen read. `elapsed_ms` keeps its
+  meaning unchanged — wall clock, first keystroke to completion — and is not redefined.
 - **Attempt buffer** — A capped, local (per-browser) store of completed **chunk attempts** awaiting
   persistence, drained into `chunk_attempts` once a valid session exists. Two things fill it: a
   guest's completion (no session to write under) and a signed-in user's **transient** write failure
@@ -278,3 +345,4 @@ Use these terms as defined here; do not drift to synonyms.
 - [ADR-0011](docs/adr/0011-two-axis-theming.md) — Two-axis theming: palettes as data, fonts as data
 - [ADR-0012](docs/adr/0012-client-trusted-progress-writes.md) — Client-trusted progress writes
 - [ADR-0013](docs/adr/0013-typeable-character-set.md) — Typeable character set and source normalization
+- [ADR-0014](docs/adr/0014-mode-measurement-axis.md) — Mode as the measurement axis
