@@ -36,22 +36,45 @@ const OTHER_BOOK_SLUG = 'pride-and-prejudice-excerpt';
 /** Read the real seeded shape rather than assuming it — shared with the auth fixture. */
 const readBook = readSeededBook;
 
+/**
+ * The best guard's floor (spec #24 §6): a measured span shorter than this many characters
+ * is stored but never sets a `best_*`. Duplicated from the migration deliberately — a test
+ * that imported the constant would agree with the code by construction and prove nothing.
+ */
+const BEST_GUARD_CHARS = 100;
+
+/** A measured span comfortably over the floor: a real chunk is 400-600 chars (ADR-0005). */
+const FULL_SPAN_CHARS = 420;
+
 interface AttemptInput {
 	chunkId: string;
 	bookId: string;
 	completed?: boolean;
-	grossWpm?: number;
-	accuracyRaw?: number;
+	grossWpm?: number | null;
+	accuracyRaw?: number | null;
 	elapsedMs?: number;
 	/** Client-supplied and informational only: no rollup rule may read it. */
 	startedAt?: string;
+	/** Spec #24. Defaults describe a whole passage typed in Normal — what every pre-4a case was. */
+	mode?: 'normal' | 'zen';
+	measuredMs?: number;
+	measuredChars?: number;
 }
 
 /**
  * Insert one attempt as `user` and return the server clock it was stamped with. Every
  * rollup timestamp must equal this value, never the client-supplied `started_at`.
+ *
+ * Since spec #24 an attempt also states WHAT IT MEASURED, and the defaults here say "a
+ * whole passage, in Normal" — which is what every attempt in this file was before 4a, and
+ * what §8's backfill asserts of every pre-existing row. That matters for the `best_*`
+ * cases below: `measured_chars` defaults to 0 in the schema, and the best guard reads it,
+ * so an attempt that omits the column can never set a best. Leaving the omission in place
+ * would have quietly turned every best assertion in this file into an assertion about the
+ * guard instead of about the rollup.
  */
 async function insertAttempt(user: TestUser, input: AttemptInput): Promise<string> {
+	const elapsedMs = input.elapsedMs ?? 30_000;
 	const { data, error } = await user.client
 		.from('chunk_attempts')
 		.insert({
@@ -59,10 +82,13 @@ async function insertAttempt(user: TestUser, input: AttemptInput): Promise<strin
 			chunk_id: input.chunkId,
 			book_id: input.bookId,
 			completed: input.completed ?? true,
-			gross_wpm: input.grossWpm ?? 50,
-			accuracy_raw: input.accuracyRaw ?? 0.9,
-			elapsed_ms: input.elapsedMs ?? 30_000,
-			started_at: input.startedAt ?? new Date().toISOString()
+			gross_wpm: input.grossWpm === undefined ? 50 : input.grossWpm,
+			accuracy_raw: input.accuracyRaw === undefined ? 0.9 : input.accuracyRaw,
+			elapsed_ms: elapsedMs,
+			started_at: input.startedAt ?? new Date().toISOString(),
+			mode: input.mode ?? 'normal',
+			measured_ms: input.measuredMs ?? elapsedMs,
+			measured_chars: input.measuredChars ?? FULL_SPAN_CHARS
 		})
 		.select('created_at')
 		.single();
@@ -381,6 +407,259 @@ test.describe('book_progress rollup', () => {
 		// its ceiling: 100% and no further.
 		const final = await readBookProgress(reader, book.id);
 		expect(final.chunks_completed).toBe(book.chunkCount);
+	});
+});
+
+/**
+ * Mode and measured spans (spec #24 §§5-7), at the level where they are actually decided.
+ *
+ * The engine's own rules are unit-tested and the write path is component-tested with a
+ * mocked client; neither can see the trigger. Everything below is a property of the
+ * DATABASE — a CHECK constraint, a column-level grant, and a rewritten
+ * `apply_chunk_attempt_rollups()` — so it is asserted the only honest way: by inserting a
+ * real row through PostgREST as a real user and reading back what the trigger produced.
+ */
+test.describe('mode and the best guard (spec #24)', () => {
+	// Serial, one user, a fresh chunk per test — same shape and same reasoning as the
+	// chunk_progress describe above.
+	test.describe.configure({ mode: 'serial' });
+	test.skip(
+		!isLocalStack,
+		`refusing to create throwaway users against a non-local Supabase (${SUPABASE_URL})`
+	);
+
+	let typist: TestUser;
+	let book: SeededBook;
+
+	test.beforeAll(async () => {
+		const anon = anonClient();
+		[typist, book] = await Promise.all([signUpUser('progress'), readBook(anon, OTHER_BOOK_SLUG)]);
+		expect(book.chunkCount, 'this describe needs one fresh chunk per test').toBeGreaterThanOrEqual(
+			5
+		);
+	});
+
+	test.afterAll(async () => {
+		await deleteUsers(typist.id);
+	});
+
+	test('the axis is closed: a value outside normal|zen is refused by the constraint', async () => {
+		// The value a future page-view presentation would be tempted to fold into this
+		// column (§1). The database is where that temptation is stopped.
+		const refused = await typist.client.from('chunk_attempts').insert({
+			user_id: typist.id,
+			chunk_id: book.chunkIds[0],
+			book_id: book.id,
+			completed: true,
+			gross_wpm: 50,
+			accuracy_raw: 0.9,
+			elapsed_ms: 30_000,
+			started_at: new Date().toISOString(),
+			mode: 'zen-page' as 'normal' | 'zen',
+			measured_ms: 30_000,
+			measured_chars: FULL_SPAN_CHARS
+		});
+		expect(refused.error, 'a mode outside the axis was accepted').not.toBeNull();
+		expect(refused.error!.code, refused.error!.message).toBe('23514'); // check_violation
+	});
+
+	test('measured_ms may not exceed elapsed_ms', async () => {
+		// §5: `measured_ms <= elapsed_ms` always, and they are equal exactly when the whole
+		// traversal was Normal. A row claiming to have measured more than the wall clock is
+		// nonsense no client should be able to file.
+		const refused = await typist.client.from('chunk_attempts').insert({
+			user_id: typist.id,
+			chunk_id: book.chunkIds[0],
+			book_id: book.id,
+			completed: true,
+			gross_wpm: 50,
+			accuracy_raw: 0.9,
+			elapsed_ms: 10_000,
+			started_at: new Date().toISOString(),
+			mode: 'normal',
+			measured_ms: 10_001,
+			measured_chars: FULL_SPAN_CHARS
+		});
+		expect(refused.error, 'measured_ms > elapsed_ms was accepted').not.toBeNull();
+		expect(refused.error!.code, refused.error!.message).toBe('23514');
+	});
+
+	test('the column-level INSERT grant reaches the three new columns, and still not id', async () => {
+		// §7: the 2b migration replaced the table-level grant with a column-level one, so a
+		// new column that is not named in it fails SILENTLY at the client. This is the
+		// assertion that would have caught that — a round trip of all three values.
+		const chunkId = book.chunkIds[1];
+		await insertAttempt(typist, {
+			chunkId,
+			bookId: book.id,
+			mode: 'zen',
+			grossWpm: null,
+			accuracyRaw: null,
+			elapsedMs: 20_000,
+			measuredMs: 7_500,
+			measuredChars: 250
+		});
+
+		const stored = await typist.client
+			.from('chunk_attempts')
+			.select('mode, measured_ms, measured_chars, gross_wpm, accuracy_raw')
+			.eq('chunk_id', chunkId)
+			.single();
+		expect(stored.error, `attempt read failed: ${stored.error?.message}`).toBeNull();
+		expect(stored.data).toEqual({
+			mode: 'zen',
+			measured_ms: 7_500,
+			measured_chars: 250,
+			gross_wpm: null,
+			accuracy_raw: null
+		});
+
+		// `id` stays omitted from the grant alongside `created_at`, so it keeps falling to
+		// its default. (`created_at` has its own test in the chunk_progress describe.)
+		const refused = await typist.client.from('chunk_attempts').insert({
+			id: '00000000-0000-4000-8000-000000000001',
+			user_id: typist.id,
+			chunk_id: chunkId,
+			book_id: book.id,
+			completed: true,
+			gross_wpm: 50,
+			accuracy_raw: 0.9,
+			elapsed_ms: 30_000,
+			started_at: new Date().toISOString()
+		});
+		expect(refused.error, 'a client-supplied id was accepted').not.toBeNull();
+		expect(refused.error!.code).toBe('42501');
+	});
+
+	test('a completed Zen attempt is progress: it counts and completes, but sets no best', async () => {
+		const chunkId = book.chunkIds[2];
+		const zenAt = await insertAttempt(typist, {
+			chunkId,
+			bookId: book.id,
+			mode: 'zen',
+			grossWpm: null,
+			accuracyRaw: null,
+			measuredMs: 0,
+			measuredChars: 0
+		});
+
+		const row = await readChunkProgress(typist, chunkId);
+		expect(row.attempt_count).toBe(1);
+		expect(epoch(row.last_attempt_at)).toBe(epoch(zenAt));
+		// "Zen progress is progress" (§7): the passage is completed, and resume, book
+		// percentages and continue-reading all read this timestamp.
+		expect(epoch(row.first_completed_at)).toBe(epoch(zenAt));
+		// Nothing was measured, so there is nothing to be best at — null, not zero.
+		expect(row.best_wpm).toBeNull();
+		expect(row.best_accuracy_raw).toBeNull();
+	});
+
+	test('a Zen attempt never disturbs a best a Normal attempt already set', async () => {
+		const chunkId = book.chunkIds[3];
+		const normalAt = await insertAttempt(typist, {
+			chunkId,
+			bookId: book.id,
+			grossWpm: 70,
+			accuracyRaw: 0.98
+		});
+		const zenAt = await insertAttempt(typist, {
+			chunkId,
+			bookId: book.id,
+			mode: 'zen',
+			grossWpm: null,
+			accuracyRaw: null,
+			measuredMs: 0,
+			measuredChars: 0
+		});
+
+		const row = await readChunkProgress(typist, chunkId);
+		expect(row.attempt_count).toBe(2);
+		expect(epoch(row.last_attempt_at)).toBe(epoch(zenAt));
+		expect(epoch(row.first_completed_at)).toBe(epoch(normalAt));
+		// `greatest()` ignores NULLs, but the `case` arms are what actually decide this:
+		// a NULL-metric attempt must not reach them at all.
+		expect(Number(row.best_wpm)).toBeCloseTo(70, 6);
+		expect(Number(row.best_accuracy_raw)).toBeCloseTo(0.98, 6);
+	});
+
+	test('the best guard is a floor at 100 measured characters, tested on both sides of it', async () => {
+		const chunkId = book.chunkIds[4];
+
+		// One character short: stored, counted, completed — and never a best, however
+		// spectacular the rate. This is the short end-of-passage sprint §6 exists to stop.
+		const shortAt = await insertAttempt(typist, {
+			chunkId,
+			bookId: book.id,
+			grossWpm: 400,
+			accuracyRaw: 1,
+			measuredChars: BEST_GUARD_CHARS - 1
+		});
+		let row = await readChunkProgress(typist, chunkId);
+		expect(row.attempt_count).toBe(1);
+		expect(epoch(row.first_completed_at)).toBe(epoch(shortAt));
+		expect(row.best_wpm, 'a 99-character span set a best').toBeNull();
+		expect(row.best_accuracy_raw).toBeNull();
+
+		// Exactly at the floor: the guard is `>=`, so this one counts. Asserted at the
+		// boundary rather than comfortably past it — an off-by-one in the migration is
+		// invisible to any test that only ever measures whole passages.
+		await insertAttempt(typist, {
+			chunkId,
+			bookId: book.id,
+			grossWpm: 65,
+			accuracyRaw: 0.91,
+			measuredChars: BEST_GUARD_CHARS
+		});
+		row = await readChunkProgress(typist, chunkId);
+		expect(row.attempt_count).toBe(2);
+		expect(Number(row.best_wpm)).toBeCloseTo(65, 6);
+		expect(Number(row.best_accuracy_raw)).toBeCloseTo(0.91, 6);
+
+		// And a later short sprint still cannot beat it.
+		await insertAttempt(typist, {
+			chunkId,
+			bookId: book.id,
+			grossWpm: 999,
+			accuracyRaw: 1,
+			measuredChars: 20
+		});
+		row = await readChunkProgress(typist, chunkId);
+		expect(row.attempt_count).toBe(3);
+		expect(Number(row.best_wpm)).toBeCloseTo(65, 6);
+		expect(Number(row.best_accuracy_raw)).toBeCloseTo(0.91, 6);
+	});
+
+	test('book_progress counts a Zen completion exactly like a Normal one', async () => {
+		// §7 again, one level up: completion percentages, resume and continue-reading must
+		// behave identically in both modes. A second book, so this cannot collide with the
+		// per-chunk cases above.
+		const anon = anonClient();
+		const otherBook = await readBook(anon, BOOK_SLUG);
+		const reader = await signUpUser('progress');
+		try {
+			await insertAttempt(reader, {
+				chunkId: otherBook.chunkIds[0],
+				bookId: otherBook.id,
+				mode: 'zen',
+				grossWpm: null,
+				accuracyRaw: null,
+				measuredMs: 0,
+				measuredChars: 0
+			});
+			let row = await readBookProgress(reader, otherBook.id);
+			expect(row.chunks_completed).toBe(1);
+
+			await insertAttempt(reader, {
+				chunkId: otherBook.chunkIds[1],
+				bookId: otherBook.id,
+				mode: 'normal'
+			});
+			row = await readBookProgress(reader, otherBook.id);
+			expect(row.chunks_completed).toBe(2);
+			expect(await countCompletedChunks(reader, otherBook.id)).toBe(2);
+		} finally {
+			await deleteUsers(reader.id);
+		}
 	});
 });
 

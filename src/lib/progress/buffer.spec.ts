@@ -81,8 +81,29 @@ function entry(over: Partial<BufferedChunkAttempt> = {}): BufferedChunkAttempt {
 		elapsedMs: 42_124,
 		startedAt: 1_700_000_000_000,
 		bufferedAt: 1_700_000_000_000,
+		mode: 'normal',
+		measuredMs: 42_124,
+		measuredChars: 431,
 		...over
 	};
+}
+
+/**
+ * A pre-4a entry, exactly as it sits in a real browser today: the three span fields simply
+ * do not exist on it. Built by deletion from the current shape rather than declared
+ * separately, so it stays a genuine subset if the shape grows again.
+ */
+function legacyEntry(over: Partial<BufferedChunkAttempt> = {}): BufferedChunkAttempt {
+	const {
+		mode: _mode,
+		measuredMs: _measuredMs,
+		measuredChars: _measuredChars,
+		...legacy
+	} = entry(over);
+	void _mode;
+	void _measuredMs;
+	void _measuredChars;
+	return legacy;
 }
 
 const NOW = 1_700_000_100_000;
@@ -99,6 +120,12 @@ function seed(entries: BufferedChunkAttempt[]) {
 describe('attempt buffer constants', () => {
 	it('exposes a versioned storage key so a shape change abandons old data instead of migrating it', () => {
 		expect(ATTEMPT_BUFFER_KEY).toMatch(/:v1$/);
+	});
+
+	it('is STILL v1 after spec #24 — a bump would discard every unsent guest completion', () => {
+		// The three span fields are optional on READ precisely so this key can stay put.
+		// Changing this string is a data-loss change, not a version-hygiene one.
+		expect(ATTEMPT_BUFFER_KEY).toBe('typefy:attempt-buffer:v1');
 	});
 
 	it('exposes the cap as a named constant — the sign-in prompt clamps its count against it', () => {
@@ -203,6 +230,70 @@ describe('readAll', () => {
 		const storage = seed([entry({ chunkId: 'edge', bufferedAt: NOW - ATTEMPT_BUFFER_TTL_MS })]);
 
 		expect(readAll(storage, NOW)).toHaveLength(1);
+	});
+});
+
+describe('the measurement axis on a buffered entry (spec #24 §9)', () => {
+	it('round-trips mode and the span fields through the storage port', () => {
+		const storage = fakeStorage(null);
+		const mixed = entry({ mode: 'zen', grossWpm: null, accuracyRaw: null, measuredMs: 18_400 });
+
+		enqueue(storage, mixed, NOW);
+
+		expect(readAll(storage, NOW)[0]).toEqual(mixed);
+	});
+
+	it('KEEPS an entry whose metrics are null — every guest Zen completion depends on it', () => {
+		// The trap: `isFiniteNumber(null)` is false, so validating these two fields with it
+		// would drop every Zen completion on read, silently, which is the exact loss the
+		// buffer exists to prevent.
+		const storage = seed([
+			entry({ chunkId: 'zen', grossWpm: null, accuracyRaw: null, mode: 'zen', bufferedAt: T(100) })
+		]);
+
+		expect(readAll(storage, NOW).map((e) => e.chunkId)).toEqual(['zen']);
+	});
+
+	it('keeps a pre-existing v1 entry that predates the three fields', () => {
+		const storage = seed([legacyEntry({ chunkId: 'legacy', bufferedAt: T(100) })]);
+
+		const [read] = readAll(storage, NOW);
+
+		expect(read.chunkId).toBe('legacy');
+		expect(read.mode).toBeUndefined();
+		expect(read.measuredMs).toBeUndefined();
+		expect(read.measuredChars).toBeUndefined();
+	});
+
+	it('still drops an entry whose mode is not a Mode — a hand edit must not reach the CHECK', () => {
+		const storage = seed([
+			entry({ chunkId: 'good', bufferedAt: T(100) }),
+			{ ...entry({ chunkId: 'bad-mode' }), mode: 'sprint' } as unknown as BufferedChunkAttempt
+		]);
+
+		expect(readAll(storage, NOW).map((e) => e.chunkId)).toEqual(['good']);
+	});
+
+	it('still drops an entry whose span fields are present but not numbers', () => {
+		const storage = seed([
+			entry({ chunkId: 'good', bufferedAt: T(100) }),
+			{ ...entry({ chunkId: 'bad-ms' }), measuredMs: 'lots' } as unknown as BufferedChunkAttempt,
+			{
+				...entry({ chunkId: 'bad-chars' }),
+				measuredChars: null
+			} as unknown as BufferedChunkAttempt
+		]);
+
+		expect(readAll(storage, NOW).map((e) => e.chunkId)).toEqual(['good']);
+	});
+
+	it('still drops an entry whose elapsedMs is null — only the two metrics are nullable', () => {
+		const storage = seed([
+			entry({ chunkId: 'good', bufferedAt: T(100) }),
+			{ ...entry({ chunkId: 'bad-elapsed' }), elapsedMs: null } as unknown as BufferedChunkAttempt
+		]);
+
+		expect(readAll(storage, NOW).map((e) => e.chunkId)).toEqual(['good']);
 	});
 });
 

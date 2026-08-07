@@ -69,8 +69,25 @@ function entry(over: Partial<BufferedChunkAttempt> = {}): BufferedChunkAttempt {
 		elapsedMs: 42_124,
 		startedAt: NOW - 60_000,
 		bufferedAt: NOW - 10_000,
+		mode: 'normal',
+		measuredMs: 42_124,
+		measuredChars: 431,
 		...over
 	};
+}
+
+/** A pre-4a entry: the three span fields are simply absent, as they are in real browsers. */
+function legacyEntry(over: Partial<BufferedChunkAttempt> = {}): BufferedChunkAttempt {
+	const {
+		mode: _mode,
+		measuredMs: _measuredMs,
+		measuredChars: _measuredChars,
+		...legacy
+	} = entry(over);
+	void _mode;
+	void _measuredMs;
+	void _measuredChars;
+	return legacy;
 }
 
 const TRANSIENT: WriteOutcome = { status: 0, error: { message: 'TypeError: Failed to fetch' } };
@@ -128,6 +145,9 @@ describe('drainAttemptBuffer — order and removal', () => {
 			'completed',
 			'elapsed_ms',
 			'gross_wpm',
+			'measured_chars',
+			'measured_ms',
+			'mode',
 			'started_at',
 			'user_id'
 		]);
@@ -171,6 +191,61 @@ describe('drainAttemptBuffer — order and removal', () => {
 
 		expect(upserts).toEqual([]);
 		expect(result.remaining).toBe(0);
+	});
+});
+
+describe('drainAttemptBuffer — the measurement axis (spec #24 §9)', () => {
+	it('round-trips a Zen entry: mode, NULL metrics and the real span all reach the row', async () => {
+		const storage = fakeStorage([
+			entry({
+				chunkId: 'zen',
+				mode: 'zen',
+				grossWpm: null,
+				accuracyRaw: null,
+				measuredMs: 18_400,
+				measuredChars: 212
+			})
+		]);
+		const { client, upserts } = mockSupabase();
+
+		const result = await drainAttemptBuffer(client, storage, USER_A, NOW);
+
+		expect(result.written).toBe(1);
+		expect(upserts[0]).toMatchObject({
+			mode: 'zen',
+			gross_wpm: null,
+			accuracy_raw: null,
+			measured_ms: 18_400,
+			measured_chars: 212
+		});
+	});
+
+	it('drains a pre-existing v1 entry without the three fields as fully-Normal', async () => {
+		// The §8 backfill argument applied to localStorage: every pre-4a entry was produced
+		// by an engine that always measured the whole passage.
+		const storage = fakeStorage([legacyEntry({ chunkId: 'legacy', elapsedMs: 42_124 })]);
+		const { client, upserts } = mockSupabase();
+
+		const result = await drainAttemptBuffer(client, storage, USER_A, NOW);
+
+		expect(result).toEqual({ written: 1, discarded: 0, remaining: 0 });
+		expect(upserts[0]).toMatchObject({
+			mode: 'normal',
+			elapsed_ms: 42_124,
+			measured_ms: 42_124,
+			// The accepted, bounded cost: there is no character count to recover, so a legacy
+			// entry sets no best_* once the rollup's floor sees a 0.
+			measured_chars: 0
+		});
+	});
+
+	it('sends all eleven columns for a legacy entry — the defaults fill the shape, not a hole', async () => {
+		const storage = fakeStorage([legacyEntry({ chunkId: 'legacy' })]);
+		const { client, upserts } = mockSupabase();
+
+		await drainAttemptBuffer(client, storage, USER_A, NOW);
+
+		expect(Object.keys(upserts[0])).toHaveLength(11);
 	});
 });
 

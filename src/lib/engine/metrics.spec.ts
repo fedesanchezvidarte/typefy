@@ -200,3 +200,51 @@ describe('computeMetrics — excludeMs, the awaiting-time discount (spec #18)', 
 		expect(computeMetrics([], undefined, 5000)).toEqual(computeMetrics([]));
 	});
 });
+
+describe('computeMetrics — measured provenance (spec #24)', () => {
+	/** 4 correct chars at 0, 2000, 4000, 6000. */
+	const log = typeLog('abcd', 'abcd', 0, 2000);
+
+	/** Marks a stretch of the log as typed in Zen — what `session.ts` stamps on the event. */
+	function unmeasure(slice: readonly Keystroke[], from: number, to = slice.length): Keystroke[] {
+		return slice.map((k, i) => (i >= from && i < to ? { ...k, measured: false } : k));
+	}
+
+	it('reads an ABSENT measured flag as measured — the pre-4a corpus stays valid', () => {
+		const explicit = log.map((k) => ({ ...k, measured: true }));
+		expect(computeMetrics(log)).toEqual(computeMetrics(explicit));
+		expect(computeMetrics(log).typedChars).toBe(4);
+	});
+
+	it('excludes unmeasured strokes from typedChars', () => {
+		expect(computeMetrics(unmeasure(log, 2)).typedChars).toBe(2);
+	});
+
+	it('excludes unmeasured strokes from the first-attempt population', () => {
+		// 'axcd' typed against 'abcd': one miss at position 1. Unmeasuring that stroke must
+		// remove it from BOTH numerator and denominator, not just the numerator.
+		const missed = typeLog('abcd', 'axcd', 0, 100);
+		expect(computeMetrics(missed).accuracyRaw).toBeCloseTo(0.75, 5);
+		expect(computeMetrics(unmeasure(missed, 1, 2)).accuracyRaw).toBe(1);
+	});
+
+	it('keeps the time span over the WHOLE slice — Zen time is discounted via excludeMs', () => {
+		// The span is deliberately NOT recomputed over the measured strokes only: Zen time is
+		// removed by the same accumulator mechanism as `awaiting`, never by a second span.
+		expect(computeMetrics(unmeasure(log, 2)).elapsedMs).toBe(6000);
+		expect(computeMetrics(unmeasure(log, 0)).elapsedMs).toBe(6000);
+	});
+
+	it('yields zero WPM and zero accuracy for a fully unmeasured slice', () => {
+		const metrics = computeMetrics(unmeasure(log, 0));
+		expect(metrics.typedChars).toBe(0);
+		expect(metrics.grossWpm).toBe(0);
+		expect(metrics.accuracyRaw).toBe(0);
+	});
+
+	it('applies the excludeMs discount on top of the measured filter', () => {
+		const metrics = computeMetrics(unmeasure(log, 2), undefined, 3000);
+		expect(metrics.elapsedMs).toBe(3000);
+		expect(metrics.grossWpm).toBeCloseTo(2 / 5 / (3000 / 60_000), 5);
+	});
+});

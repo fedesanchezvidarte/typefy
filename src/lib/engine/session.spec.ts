@@ -186,7 +186,13 @@ describe('applySessionEvent — forwarding and auto-advance', () => {
 		expect(state.results.get(0)).toEqual({
 			grossWpm: 10,
 			accuracyRaw: 0.75,
-			elapsedMs: 6000
+			elapsedMs: 6000,
+			// A fully-Normal traversal (spec #24): the span covers the whole wall clock and
+			// every stroke, and the row is clean. These three fields are the ONLY change to
+			// this pre-4a expectation — the figures themselves are byte-identical.
+			measuredMs: 6000,
+			measuredChars: 5,
+			mode: 'normal'
 		});
 	});
 
@@ -203,7 +209,14 @@ describe('applySessionEvent — forwarding and auto-advance', () => {
 			...CHUNK_TWO_EVENTS
 		]);
 		expect(state.status).toBe('finished');
-		expect(state.results.get(1)).toEqual({ grossWpm: 8, accuracyRaw: 1, elapsedMs: 3000 });
+		expect(state.results.get(1)).toEqual({
+			grossWpm: 8,
+			accuracyRaw: 1,
+			elapsedMs: 3000,
+			measuredMs: 3000,
+			measuredChars: 2,
+			mode: 'normal'
+		});
 	});
 
 	it('ignores typing events once the session is finished', () => {
@@ -463,10 +476,11 @@ describe('awaiting time is excluded from elapsed and WPM (spec #18)', () => {
 	});
 
 	it('reports the same averageWpm across a window boundary as with both chunks preloaded', () => {
-		expect(sessionSummary(windowed()).averageWpm).toBeCloseTo(
-			sessionSummary(preloaded()).averageWpm,
-			10
-		);
+		// Both sessions are fully Normal, so `averageWpm` is non-null on both sides — the
+		// assertion is unchanged, only narrowed for the nullable type (spec #24).
+		const expected = sessionSummary(preloaded()).averageWpm;
+		expect(expected).not.toBeNull();
+		expect(sessionSummary(windowed()).averageWpm).toBeCloseTo(expected!, 10);
 		expect(sessionSummary(windowed()).averageWpm).toBeCloseTo(7 / 5 / (13_000 / 60_000), 5);
 	});
 
@@ -481,7 +495,11 @@ describe('awaiting time is excluded from elapsed and WPM (spec #18)', () => {
 		expect(windowed().results.get(9)).toEqual({
 			grossWpm: 10,
 			accuracyRaw: 0.75,
-			elapsedMs: 6000
+			elapsedMs: 6000,
+			// The wait falls strictly BETWEEN traversals, so it reaches neither span field.
+			measuredMs: 6000,
+			measuredChars: 5,
+			mode: 'normal'
 		});
 	});
 
@@ -744,6 +762,490 @@ describe('sessionSummary', () => {
 		const summary = sessionSummary(state);
 		expect(summary.chunksCompleted).toBe(2);
 		expect(summary.overallAccuracy).toBeCloseTo(5 / 6, 5); // (3 + 2) ÷ (4 + 2)
+		expect(summary.totalActiveMs).toBe(9000);
+	});
+});
+
+// ---------------------------------------------------------------------------------------
+// Mode: the measurement axis (spec #24)
+// ---------------------------------------------------------------------------------------
+
+/** 'abcd' typed cleanly at 0/1000/2000/3000 — 4 chars, 3000 ms, no correction. */
+const CLEAN_FOUR: readonly SessionEvent[] = [
+	{ type: 'char', char: 'a', timestamp: 0 },
+	{ type: 'char', char: 'b', timestamp: 1000 },
+	{ type: 'char', char: 'c', timestamp: 2000 },
+	{ type: 'char', char: 'd', timestamp: 3000 }
+];
+
+describe('set-mode — the reducer rule', () => {
+	it('returns the IDENTICAL state when the mode is unchanged', () => {
+		// Idempotent: a UI that re-asserts its cookie value must never fabricate a
+		// zero-length span boundary, and must never invalidate a memo downstream.
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), CLEAN_FOUR.slice(0, 2));
+		expect(applySessionEvent(state, { type: 'set-mode', mode: 'normal', timestamp: 9000 })).toBe(
+			state
+		);
+		const zen = applySessionEvent(state, { type: 'set-mode', mode: 'zen', timestamp: 9000 });
+		expect(applySessionEvent(zen, { type: 'set-mode', mode: 'zen', timestamp: 12_000 })).toBe(zen);
+	});
+
+	it('touches nothing but the span accounting — not the chunk, the log, or the status', () => {
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), CLEAN_FOUR.slice(0, 2));
+		const zen = applySessionEvent(state, { type: 'set-mode', mode: 'zen', timestamp: 5000 });
+		expect(zen.activeChunk).toBe(state.activeChunk); // same object, not recreated
+		expect(zen.status).toBe(state.status);
+		expect(zen.activeIndex).toBe(state.activeIndex);
+		expect(zen.results).toBe(state.results);
+		expect(runningLog(zen)).toEqual(runningLog(state));
+	});
+
+	it('opens a Zen span on normal → zen and closes it on zen → normal', () => {
+		let state = run(createSession(makeFullText(['abcd', 'ef'])), CLEAN_FOUR.slice(0, 2));
+		state = applySessionEvent(state, { type: 'set-mode', mode: 'zen', timestamp: 2000 });
+		expect(state.mode).toBe('zen');
+		expect(state.unmeasuredSince).toBe(2000);
+		expect(state.unmeasuredMs).toBe(0);
+		expect(state.everUnmeasured).toBe(true);
+		expect(state.chunkFullyMeasured).toBe(false);
+
+		state = applySessionEvent(state, { type: 'set-mode', mode: 'normal', timestamp: 7000 });
+		expect(state.mode).toBe('normal');
+		expect(state.unmeasuredSince).toBeNull();
+		expect(state.unmeasuredMs).toBe(5000);
+		expect(state.chunkUnmeasuredMs).toBe(5000);
+		// A return to Normal resumes measurement but NEVER re-cleans the traversal.
+		expect(state.chunkFullyMeasured).toBe(false);
+		expect(state.everUnmeasured).toBe(true);
+	});
+
+	it('is accepted while awaiting and while finished', () => {
+		const awaiting = run(createSession(makeText({ 0: 'abcd' }, 2)), CHUNK_ONE_EVENTS);
+		expect(awaiting.status).toBe('awaiting');
+		const zen = applySessionEvent(awaiting, { type: 'set-mode', mode: 'zen', timestamp: 7000 });
+		expect(zen.mode).toBe('zen');
+		expect(zen.status).toBe('awaiting');
+
+		const finished = run(createSession(makeFullText(['abcd', 'ef'])), [
+			...CHUNK_ONE_EVENTS,
+			...CHUNK_TWO_EVENTS
+		]);
+		const zenFinished = applySessionEvent(finished, {
+			type: 'set-mode',
+			mode: 'zen',
+			timestamp: 200_000
+		});
+		expect(zenFinished.mode).toBe('zen');
+		expect(zenFinished.status).toBe('finished');
+	});
+});
+
+describe('createSession — the mode parameter', () => {
+	it('defaults to normal with a clean traversal and no unmeasured time', () => {
+		const state = createSession(makeFullText(['abcd', 'ef']));
+		expect(state.mode).toBe('normal');
+		expect(state.unmeasuredSince).toBeNull();
+		expect(state.unmeasuredMs).toBe(0);
+		expect(state.chunkUnmeasuredMs).toBe(0);
+		expect(state.chunkFullyMeasured).toBe(true);
+		expect(state.everUnmeasured).toBe(false);
+	});
+
+	it('opens in zen when asked, and the traversal is dirty from the first instant', () => {
+		const state = createSession(makeFullText(['abcd', 'ef']), 0, 'zen');
+		expect(state.mode).toBe('zen');
+		expect(state.chunkFullyMeasured).toBe(false);
+		expect(state.everUnmeasured).toBe(true);
+		// No clock is available in createSession, so the span opens on the first stroke
+		// rather than at a fabricated instant — the `awaitingSince` precedent.
+		expect(state.unmeasuredSince).toBeNull();
+	});
+});
+
+describe('Zen keeps the log and drops the metrics (spec #24 §2)', () => {
+	it('grows the keystroke log exactly as Normal does', () => {
+		const zen = run(createSession(makeFullText(['abcd', 'ef']), 0, 'zen'), CHUNK_ONE_EVENTS);
+		const normal = run(createSession(makeFullText(['abcd', 'ef'])), CHUNK_ONE_EVENTS);
+		expect(zen.completedLog).toHaveLength(normal.completedLog.length);
+		expect(zen.completedLog.map((k) => k.char)).toEqual(normal.completedLog.map((k) => k.char));
+		// Same strokes, different provenance — that is the ONLY difference in the log.
+		expect(zen.completedLog.every((k) => k.measured === false)).toBe(true);
+		expect(normal.completedLog.every((k) => k.measured === true)).toBe(true);
+	});
+
+	it('exposes no WPM and no accuracy on the frozen result or in the summary', () => {
+		const zen = run(createSession(makeFullText(['abcd', 'ef']), 0, 'zen'), CHUNK_ONE_EVENTS);
+		expect(zen.results.get(0)?.grossWpm).toBeNull();
+		expect(zen.results.get(0)?.accuracyRaw).toBeNull();
+		const summary = sessionSummary(zen);
+		expect(summary.averageWpm).toBeNull();
+		expect(summary.overallAccuracy).toBeNull();
+		// The counters survive: Zen progress is progress, and Time is neither WPM nor accuracy.
+		expect(summary.chunksCompleted).toBe(1);
+		expect(summary.totalActiveMs).toBe(6000);
+	});
+});
+
+describe('the whole clean traversal rule (spec #24 §4)', () => {
+	it('wholly Normal: metrics present, measuredMs equals elapsedMs, mode normal', () => {
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), CHUNK_ONE_EVENTS);
+		expect(state.results.get(0)).toEqual({
+			grossWpm: 10,
+			accuracyRaw: 0.75,
+			elapsedMs: 6000,
+			measuredMs: 6000,
+			measuredChars: 5,
+			mode: 'normal'
+		});
+	});
+
+	it('wholly Zen: metrics NULL, zero span, mode zen', () => {
+		const state = run(createSession(makeFullText(['abcd', 'ef']), 0, 'zen'), CHUNK_ONE_EVENTS);
+		expect(state.results.get(0)).toEqual({
+			grossWpm: null,
+			accuracyRaw: null,
+			elapsedMs: 6000, // wall clock is unchanged in meaning
+			measuredMs: 0,
+			measuredChars: 0,
+			mode: 'zen'
+		});
+	});
+
+	it('mid-way switch: metrics NULL, but a non-zero span is still recorded', () => {
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'char', char: 'x', timestamp: 1000 },
+			{ type: 'backspace', timestamp: 2000 },
+			{ type: 'set-mode', mode: 'zen', timestamp: 2500 },
+			{ type: 'char', char: 'b', timestamp: 3000 },
+			{ type: 'char', char: 'c', timestamp: 4000 },
+			{ type: 'set-mode', mode: 'normal', timestamp: 5000 },
+			{ type: 'char', char: 'd', timestamp: 6000 }
+		]);
+		expect(state.results.get(0)).toEqual({
+			grossWpm: null,
+			accuracyRaw: null,
+			elapsedMs: 6000,
+			measuredMs: 3500, // 6000 wall clock − 2500 of Zen
+			measuredChars: 3, // a, x, d — b and c were typed in Zen
+			mode: 'zen'
+		});
+	});
+
+	it('a zero-millisecond Zen excursion still dirties the traversal', () => {
+		// The rule is a BOOLEAN, not `chunkUnmeasuredMs === 0`: an instantaneous toggle
+		// accrues no time and still means the passage was not wholly measured.
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'set-mode', mode: 'zen', timestamp: 1000 },
+			{ type: 'set-mode', mode: 'normal', timestamp: 1000 },
+			{ type: 'char', char: 'b', timestamp: 2000 },
+			{ type: 'char', char: 'c', timestamp: 3000 },
+			{ type: 'char', char: 'd', timestamp: 4000 }
+		]);
+		expect(state.chunkUnmeasuredMs).toBe(0);
+		expect(state.results.get(0)?.mode).toBe('zen');
+		expect(state.results.get(0)?.grossWpm).toBeNull();
+		expect(state.results.get(0)?.measuredChars).toBe(4);
+	});
+
+	it('starts each traversal clean again — a dirty passage does not poison the next', () => {
+		// Back in Normal BEFORE the boundary, so passage 2 is traversed wholly in Normal.
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), [
+			{ type: 'set-mode', mode: 'zen', timestamp: 0 },
+			...CHUNK_ONE_EVENTS.slice(0, 5), // a, x, backspace, b, c — all in Zen
+			{ type: 'set-mode', mode: 'normal', timestamp: 5000 },
+			{ type: 'char', char: 'd', timestamp: 6000 }, // completes chunk 0
+			...CHUNK_TWO_EVENTS
+		]);
+		expect(state.results.get(0)?.mode).toBe('zen');
+		expect(state.results.get(1)).toEqual({
+			grossWpm: 8,
+			accuracyRaw: 1,
+			elapsedMs: 3000,
+			measuredMs: 3000,
+			measuredChars: 2,
+			mode: 'normal'
+		});
+	});
+
+	it('dirties a traversal that BEGINS in Zen, even if Normal resumes a moment later', () => {
+		// The boundary at 6000 opens passage 2 in Zen; the switch at 7000 leaves 1000 ms of
+		// that traversal unmeasured, so the row must say so. `chunkFullyMeasured` is set from
+		// the mode AT the boundary and is never restored within the traversal.
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), [
+			{ type: 'set-mode', mode: 'zen', timestamp: 0 },
+			...CHUNK_ONE_EVENTS,
+			{ type: 'set-mode', mode: 'normal', timestamp: 7000 },
+			...CHUNK_TWO_EVENTS
+		]);
+		expect(state.results.get(1)?.mode).toBe('zen');
+		expect(state.results.get(1)?.grossWpm).toBeNull();
+		expect(state.results.get(1)?.elapsedMs).toBe(3000);
+		expect(state.results.get(1)?.measuredChars).toBe(2); // both strokes WERE measured
+		expect(state.results.get(1)?.measuredMs).toBe(2000); // 3000 wall clock − the 1000 of Zen
+		// And the span the previous traversal already accounted for is NOT charged again:
+		// 6000 ms of Zen in passage 1 plus 1000 ms at the head of passage 2.
+		expect(state.unmeasuredMs).toBe(7000);
+	});
+
+	it('holds measuredMs <= elapsedMs for every switch timing', () => {
+		for (const enter of [0, 500, 1000, 2500, 4000, 6000]) {
+			for (const leave of [enter, enter + 1, 3000, 5500, 6000, 9999]) {
+				const state = run(createSession(makeFullText(['abcd', 'ef'])), [
+					{ type: 'char', char: 'a', timestamp: 0 },
+					{ type: 'set-mode', mode: 'zen', timestamp: enter },
+					{ type: 'char', char: 'b', timestamp: 2000 },
+					{ type: 'set-mode', mode: 'normal', timestamp: leave },
+					{ type: 'char', char: 'c', timestamp: 4000 },
+					{ type: 'char', char: 'd', timestamp: 6000 }
+				]);
+				const result = state.results.get(0);
+				expect(result).toBeDefined();
+				expect(result!.measuredMs).toBeGreaterThanOrEqual(0);
+				expect(result!.measuredMs).toBeLessThanOrEqual(result!.elapsedMs);
+			}
+		}
+	});
+});
+
+describe('Zen time is discounted from cumulative figures (spec #24 §3)', () => {
+	it('discounts an OPEN Zen span live — the figure must not decay while in Zen', () => {
+		const state = run(createSession(makeFullText(['abcdefgh'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'char', char: 'b', timestamp: 1000 },
+			{ type: 'set-mode', mode: 'zen', timestamp: 2000 }
+		]);
+		expect(runningMetrics(state, 2000).elapsedMs).toBe(2000);
+		expect(runningMetrics(state, 62_000).elapsedMs).toBe(2000);
+		expect(runningMetrics(state, 62_000).grossWpm).toBe(runningMetrics(state, 2000).grossWpm);
+	});
+
+	it('accounts a closed Zen span exactly once, and nothing else', () => {
+		const state = run(createSession(makeFullText(['abcdefgh'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'set-mode', mode: 'zen', timestamp: 1000 },
+			{ type: 'set-mode', mode: 'normal', timestamp: 31_000 },
+			{ type: 'char', char: 'b', timestamp: 32_000 }
+		]);
+		expect(state.unmeasuredMs).toBe(30_000);
+		expect(runningMetrics(state).elapsedMs).toBe(2000); // 32_000 span − 30_000 Zen
+	});
+
+	it('reports a cumulative figure over the Normal stretches only', () => {
+		const state = run(createSession(makeFullText(['abcd', 'efgh'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'char', char: 'b', timestamp: 1000 },
+			{ type: 'char', char: 'c', timestamp: 2000 },
+			{ type: 'char', char: 'd', timestamp: 3000 },
+			{ type: 'set-mode', mode: 'zen', timestamp: 4000 },
+			{ type: 'char', char: 'e', timestamp: 5000 },
+			{ type: 'char', char: 'f', timestamp: 6000 },
+			{ type: 'set-mode', mode: 'normal', timestamp: 7000 },
+			{ type: 'char', char: 'g', timestamp: 8000 },
+			{ type: 'char', char: 'h', timestamp: 9000 }
+		]);
+		const metrics = runningMetrics(state);
+		expect(metrics.typedChars).toBe(6); // e and f are excluded
+		expect(metrics.elapsedMs).toBe(6000); // 9000 span − 3000 of Zen
+		expect(metrics.grossWpm).toBeCloseTo(6 / 5 / (6000 / 60_000), 5);
+		expect(metrics.accuracyRaw).toBe(1);
+	});
+});
+
+describe('Zen and awaiting must never double-discount (spec #24 §3.5)', () => {
+	/**
+	 * Both feed `excludeMs`. If a Zen span were left open across a wait, the same
+	 * milliseconds would be subtracted twice — floored at 0, so it never crashes and never
+	 * goes negative, which is exactly what would make it invisible.
+	 */
+	function acrossTheBoundary(): SessionState {
+		const state = run(createSession(makeText({ 0: 'abcd' }, 2)), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'char', char: 'x', timestamp: 1000 },
+			{ type: 'backspace', timestamp: 2000 },
+			{ type: 'char', char: 'b', timestamp: 3000 },
+			{ type: 'char', char: 'c', timestamp: 4000 },
+			{ type: 'set-mode', mode: 'zen', timestamp: 5000 },
+			{ type: 'char', char: 'd', timestamp: 6000 } // completes; enters awaiting
+		]);
+		expect(state.status).toBe('awaiting');
+		return state;
+	}
+
+	it('closes the open Zen span when the session enters awaiting', () => {
+		const state = acrossTheBoundary();
+		expect(state.unmeasuredSince).toBeNull();
+		expect(state.unmeasuredMs).toBe(1000);
+		expect(state.awaitingSince).toBe(6000);
+	});
+
+	it('reopens the Zen span when the window lands and typing resumes', () => {
+		const state = applySessionEvent(acrossTheBoundary(), {
+			type: 'window-loaded',
+			chunks: [chunkAt(1, 'ef')],
+			chunkCount: 2,
+			timestamp: 16_000
+		});
+		expect(state.status).toBe('active');
+		expect(state.awaitingMs).toBe(10_000);
+		expect(state.unmeasuredMs).toBe(1000); // the wait was NOT counted as Zen too
+		expect(state.unmeasuredSince).toBe(16_000);
+	});
+
+	it('subtracts the wait once, not once per reason', () => {
+		const state = applySessionEvent(acrossTheBoundary(), {
+			type: 'window-loaded',
+			chunks: [chunkAt(1, 'ef')],
+			chunkCount: 2,
+			timestamp: 16_000
+		});
+		// Span 0→16_000, minus 10_000 of awaiting and 1000 of Zen = 5000. A double discount
+		// would leave 0 here and silently inflate every WPM downstream.
+		expect(runningMetrics(state, 16_000).elapsedMs).toBe(5000);
+		expect(runningMetrics(state, 26_000).elapsedMs).toBe(5000); // the reopened span holds
+	});
+
+	it('does not open a Zen span while awaiting — awaitingSince already owns that time', () => {
+		const awaiting = run(createSession(makeText({ 0: 'abcd' }, 2)), CHUNK_ONE_EVENTS);
+		const zen = applySessionEvent(awaiting, { type: 'set-mode', mode: 'zen', timestamp: 8000 });
+		expect(zen.unmeasuredSince).toBeNull();
+		expect(zen.everUnmeasured).toBe(true);
+		const resumed = applySessionEvent(zen, {
+			type: 'window-loaded',
+			chunks: [chunkAt(1, 'ef')],
+			chunkCount: 2,
+			timestamp: 20_000
+		});
+		expect(resumed.awaitingMs).toBe(14_000);
+		expect(resumed.unmeasuredMs).toBe(0);
+		expect(resumed.unmeasuredSince).toBe(20_000); // reopened on the return to active
+	});
+});
+
+describe('completion is unchanged in both modes (ADR-0004)', () => {
+	it('still requires every character to be correct or corrected in Zen', () => {
+		const partial = run(createSession(makeFullText(['abcd', 'ef']), 0, 'zen'), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'char', char: 'b', timestamp: 1000 },
+			{ type: 'char', char: 'c', timestamp: 2000 },
+			{ type: 'char', char: 'x', timestamp: 3000 } // wrong last character
+		]);
+		expect(partial.activeChunk?.completed).toBe(false);
+		expect(partial.results.size).toBe(0);
+
+		const fixed = run(partial, [
+			{ type: 'backspace', timestamp: 4000 },
+			{ type: 'char', char: 'd', timestamp: 5000 }
+		]);
+		expect(fixed.results.size).toBe(1);
+		expect(fixed.activeIndex).toBe(1);
+	});
+
+	it('produces the identical display and character states in both modes', () => {
+		const events = CHUNK_ONE_EVENTS.slice(0, 4);
+		const normal = run(createSession(makeFullText(['abcd', 'ef'])), events);
+		const zen = run(createSession(makeFullText(['abcd', 'ef']), 0, 'zen'), events);
+		expect(zen.activeChunk?.display).toEqual(normal.activeChunk?.display);
+		expect(zen.activeChunk?.firstAttempts).toEqual(normal.activeChunk?.firstAttempts);
+		expect(zen.activeChunk?.cursor).toBe(normal.activeChunk?.cursor);
+	});
+});
+
+describe('restart semantics under mode', () => {
+	it('restart-session carries the CURRENT mode over and resets every accumulator', () => {
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'set-mode', mode: 'zen', timestamp: 1000 },
+			{ type: 'char', char: 'b', timestamp: 2000 }
+		]);
+		const restarted = applySessionEvent(state, { type: 'restart-session' });
+		expect(restarted.mode).toBe('zen'); // it is a cookie-backed preference, not session state
+		expect(restarted.unmeasuredMs).toBe(0);
+		expect(restarted.chunkUnmeasuredMs).toBe(0);
+		expect(restarted.unmeasuredSince).toBeNull();
+		expect(restarted.chunkFullyMeasured).toBe(false); // opened in zen
+		expect(restarted.everUnmeasured).toBe(true);
+	});
+
+	it('restart-session out of Zen gives a genuinely unmeasured-free session again', () => {
+		// Risk 11: `everUnmeasured` is session-scoped. A restarted session that never enters
+		// Zen really did contain no Zen, so a full summary is correct, not a bug.
+		const dirty = run(createSession(makeFullText(['abcd', 'ef'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'set-mode', mode: 'zen', timestamp: 1000 },
+			{ type: 'set-mode', mode: 'normal', timestamp: 2000 }
+		]);
+		const restarted = applySessionEvent(dirty, { type: 'restart-session' });
+		expect(restarted.everUnmeasured).toBe(false);
+		expect(restarted.chunkFullyMeasured).toBe(true);
+		const typed = run(restarted, CHUNK_ONE_EVENTS);
+		expect(sessionSummary(typed).averageWpm).not.toBeNull();
+		expect(typed.results.get(0)?.mode).toBe('normal');
+	});
+
+	it('restart-chunk resets the per-traversal accounting and re-cleans the traversal', () => {
+		const dirty = run(createSession(makeFullText(['abcd', 'ef'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'set-mode', mode: 'zen', timestamp: 1000 },
+			{ type: 'set-mode', mode: 'normal', timestamp: 6000 }
+		]);
+		expect(dirty.chunkUnmeasuredMs).toBe(5000);
+		expect(dirty.chunkFullyMeasured).toBe(false);
+
+		const restarted = applySessionEvent(dirty, { type: 'restart-chunk' });
+		expect(restarted.chunkUnmeasuredMs).toBe(0);
+		expect(restarted.chunkFullyMeasured).toBe(true); // a fresh traversal, cleanly measured
+		expect(restarted.unmeasuredMs).toBe(5000); // SESSION scope is untouched
+		expect(restarted.everUnmeasured).toBe(true); // and so is the session-scope flag
+
+		const typed = run(restarted, shift(CHUNK_ONE_EVENTS, 10_000));
+		expect(typed.results.get(0)?.mode).toBe('normal');
+		expect(typed.results.get(0)?.grossWpm).toBe(10);
+	});
+
+	it('restart-chunk in Zen leaves the traversal dirty', () => {
+		const state = applySessionEvent(createSession(makeFullText(['abcd', 'ef']), 0, 'zen'), {
+			type: 'restart-chunk'
+		});
+		expect(state.chunkFullyMeasured).toBe(false);
+	});
+});
+
+describe('sessionSummary is all-or-nothing on Zen (spec #24 §11)', () => {
+	it('nulls both metric fields after ANY Zen time, keeping the counters', () => {
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), [
+			...CHUNK_ONE_EVENTS, // wholly Normal, clean
+			{ type: 'set-mode', mode: 'zen', timestamp: 6500 },
+			{ type: 'set-mode', mode: 'normal', timestamp: 6500 },
+			...CHUNK_TWO_EVENTS
+		]);
+		const summary = sessionSummary(state);
+		expect(summary.averageWpm).toBeNull();
+		expect(summary.overallAccuracy).toBeNull();
+		expect(summary.chunksCompleted).toBe(2);
+		expect(summary.totalActiveMs).toBe(9000); // Time is neither WPM nor accuracy
+	});
+
+	it('nulls them before any chunk completes, too', () => {
+		const state = createSession(makeFullText(['abcd', 'ef']), 0, 'zen');
+		expect(sessionSummary(state)).toEqual({
+			averageWpm: null,
+			overallAccuracy: null,
+			chunksCompleted: 0,
+			totalActiveMs: 0
+		});
+	});
+
+	it('leaves a fully-Normal session identical to pre-4a', () => {
+		const state = run(createSession(makeFullText(['abcd', 'ef'])), [
+			...CHUNK_ONE_EVENTS,
+			...CHUNK_TWO_EVENTS
+		]);
+		const summary = sessionSummary(state);
+		expect(summary.averageWpm).toBeCloseTo(7 / 5 / (103_000 / 60_000), 5);
+		expect(summary.overallAccuracy).toBeCloseTo(5 / 6, 5);
+		expect(summary.chunksCompleted).toBe(2);
 		expect(summary.totalActiveMs).toBe(9000);
 	});
 });

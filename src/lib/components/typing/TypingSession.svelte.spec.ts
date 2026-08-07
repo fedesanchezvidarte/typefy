@@ -107,12 +107,25 @@ function makeWindow(contents: readonly string[], chunkCount: number, from = 0): 
 }
 
 /**
+ * `mode` is a REQUIRED prop since spec #24, and every test in this file describes a fully
+ * Normal session — that is the regression guarantee the spec asks for ("byte-identical
+ * behaviour and figures to today"). Carried on the two fixture helpers rather than repeated at
+ * thirty render sites, so it says once, in one place, what these tests are about; a Zen
+ * fixture states its own mode at the call site instead.
+ */
+const NORMAL = 'normal' as const;
+
+/**
  * The two props that used to be one. A book short enough to hold whole: every passage is
  * loaded, `chunkCount` equals what the window carries, so nothing here can prefetch or
  * await — which is exactly what every test written before spec #18 assumed.
  */
 function loaded(contents: readonly string[]) {
-	return { book: makeBook(contents.length), window: makeWindow(contents, contents.length) };
+	return {
+		book: makeBook(contents.length),
+		window: makeWindow(contents, contents.length),
+		mode: NORMAL
+	};
 }
 
 /**
@@ -120,7 +133,7 @@ function loaded(contents: readonly string[]) {
  * This is the shape that makes the prefetch, `awaiting` and the end-of-window state reachable.
  */
 function windowed(contents: readonly string[], chunkCount: number) {
-	return { book: makeBook(chunkCount), window: makeWindow(contents, chunkCount) };
+	return { book: makeBook(chunkCount), window: makeWindow(contents, chunkCount), mode: NORMAL };
 }
 
 /** `n` two-word passages: 'a b', 'c d', … — enough to complete without a wall of keystrokes. */

@@ -37,8 +37,18 @@
 		next
 	}: Props = $props();
 
-	// Floored, not rounded: a session with an error must never display as 100%.
-	const accuracyPct = $derived(Math.floor(summary.overallAccuracy * 100));
+	/**
+	 * Both figures are `number | null` since spec #24, and they are null TOGETHER: the engine
+	 * makes it all-or-nothing on `everUnmeasured`, so a session containing any Zen time at all
+	 * — even an instantaneous toggle that accrued no milliseconds — reports neither.
+	 */
+	const zen = $derived(summary.averageWpm === null || summary.overallAccuracy === null);
+
+	// Floored, not rounded: a session with an error must never display as 100%. Null in Zen,
+	// where there is no accuracy to floor — the tile that would have shown it is not rendered.
+	const accuracyPct = $derived(
+		summary.overallAccuracy === null ? null : Math.floor(summary.overallAccuracy * 100)
+	);
 
 	/**
 	 * Passages that are actually lost: every failure minus the ones sitting in the buffer.
@@ -96,20 +106,33 @@
 		{m.summary_heading_passages({ count: summary.chunksCompleted })}
 	</h1>
 	<dl class="mt-7 mb-2 grid grid-cols-2 gap-6">
-		<div>
-			<dt class="mb-1 text-[13px] text-muted">{m.summary_average_speed()}</dt>
-			<dd data-testid="summary-wpm" class="text-[34px] font-semibold tabular-nums">
-				{Math.round(summary.averageWpm)}<span class="text-[15px] font-normal text-muted">
-					{m.unit_wpm()}</span
-				>
-			</dd>
-		</div>
-		<div>
-			<dt class="mb-1 text-[13px] text-muted">{m.summary_accuracy()}</dt>
-			<dd data-testid="summary-accuracy" class="text-[34px] font-semibold tabular-nums">
-				{accuracyPct}<span class="text-[15px] font-normal text-muted">%</span>
-			</dd>
-		</div>
+		<!--
+			THE TWO METRIC TILES ARE ABSENT, NOT EMPTY, after a session containing any Zen time
+			(spec #24 §11). No em-dash, no placeholder, no dimmed zero: a tile that advertises the
+			number Zen refused is worse than no tile.
+
+			One guard for both because the two are null together — see `zen` in the script. The
+			grid needs no change: it simply renders two tiles instead of four. Everything else on
+			this summary — the kicker, the heading, Passages, TIME, the status region, the actions
+			and the guest prompt — renders identically in both modes. Time is neither WPM nor
+			accuracy, and §11 prohibits exactly two tiles; do not extend the omission to it.
+		-->
+		{#if summary.averageWpm !== null && summary.overallAccuracy !== null}
+			<div>
+				<dt class="mb-1 text-[13px] text-muted">{m.summary_average_speed()}</dt>
+				<dd data-testid="summary-wpm" class="text-[34px] font-semibold tabular-nums">
+					{Math.round(summary.averageWpm)}<span class="text-[15px] font-normal text-muted">
+						{m.unit_wpm()}</span
+					>
+				</dd>
+			</div>
+			<div>
+				<dt class="mb-1 text-[13px] text-muted">{m.summary_accuracy()}</dt>
+				<dd data-testid="summary-accuracy" class="text-[34px] font-semibold tabular-nums">
+					{accuracyPct}<span class="text-[15px] font-normal text-muted">%</span>
+				</dd>
+			</div>
+		{/if}
 		<div>
 			<dt class="mb-1 text-[13px] text-muted">{m.summary_passages()}</dt>
 			<dd data-testid="summary-chunks" class="text-[34px] font-semibold tabular-nums">
@@ -123,6 +146,12 @@
 			</dd>
 		</div>
 	</dl>
+	{#if zen}
+		<!-- Why two figures are missing, said once and quietly. A line of prose in the same muted
+		     register as the save notices — deliberately NOT a tile and NOT inside the `dl`, which
+		     would make it the placeholder the omission exists to avoid. -->
+		<p class="mb-2 text-sm text-muted" data-testid="summary-zen-note">{m.summary_zen_note()}</p>
+	{/if}
 	<!--
 		Two statements, not error banners: same muted register as the rest of the summary.
 		Wrapped so the 3-unit gap before the buttons is stated once however many of the two

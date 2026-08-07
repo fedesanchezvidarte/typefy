@@ -86,7 +86,25 @@ export async function drainAttemptBuffer(
 		// reach the payload; `userId` is overwritten in the same step.
 		const { bufferedAt: _bufferedAt, ...attempt } = entry;
 		void _bufferedAt;
-		const outcome = await backfillChunkAttempt(client, { ...attempt, userId });
+		// The three span fields are optional on read (spec #24 §9), so a v1 entry written
+		// before 4a arrives without them and is defaulted to fully-Normal here — the same
+		// construction argument as the database backfill: every pre-4a entry was produced by
+		// an engine that always measured the whole passage.
+		//
+		// **The accepted cost, stated rather than engineered away:** a legacy entry has no
+		// character count to recover, so it drains with `measured_chars: 0` and therefore
+		// sets NO `best_*` — the rollup's floor sees a zero-character span and declines. It
+		// is bounded to at most `ATTEMPT_BUFFER_CAP` entries per browser, only for users
+		// holding unsent attempts across the upgrade, and only `best_*` is affected:
+		// `attempt_count`, `first_completed_at`, `chunks_completed`, resume and
+		// continue-reading all behave identically. Recorded in the ADR-0010 amendment.
+		const outcome = await backfillChunkAttempt(client, {
+			...attempt,
+			userId,
+			mode: attempt.mode ?? 'normal',
+			measuredMs: attempt.measuredMs ?? attempt.elapsedMs,
+			measuredChars: attempt.measuredChars ?? 0
+		});
 
 		if (outcome.saved) {
 			remove(storage, entry, now);

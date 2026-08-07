@@ -35,11 +35,23 @@ const PRIVATE_TABLES = ['chunk_attempts', 'chunk_progress', 'book_progress', 'pr
 /** The rollups have no client write policy at all — 2b's trigger is their only writer. */
 const ROLLUP_TABLES = ['chunk_progress', 'book_progress'] as const;
 
-/** The seeded attempt every rollup assertion below is derived from. */
+/**
+ * The seeded attempt every rollup assertion below is derived from.
+ *
+ * A whole passage typed in Normal (spec #24): `measured_ms = elapsed_ms` and a measured
+ * span well past the 100-character best guard. Both are load-bearing here, not decoration
+ * — `measured_chars` defaults to 0 in the schema, and the rollup's best guard reads it, so
+ * an attempt that omits the column is stored and completed but sets no `best_*` at all.
+ * Without these two fields the rollup assertions below would be testing the guard rather
+ * than the isolation this file is about.
+ */
 const SEED_ATTEMPT = {
 	gross_wpm: 42,
 	accuracy_raw: 0.97,
-	elapsed_ms: 30_000
+	elapsed_ms: 30_000,
+	mode: 'normal',
+	measured_ms: 30_000,
+	measured_chars: 420
 } as const;
 
 /**

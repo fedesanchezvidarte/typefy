@@ -1,3 +1,4 @@
+import { isMode } from '$lib/types';
 import type { ChunkAttemptInput } from './client';
 
 /**
@@ -33,11 +34,24 @@ export interface AttemptStorage {
 /**
  * One buffered completed chunk attempt.
  *
- * Derived from `ChunkAttemptInput` rather than declared independently, so the eight-column
- * payload has exactly one definition: if a ninth column is ever added there, the drain's
- * spread stops compiling until the buffer carries it. That failure is the point.
+ * Still **derived** from `ChunkAttemptInput` rather than declared independently, so the
+ * payload has exactly one definition: if a twelfth column is ever added there, the drain's
+ * spread stops compiling until the buffer carries it. That failure is the point, and the
+ * `Omit`/`Partial<Pick>` pair below is written the way it is to keep it.
+ *
+ * `mode`, `measuredMs` and `measuredChars` are **optional here and only here** (spec #24 §9).
+ * The key stays `v1`: bumping it would silently discard every unsent guest completion sitting
+ * in every existing browser, which is precisely the loss the buffer exists to prevent. An
+ * entry written before spec #24 simply lacks the three fields, and the drain defaults it to
+ * fully-Normal on the same construction argument as the database backfill — every pre-4a
+ * entry was produced by an engine that always measured the whole passage.
+ *
+ * Optional on READ only. Every entry `enqueue` receives today carries all three.
  */
-export interface BufferedChunkAttempt extends Omit<ChunkAttemptInput, 'userId'> {
+export interface BufferedChunkAttempt
+	extends
+		Omit<ChunkAttemptInput, 'userId' | 'mode' | 'measuredMs' | 'measuredChars'>,
+		Partial<Pick<ChunkAttemptInput, 'mode' | 'measuredMs' | 'measuredChars'>> {
 	/**
 	 * `null` = guest-authored: typed by nobody, attributable to whoever signs in next on
 	 * this browser. A string = signed-in-authored: the user held a session when they typed
@@ -72,6 +86,20 @@ export const ATTEMPT_BUFFER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
  * disk, plainly readable and editable (ADR-0012 amendment), and a shape change or a hand
  * edit must degrade to "this entry does not exist" rather than to a `TypeError` thrown
  * into the typing path or a malformed row offered to PostgREST.
+ *
+ * Two rules here are load-bearing rather than mechanical:
+ *
+ * 1. **`grossWpm` and `accuracyRaw` must accept `null`.** They are nullable since spec #24 —
+ *    a Zen traversal asserts no figure at all. `isFiniteNumber(null)` is `false`, so
+ *    validating them with it would make **every guest's Zen completion read as malformed and
+ *    be dropped in silence**, which is the exact loss this module exists to prevent. Only
+ *    these two fields are nullable; `elapsedMs`, `startedAt` and `bufferedAt` are not, and
+ *    are deliberately still checked with the strict helper.
+ * 2. **The three span fields are tolerated when ABSENT and validated when PRESENT.** Absent
+ *    means "written before spec #24" and drains as fully-Normal. Present-but-wrong means a
+ *    hand edit or a bug, and is dropped — a `mode` outside the axis would otherwise travel
+ *    all the way to the database's CHECK constraint and come back as a permanent refusal,
+ *    discarding the entry there instead, one round trip later.
  */
 function isBufferedChunkAttempt(value: unknown): value is BufferedChunkAttempt {
 	if (typeof value !== 'object' || value === null) return false;
@@ -81,16 +109,28 @@ function isBufferedChunkAttempt(value: unknown): value is BufferedChunkAttempt {
 		typeof entry.chunkId === 'string' &&
 		typeof entry.bookId === 'string' &&
 		typeof entry.completed === 'boolean' &&
-		isFiniteNumber(entry.grossWpm) &&
-		isFiniteNumber(entry.accuracyRaw) &&
+		isNullableFiniteNumber(entry.grossWpm) &&
+		isNullableFiniteNumber(entry.accuracyRaw) &&
 		isFiniteNumber(entry.elapsedMs) &&
 		isFiniteNumber(entry.startedAt) &&
-		isFiniteNumber(entry.bufferedAt)
+		isFiniteNumber(entry.bufferedAt) &&
+		(entry.mode === undefined || isMode(entry.mode)) &&
+		(entry.measuredMs === undefined || isFiniteNumber(entry.measuredMs)) &&
+		(entry.measuredChars === undefined || isFiniteNumber(entry.measuredChars))
 	);
 }
 
 function isFiniteNumber(value: unknown): value is number {
 	return typeof value === 'number' && Number.isFinite(value);
+}
+
+/**
+ * `null` or a finite number — and nothing else. Written as its own helper rather than as an
+ * inline `=== null ||` at the two call sites so the nullable fields are visibly a closed set
+ * of two, and so widening it to a third is a deliberate edit rather than a copied clause.
+ */
+function isNullableFiniteNumber(value: unknown): value is number | null {
+	return value === null || isFiniteNumber(value);
 }
 
 /** Best-effort clear. The binding can throw here too; that is still not our caller's problem. */

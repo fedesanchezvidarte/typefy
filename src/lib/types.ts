@@ -1,6 +1,32 @@
 export type Language = 'en' | 'es';
 
 /**
+ * The MEASUREMENT axis (spec #24). It answers exactly one question — *is this stretch of
+ * typing being measured?* — and must never accumulate a second meaning.
+ *
+ * `zen` means no WPM and no accuracy is derived, displayed or persisted. It does NOT mean a
+ * different presentation: a future page-view is a SEPARATE axis added beside this one, never
+ * a third value inside it. Folding presentation in here would produce `zen-page` /
+ * `normal-page` and a combinatorial mess the moment a third of either appears — the same
+ * discipline ADR-0011 applied to palette and typeface.
+ *
+ * Declared here rather than in `src/lib/engine/` because the engine, the progress layer, the
+ * route load and the schema all speak it; the engine already imports `Chunk` from this
+ * module, so the dependency direction is unchanged.
+ */
+export type Mode = 'normal' | 'zen';
+
+/**
+ * Narrows an untrusted value to `Mode` — a cookie string, a `localStorage` buffer entry, a
+ * hand-edited payload. Written as a guard rather than a cast so the two call sites that read
+ * from outside the program (the mode cookie and the attempt buffer) cannot silently admit a
+ * value the database's CHECK constraint would then reject.
+ */
+export function isMode(value: unknown): value is Mode {
+	return value === 'normal' || value === 'zen';
+}
+
+/**
  * What `/type?lang=` selects (spec #19): a content language, or `all`. Derived from
  * `Language` because it filters over exactly that vocabulary — a third content language would
  * become a third filter option by construction.

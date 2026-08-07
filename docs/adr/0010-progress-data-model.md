@@ -1,8 +1,9 @@
 # ADR-0010 — Progress data model: append-only attempts + rollups
 
 **Status:** Accepted (Phase 2a — spec #7 — tables created; Phase 2b — spec #12 — rollup trigger, amended
-2026-07-26; Phase 2c — spec #15 — backfilled attempts and drain idempotency, amended 2026-07-26; see
-both amendments below)
+2026-07-26; Phase 2c — spec #15 — backfilled attempts and drain idempotency, amended 2026-07-26;
+Phase 4a — spec #24 — nullable metrics, span columns and the best floor, amended 2026-08-07; see all
+three amendments below)
 
 ## Context
 
@@ -199,6 +200,130 @@ therefore also what forbids a real upsert. **Any future write path to this table
 (`user_id, chunk_id`) is now a strict prefix of the new index and could be dropped. Left in place
 because spec #15's third database criterion is that nothing else on the progress tables changes;
 recorded here so the next schema change picks it up rather than rediscovering it.
+
+## Amendment (2026-08-07, Phase 4a implementation — spec #24)
+
+**The Decision section above is contradicted until this amendment is read with it.** It states that
+`chunk_attempts` carries "`completed`, `gross_wpm`, `accuracy_raw`, `elapsed_ms`, `started_at`" as
+one immutable row per completed traversal. Two of those columns are now **nullable** and three
+columns are **new**. This is not optional bookkeeping: without it the ADR is simply wrong about the
+table it defines.
+
+[ADR-0014](0014-mode-measurement-axis.md) settles *why* — `mode` is the measurement axis and
+measurement is scoped to the **measured span**. This records what that did to the schema, in
+`supabase/migrations/20260806190144_mode_and_measured_spans.sql`.
+
+### Nullable metrics, and three columns that say what a row measured
+
+`gross_wpm` and `accuracy_raw` **drop `not null`**. A Zen traversal genuinely has no WPM and no
+accuracy — not "zero", not "unknown", but *not measured* — and writing 0 or a partial figure would
+be a lie `best_wpm` and every future stats screen would then read as truth. The two existing CHECKs
+(`gross_wpm >= 0`, `accuracy_raw between 0 and 1`) are deliberately left untouched: a CHECK evaluates
+to NULL, and therefore passes, on a NULL input, so both keep constraining every non-NULL value
+without an edit.
+
+| Column | Meaning |
+|---|---|
+| `mode` | `normal` \| `zen`, `not null default 'normal'`, `CHECK (mode in ('normal','zen'))` |
+| `measured_ms` | milliseconds of measured span in this traversal |
+| `measured_chars` | characters typed within measured spans |
+
+`mode` is `text` with a CHECK rather than an enum, so extending the axis is a one-line migration
+instead of an `ALTER TYPE` while a typo'd client value still cannot land in the source of truth.
+`elapsed_ms` keeps its meaning exactly — wall clock, first keystroke to completion — and is **not**
+redefined; `measured_ms <= elapsed_ms` always, equal exactly when the traversal was wholly Normal.
+
+That invariant is a **database CHECK**, not merely a tested assertion. The measured span is by
+definition a subset of the wall clock, so a row violating it is an engine bug that should be refused
+at the door rather than persisted and puzzled over later. It is safe against the write path's
+rounding: `toRow` rounds both with `Math.round`, which is monotonic non-decreasing, so a pair
+satisfying the invariant in floats still satisfies it as integers. If a rejection is ever observed in
+practice the correct fix is the engine's arithmetic, never dropping the constraint.
+
+All three columns are `not null` with a default, so the `ALTER` rewrites nothing and every
+pre-existing row is immediately valid against the constraints — the defaults are exactly the
+fully-Normal degenerate case. `measured_chars` being `not null` is what lets the rollup guard compare
+it directly, with no `coalesce` and no NULL-swallows-the-predicate trap.
+
+### The best guard, and what it does not guard
+
+The 2b aggregation rules above stand, with **only the two `best_*` arms changed**. `attempt_count`
+and `last_attempt_at` still move on every insert; `first_completed_at` is still set by any completed
+attempt; the `book_progress` block is unchanged in meaning, so a Zen completion counts toward
+`chunks_completed` identically to a Normal one. **Zen progress is progress.**
+
+Each `best_*` arm now carries its own independent three-part guard: `completed`, **and** the incoming
+metric is non-NULL, **and** `new.measured_chars >= 100`. Previously `completed` alone sufficed,
+because a completed attempt always carried metrics — it no longer does. The non-NULL test is stated
+explicitly even though `greatest()` would ignore a NULL anyway, so a future reader cannot re-derive
+"completed implies measured" from the old shape. The guard is written out per column rather than
+hoisted into one shared boolean: the two metrics are NULL together by construction today, and a
+per-column guard cannot be broken by a future row where only one is set. `greatest()` still ignores a
+NULL `cp.best_*`, so 2b's seeding behaviour survives untouched.
+
+The literal `100` is the twin of `BEST_MEASURED_CHARS_FLOOR` (`src/lib/progress/client.ts`). **There
+is no single source of truth across the TS/SQL boundary and this ADR does not pretend there is:** the
+enforcing copy is the SQL literal, TypeScript never applies the guard, and the two are kept in
+agreement by a comment in each naming the other and by the rollup's test importing the constant
+rather than writing `100` a third time.
+
+What the guard is *for* is recorded in [ADR-0014](0014-mode-measurement-axis.md) and must not be
+inflated here: it is a **sanity floor** against a short measured span banking a personal best, and
+**never an anti-cheat** — `measured_chars` is client-asserted exactly like `gross_wpm`
+([ADR-0012](0012-client-trusted-progress-writes.md)).
+
+### The backfill is true by construction, so no `best_*` was recomputed
+
+Existing rows are backfilled as fully-Normal: `mode = 'normal'`, `measured_ms = elapsed_ms`,
+`measured_chars` from the joined `chunks.char_count`. This restates what those rows already meant
+rather than guessing at it — every row written before 4a came from an engine that had no notion of an
+unmeasured stretch, always measured the whole passage, and only recorded a completed traversal
+covering the chunk's full character count. **That is why existing `best_*` values stay valid and need
+no recomputation.**
+
+They also cannot move even in principle: `chunk_attempts_apply_rollups` is an `AFTER INSERT` trigger
+and the backfill is an `UPDATE`, so it does not fire at all. The acceptance criterion "no `best_*`
+value changed" is satisfied structurally rather than by care.
+
+The same construction argument licenses the **attempt buffer** staying on `typefy:attempt-buffer:v1`
+with the three fields optional *on read*. Bumping the key would silently discard every unsent guest
+completion sitting in every existing browser — the loss spec #15 exists to prevent. **One accepted
+cost, stated rather than engineered away:** a legacy entry has no character count to recover, so the
+drain defaults it to `measured_chars = 0` and it therefore sets no `best_*`. Bounded to at most
+`ATTEMPT_BUFFER_CAP` (50) entries per browser, only for users holding unsent attempts across the
+upgrade, and only `best_*` is affected — `attempt_count`, `first_completed_at`, `chunks_completed`,
+resume and continue reading all behave identically.
+
+### The column grant is additive, and omitting it fails silently
+
+2b replaced the table-level `INSERT` grant with a **column-level** one. A column-level grant does not
+extend itself to columns added later, so the migration issues
+`grant insert (mode, measured_ms, measured_chars) on public.chunk_attempts to authenticated`.
+
+Without that line an authenticated client posting the three new columns is refused `42501`, which
+`classifyWriteOutcome` correctly classifies as **permanent** — so the attempt is never buffered and
+never retried. Every completion would be dropped, quietly, for signed-in users only. This is a
+migration step, not an afterthought.
+
+It is a bare `GRANT` with **no preceding `REVOKE`**: revoking `INSERT` on the table from
+`authenticated` would drop the eight existing column grants with it and break every write. `id` and
+`created_at` remain ungranted, exactly as before, so both still fall to their defaults and the server
+clock remains the sole source of every rollup timestamp. `create or replace function` preserves
+privileges, so 2b's `revoke execute … from public, anon, authenticated` still stands and is
+deliberately not re-issued.
+
+### `chunk_attempts_user_chunk_idx` — the debt is re-recorded, not dropped
+
+The 2c amendment below observed that `chunk_attempts_user_chunk_idx` (`user_id, chunk_id`) is a
+**strict prefix** of `chunk_attempts_user_chunk_started_key` and could be dropped, and asked that
+"the next schema change picks it up rather than rediscovering it". This *is* the next schema change,
+and it deliberately did **not** pick it up: spec #24's Out-of-scope list forbids changes to the
+progress tables beyond the ones above, and quietly widening a migration past its spec is worse than
+carrying a known redundancy for one more phase.
+
+So the observation stands unchanged and is re-recorded here rather than allowed to expire silently:
+the index is still redundant, still safe to drop, and the request is renewed for whichever schema
+change is next permitted to touch these tables.
 
 ## Alternatives considered
 

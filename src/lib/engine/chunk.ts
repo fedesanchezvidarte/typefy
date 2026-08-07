@@ -40,13 +40,22 @@ export function applyChunkEvent(state: ChunkEngineState, event: ChunkEvent): Chu
 	if (state.completed) {
 		return state; // further keystrokes are ignored once complete
 	}
+	// `measured` is copied off the event exactly as `timestamp` is — absent means measured
+	// (spec #24 §3). This module still knows nothing about modes and imports nothing new:
+	// the flag is provenance travelling with the stroke, not a metric being computed.
+	const measured = event.measured !== false;
 	if (event.type === 'char') {
-		return applyChar(state, event.char, event.timestamp);
+		return applyChar(state, event.char, event.timestamp, measured);
 	}
-	return applyBackspace(state, event.timestamp);
+	return applyBackspace(state, event.timestamp, measured);
 }
 
-function applyChar(state: ChunkEngineState, char: string, timestamp: number): ChunkEngineState {
+function applyChar(
+	state: ChunkEngineState,
+	char: string,
+	timestamp: number,
+	measured: boolean
+): ChunkEngineState {
 	const characters = toCharacters(state.text);
 	if (state.cursor >= characters.length) {
 		return state; // end reached with errors remaining: backspace-only recovery
@@ -64,7 +73,8 @@ function applyChar(state: ChunkEngineState, char: string, timestamp: number): Ch
 		position,
 		judgment: hit ? 'hit' : 'miss',
 		firstAttempt: isFirstAttempt,
-		timestamp
+		timestamp,
+		measured
 	};
 
 	const display = state.display.slice();
@@ -94,7 +104,11 @@ function applyChar(state: ChunkEngineState, char: string, timestamp: number): Ch
 	};
 }
 
-function applyBackspace(state: ChunkEngineState, timestamp: number): ChunkEngineState {
+function applyBackspace(
+	state: ChunkEngineState,
+	timestamp: number,
+	measured: boolean
+): ChunkEngineState {
 	if (state.cursor === 0) {
 		return state; // no-op at the start of the chunk
 	}
@@ -104,7 +118,8 @@ function applyBackspace(state: ChunkEngineState, timestamp: number): ChunkEngine
 		kind: 'backspace',
 		position,
 		firstAttempt: false,
-		timestamp
+		timestamp,
+		measured
 	};
 
 	const display = state.display.slice();

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
+import type { Mode } from '$lib/types';
 
 /**
  * Browser write service (spec #12, ADR-0012): appends one immutable `chunk_attempts` row
@@ -20,12 +21,52 @@ export interface ChunkAttemptInput {
 	chunkId: string;
 	bookId: string;
 	completed: boolean;
-	grossWpm: number;
-	accuracyRaw: number;
+	/**
+	 * NULL exactly when the traversal was not a whole clean one (spec #24 §4): any Zen time in
+	 * the passage and the row carries no figure at all, rather than a figure covering part of
+	 * it. A partial figure filed as *that passage's* result would let a twenty-character
+	 * Normal sprint at the tail bank a personal best — which is the asymmetry between this row
+	 * and the live figure, and the reason the two are deliberately different.
+	 */
+	grossWpm: number | null;
+	accuracyRaw: number | null;
+	/** WALL CLOCK, first keystroke → completion. Meaning unchanged by spec #24. */
 	elapsedMs: number;
 	/** The attempt's FIRST KEYSTROKE, ms epoch. Informational only — no rollup rule reads it. */
 	startedAt: number;
+	/** `normal` iff the whole traversal was measured; otherwise `zen`. */
+	mode: Mode;
+	/**
+	 * What the row measured, recorded whether or not it carries figures (spec #24 §5). A row
+	 * that carries a number must carry its span alongside it, so "what did this number
+	 * measure?" is answerable from the row rather than assumed from its type — the property
+	 * that survives a future page-view, where a passage is no longer the natural unit.
+	 *
+	 * `measuredMs <= elapsedMs` always, equal exactly when the traversal was wholly Normal.
+	 */
+	measuredMs: number;
+	measuredChars: number;
 }
+
+/**
+ * The best guard (spec #24 §6): a measured span shorter than this many characters (≈20 words)
+ * is stored, counted and completed like any other, but never sets `best_wpm` or
+ * `best_accuracy_raw`. Chunks are 400-600 characters (ADR-0005), so a genuine passage clears
+ * it comfortably; what it stops is a short sprint producing an unbeatable rate. An absolute
+ * count rather than a fraction of the chunk, so it is independent of chunk size and of layout.
+ *
+ * **The enforcing copy of this number is the SQL literal `100` inside
+ * `apply_chunk_attempt_rollups()` (migration `20260806190144_mode_and_measured_spans.sql`).**
+ * TypeScript never applies the guard — nothing here reads this constant to decide anything.
+ * There is no single source of truth across the TS/SQL boundary and this comment does not
+ * pretend there is: the two are kept in agreement by the migration's comment naming this
+ * constant by path, by this comment naming the migration back, and by the rollup's integration
+ * test importing this constant rather than writing `100` a third time. Change one, change both.
+ *
+ * It is a **sanity floor, never an anti-cheat**: `measured_chars` is client-asserted exactly
+ * like `gross_wpm` (ADR-0012). Named in the glossary under **Measured span**.
+ */
+export const BEST_MEASURED_CHARS_FLOOR = 100;
 
 /**
  * The outcome of one write.
@@ -100,15 +141,26 @@ export function classifyWriteOutcome(status: number, error: unknown): ChunkAttem
 /**
  * The row payload, in one place so the live write and the backfill can never drift apart.
  *
- * **It is exactly eight columns and must stay that way.** The 2b migration dropped the
- * table-level `INSERT` grant on `chunk_attempts` and re-granted per column, omitting
- * `created_at` and `id` so both fall to their defaults — that is what makes "every rollup
- * timestamp comes from the server clock" enforceable rather than merely intended. Adding
- * either key here gets the whole write refused with Postgres `42501`.
+ * **It is exactly eleven columns and must stay that way** — eight since 2b, plus `mode`,
+ * `measured_ms` and `measured_chars` from spec #24. The count is not the point; *which* keys
+ * are absent is. The 2b migration dropped the table-level `INSERT` grant on `chunk_attempts`
+ * and re-granted per column, omitting `created_at` and `id` so both fall to their defaults —
+ * that is what makes "every rollup timestamp comes from the server clock" enforceable rather
+ * than merely intended, and what keeps the row's identity out of the client's hands.
+ *
+ * The grant is **column-level**, so it is not a filter: naming either key here does not get
+ * that key ignored, it gets the WHOLE write refused with Postgres `42501` — which
+ * `classifyWriteOutcome` correctly reads as permanent, so the attempt is never buffered and
+ * never retried. One stray key silently drops every completion for every signed-in user. The
+ * spec #24 migration extended the grant to the three new columns for exactly this reason.
  *
  * Boundary conversions: `started_at` is `timestamptz`, so the ms epoch becomes an ISO
- * string; `elapsed_ms` is `integer`, so it is rounded; `gross_wpm` / `accuracy_raw` are
- * `numeric` and pass through unrounded.
+ * string; `elapsed_ms`, `measured_ms` and `measured_chars` are `integer`, so all three are
+ * rounded; `gross_wpm` / `accuracy_raw` are `numeric` and pass through unrounded — including
+ * `null`, which becomes a JSON null and lands as SQL NULL. Rounding `measured_ms` the same
+ * way as `elapsed_ms` is what preserves the database's `measured_ms <= elapsed_ms` CHECK
+ * across the conversion: `Math.round` is monotonic non-decreasing, so a pair that satisfies
+ * the invariant in floats still satisfies it as integers.
  */
 function toRow(attempt: ChunkAttemptInput) {
 	return {
@@ -119,7 +171,10 @@ function toRow(attempt: ChunkAttemptInput) {
 		gross_wpm: attempt.grossWpm,
 		accuracy_raw: attempt.accuracyRaw,
 		elapsed_ms: Math.round(attempt.elapsedMs),
-		started_at: new Date(attempt.startedAt).toISOString()
+		started_at: new Date(attempt.startedAt).toISOString(),
+		mode: attempt.mode,
+		measured_ms: Math.round(attempt.measuredMs),
+		measured_chars: Math.round(attempt.measuredChars)
 	};
 }
 
@@ -147,7 +202,7 @@ export async function recordChunkAttempt(
 }
 
 /**
- * The drain's write: the same eight columns and the same mapper as the live write, sent as
+ * The drain's write: the same eleven columns and the same mapper as the live write, sent as
  * an upsert so a repeated drain is a no-op at the database rather than by care.
  *
  * **`ignoreDuplicates: true` is mandatory, not stylistic.** It makes PostgREST emit
