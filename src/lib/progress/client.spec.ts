@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
 import {
 	backfillChunkAttempt,
+	BEST_MEASURED_CHARS_FLOOR,
 	classifyWriteOutcome,
 	recordChunkAttempt,
 	type ChunkAttemptInput
@@ -47,6 +48,7 @@ function mockSupabase(outcome: { error?: unknown; status?: number } | { reject: 
 	return { client: client as unknown as SupabaseClient<Database>, calls };
 }
 
+/** A wholly-Normal traversal: metrics present, and the measured span IS the wall clock. */
 const attempt: ChunkAttemptInput = {
 	userId: '11111111-1111-1111-1111-111111111111',
 	chunkId: '33333333-3333-3333-3333-333333333333',
@@ -55,16 +57,42 @@ const attempt: ChunkAttemptInput = {
 	grossWpm: 61.4321,
 	accuracyRaw: 0.9737,
 	elapsedMs: 42_123.7,
-	startedAt: Date.UTC(2026, 6, 26, 12, 0, 0)
+	startedAt: Date.UTC(2026, 6, 26, 12, 0, 0),
+	mode: 'normal',
+	measuredMs: 42_123.7,
+	measuredChars: 431
 };
 
-const THE_EIGHT_COLUMNS = [
+/** A wholly-Zen traversal: nothing was measured, so nothing is asserted (spec #24 §4). */
+const zenAttempt: ChunkAttemptInput = {
+	...attempt,
+	grossWpm: null,
+	accuracyRaw: null,
+	mode: 'zen',
+	measuredMs: 0,
+	measuredChars: 0
+};
+
+/** A mid-way switch: mode is `zen` and the metrics are NULL, but the span is real. */
+const mixedAttempt: ChunkAttemptInput = {
+	...attempt,
+	grossWpm: null,
+	accuracyRaw: null,
+	mode: 'zen',
+	measuredMs: 18_400.4,
+	measuredChars: 212
+};
+
+const THE_ELEVEN_COLUMNS = [
 	'accuracy_raw',
 	'book_id',
 	'chunk_id',
 	'completed',
 	'elapsed_ms',
 	'gross_wpm',
+	'measured_chars',
+	'measured_ms',
+	'mode',
 	'started_at',
 	'user_id'
 ];
@@ -80,12 +108,12 @@ describe('recordChunkAttempt', () => {
 		expect(calls[0]).toMatchObject({ table: 'chunk_attempts', method: 'insert' });
 	});
 
-	it('sends exactly the eight columns the 2b column-level INSERT grant covers', async () => {
+	it('sends exactly the eleven columns the column-level INSERT grant covers', async () => {
 		const { client, calls } = mockSupabase({ error: null });
 
 		await recordChunkAttempt(client, attempt);
 
-		expect(Object.keys(calls[0].payload as object).sort()).toEqual(THE_EIGHT_COLUMNS);
+		expect(Object.keys(calls[0].payload as object).sort()).toEqual(THE_ELEVEN_COLUMNS);
 	});
 
 	it('never sends created_at or id — the grant omits them and Postgres would refuse with 42501', async () => {
@@ -130,6 +158,90 @@ describe('recordChunkAttempt', () => {
 		expect(payload.elapsed_ms).toBe(42_124);
 		expect(payload.gross_wpm).toBe(61.4321);
 		expect(payload.accuracy_raw).toBe(0.9737);
+	});
+
+	it('rounds measuredMs and measuredChars too — both columns are integer', async () => {
+		const { client, calls } = mockSupabase({ error: null });
+
+		await recordChunkAttempt(client, mixedAttempt);
+
+		const payload = calls[0].payload as Record<string, unknown>;
+		expect(payload.measured_ms).toBe(18_400);
+		expect(payload.measured_chars).toBe(212);
+	});
+});
+
+/**
+ * The three rows of spec #24 §4's table. They are asserted at the MAPPER, because this is
+ * the last place the shape is under our control: after `toRow` the payload is PostgREST's.
+ */
+describe('recordChunkAttempt — the measurement axis (spec #24 §4, §5)', () => {
+	it('writes a wholly-Normal traversal with non-null metrics and measured_ms = elapsed_ms', async () => {
+		const { client, calls } = mockSupabase({ error: null });
+
+		await recordChunkAttempt(client, attempt);
+
+		expect(calls[0].payload).toMatchObject({
+			mode: 'normal',
+			gross_wpm: 61.4321,
+			accuracy_raw: 0.9737,
+			elapsed_ms: 42_124,
+			measured_ms: 42_124,
+			measured_chars: 431
+		});
+	});
+
+	it('writes a wholly-Zen traversal as mode=zen, metrics NULL and measured_chars 0', async () => {
+		const { client, calls } = mockSupabase({ error: null });
+
+		await recordChunkAttempt(client, zenAttempt);
+
+		expect(calls[0].payload).toMatchObject({
+			mode: 'zen',
+			gross_wpm: null,
+			accuracy_raw: null,
+			measured_ms: 0,
+			measured_chars: 0
+		});
+	});
+
+	it('writes a mid-way switch as mode=zen with NULL metrics but a real, non-zero span', async () => {
+		const { client, calls } = mockSupabase({ error: null });
+
+		await recordChunkAttempt(client, mixedAttempt);
+
+		const payload = calls[0].payload as Record<string, number | null>;
+		expect(payload.mode).toBe('zen');
+		expect(payload.gross_wpm).toBeNull();
+		expect(payload.accuracy_raw).toBeNull();
+		expect(payload.measured_ms as number).toBeGreaterThan(0);
+		expect(payload.measured_chars as number).toBeGreaterThan(0);
+	});
+
+	it('never emits measured_ms above elapsed_ms — the invariant the DB CHECK also enforces', async () => {
+		// Including the rounding boundary: round() is monotonic non-decreasing, so an input
+		// pair that satisfies the invariant in floats still satisfies it as integers.
+		const inputs: ChunkAttemptInput[] = [
+			attempt,
+			zenAttempt,
+			mixedAttempt,
+			{ ...attempt, elapsedMs: 1_000.4, measuredMs: 1_000.4 },
+			{ ...attempt, elapsedMs: 1_000.5, measuredMs: 1_000.4 },
+			{ ...attempt, elapsedMs: 0, measuredMs: 0 }
+		];
+
+		for (const input of inputs) {
+			const { client, calls } = mockSupabase({ error: null });
+			await recordChunkAttempt(client, input);
+			const payload = calls[0].payload as Record<string, number>;
+			expect(payload.measured_ms).toBeLessThanOrEqual(payload.elapsed_ms);
+		}
+	});
+});
+
+describe('BEST_MEASURED_CHARS_FLOOR', () => {
+	it('is 100 measured characters — the twin of the literal inside the rollup function', () => {
+		expect(BEST_MEASURED_CHARS_FLOOR).toBe(100);
 	});
 
 	it('reports an RLS or grant refusal as a PERMANENT failure rather than throwing', async () => {
@@ -251,12 +363,26 @@ describe('backfillChunkAttempt', () => {
 		});
 	});
 
-	it('sends the same eight columns as the live write, and never created_at or id', async () => {
+	it('sends the same eleven columns as the live write, and never created_at or id', async () => {
 		const { client, calls } = mockSupabase({ error: null });
 
 		await backfillChunkAttempt(client, attempt);
 
-		expect(Object.keys(calls[0].payload as object).sort()).toEqual(THE_EIGHT_COLUMNS);
+		expect(Object.keys(calls[0].payload as object).sort()).toEqual(THE_ELEVEN_COLUMNS);
+	});
+
+	it('carries the mode and the span through the drain path unchanged', async () => {
+		const { client, calls } = mockSupabase({ error: null });
+
+		await backfillChunkAttempt(client, mixedAttempt);
+
+		expect(calls[0].payload).toMatchObject({
+			mode: 'zen',
+			gross_wpm: null,
+			accuracy_raw: null,
+			measured_ms: 18_400,
+			measured_chars: 212
+		});
 	});
 
 	it('maps the payload identically to the live write — one mapper, one payload shape', async () => {
