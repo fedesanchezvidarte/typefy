@@ -12,8 +12,8 @@ import type { Keystroke } from './types.js';
 export interface MetricsSnapshot {
 	grossWpm: number; // (typed chars ÷ 5) ÷ elapsed minutes; backspaces excluded from typed chars
 	accuracyRaw: number; // first-attempt hits ÷ first-attempt entries; corrected counts as a miss. 0..1
-	typedChars: number;
-	elapsedMs: number;
+	typedChars: number; // MEASURED char strokes only — Zen strokes never reach the count
+	elapsedMs: number; // span of the WHOLE slice minus excludeMs, never a measured-only span
 }
 
 const ZERO_SNAPSHOT: MetricsSnapshot = {
@@ -41,6 +41,21 @@ const ZERO_SNAPSHOT: MetricsSnapshot = {
  * amendment as a delivery-layer concern that reached the metrics module.
  *
  * `accuracyRaw` and `typedChars` have no time term and are untouched by the discount.
+ *
+ * Since spec #24 the COUNTING terms are taken over the measured strokes only: a stroke typed
+ * in Zen carries `measured: false` and contributes to neither `typedChars` nor the
+ * first-attempt population. An absent flag reads as measured, which is what keeps every
+ * pre-4a slice and fixture scoring identically.
+ *
+ * The TIME term is deliberately NOT recomputed over the measured strokes. Zen time is
+ * discounted through `excludeMs` — the identical mechanism as `awaiting` — because the
+ * accumulator carried alongside the log is the only thing that can account for Zen time
+ * spent between strokes, or before the first one. Two span calculations would drift; one
+ * span minus one accumulated discount cannot.
+ *
+ * This is the second, smaller widening of the seam ADR-0004's 2026-08-01 amendment opened:
+ * the module now reads a provenance flag as well as taking a discount. Surfaced, not
+ * smuggled — the signature is unchanged and no fourth parameter was added.
  */
 export function computeMetrics(
 	slice: readonly Keystroke[],
@@ -51,8 +66,11 @@ export function computeMetrics(
 		return ZERO_SNAPSHOT;
 	}
 
-	const typedChars = slice.filter((k) => k.kind === 'char').length;
-	const firstAttempts = slice.filter((k) => k.firstAttempt);
+	// Absent means measured — the pre-4a corpus, the schema backfill and the v1 buffer all
+	// rest on the same construction argument (spec #24).
+	const measured = slice.filter((k) => k.measured !== false);
+	const typedChars = measured.filter((k) => k.kind === 'char').length;
+	const firstAttempts = measured.filter((k) => k.firstAttempt);
 	const firstAttemptHits = firstAttempts.filter((k) => k.judgment === 'hit').length;
 
 	const firstStroke = slice[0].timestamp;

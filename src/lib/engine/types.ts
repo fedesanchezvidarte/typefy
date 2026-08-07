@@ -29,11 +29,29 @@ export interface Keystroke {
 	judgment?: 'hit' | 'miss'; // kind 'char' only
 	firstAttempt: boolean; // true iff this stroke created the position's first-attempt record
 	timestamp: number; // ms — injected by the caller (fake-clock friendly)
+	/**
+	 * Was this stroke inside a MEASURED span (spec #24 §3)? Written on every real stroke by
+	 * `chunk.ts`, copied straight off the event exactly as `timestamp` is.
+	 *
+	 * Typed OPTIONAL on purpose: **absent means measured.** That keeps every pre-4a fixture
+	 * and the whole pre-4a regression corpus valid without a rewrite, and it is the same
+	 * construction argument the schema backfill and the v1 attempt buffer use — everything
+	 * written before the mode axis existed was, by construction, fully measured.
+	 *
+	 * It is provenance, not a metric: the log stays the single source of truth, and a slice
+	 * can now be scored without a second source of truth about when the mode changed.
+	 */
+	measured?: boolean;
 }
 
+/**
+ * `measured` rides on the event exactly like `timestamp`, which is what lets `chunk.ts`
+ * keep its metrics-free promise: it copies the flag and learns nothing about modes.
+ * `session.ts` is the only module that stamps it, from `SessionState.mode`.
+ */
 export type ChunkEvent =
-	| { type: 'char'; char: string; timestamp: number }
-	| { type: 'backspace'; timestamp: number }
+	| { type: 'char'; char: string; timestamp: number; measured?: boolean }
+	| { type: 'backspace'; timestamp: number; measured?: boolean }
 	| { type: 'restart' };
 
 export interface ChunkEngineState {
