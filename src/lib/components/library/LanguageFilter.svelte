@@ -5,14 +5,21 @@
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import type { LanguageFilter } from '$lib/types';
 	import { LANGUAGE_FILTERS } from '$lib/library/language-filter';
+	import type { BookSort } from '$lib/library/sort';
+	import { libraryHref } from '$lib/library/url';
 
 	interface Props {
 		/** The RESOLVED filter the load applied — not the raw `?lang`, so `?lang=fr` still
 		 * marks the fallback as current rather than nothing. */
 		active: LanguageFilter;
+		/** The active search and sort (spec #25 §2), carried through so switching the
+		 * language never silently drops them — `libraryHref` is the one place a library URL
+		 * is built, and it needs the whole state to stay explicit about all three. */
+		query: string | null;
+		sort: BookSort;
 	}
 
-	let { active }: Props = $props();
+	let { active, query, sort }: Props = $props();
 
 	// The two language options reuse the content-language labels GeneratedCover already
 	// uses — that is exactly what they are. Only "All" is new.
@@ -39,7 +46,7 @@
 				     colour alone would not carry the active option. -->
 				<a
 					data-testid="library-language-filter-{value}"
-					href={resolve(localizeHref(`/type?lang=${value}`) as Pathname)}
+					href={resolve(localizeHref(libraryHref({ language: value, query, sort })) as Pathname)}
 					aria-current={value === active ? 'page' : undefined}
 					class={[
 						'block rounded-md px-2 py-1 text-xs tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',

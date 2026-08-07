@@ -83,17 +83,19 @@ test.describe('library grid', () => {
 		await page.goto('/type');
 		await expect(page.getByTestId('text-picker')).toBeVisible();
 
-		// Tab from page load until focus lands on a card (bounded walk — the
-		// header now carries theme/language/auth controls before the grid).
+		// Tab from page load until focus lands on a card (bounded walk — the header carries
+		// theme/language/auth controls before the grid, and spec #25 §2 added the library's
+		// own control group — language filter, sort pills, search input + submit — ahead of
+		// it too, which is why the budget is 30 rather than the pre-#25 20).
 		let reached = false;
-		for (let i = 0; i < 20 && !reached; i++) {
+		for (let i = 0; i < 30 && !reached; i++) {
 			await page.keyboard.press('Tab');
 			const focusedTestId = await page.evaluate(
 				() => document.activeElement?.getAttribute('data-testid') ?? ''
 			);
 			reached = focusedTestId.startsWith('text-picker-option-');
 		}
-		expect(reached, 'Tab should reach a book card within 20 stops').toBe(true);
+		expect(reached, 'Tab should reach a book card within 30 stops').toBe(true);
 
 		// Enter activates the focused card once hydrated (retried like clicks).
 		await expect(async () => {

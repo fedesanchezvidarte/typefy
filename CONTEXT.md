@@ -37,7 +37,10 @@ audited against this glossary, with a CI floor). **4a** is complete and opens th
 now a first-class concept the engine, the schema and the persistence layer all carry, measurement is
 scoped to the **measured span** rather than to one whole passage, and **Zen mode** finally means what
 this glossary has promised since Phase 0 — a Zen passage derives, displays and persists no WPM and no
-accuracy. 4b and 4c both depend on it landing first.
+accuracy. **4b** is also complete: every foreground token across all four palettes now clears WCAG AA
+against both `bg` and `sheet`, closing #21; the library gained server-resolved **search** and
+**sort**, composing with the **language filter**; and an accessibility sweep across all four screens
+removed the `color-contrast` axe carve-out for good. 4c still depends on 4a and 4b having landed.
 
 Phased roadmap:
 
@@ -58,9 +61,11 @@ Phased roadmap:
   tested without the real long books 3a put in the database.
 - **Phase 4** — Modes + polish + E2E coverage. Split into **4a** (✅ spec #24 — **mode** as the
   measurement axis: honest Zen, span-scoped metrics, nullable metrics and span columns on
-  `chunk_attempts`, the 100-character best floor), **4b** (spec #25 — polish: palette contrast,
-  catalog search and sort, an accessibility sweep) and **4c** (spec #26 — an E2E gap audit against
-  this glossary and a CI coverage floor). The order is load-bearing the same way Phase 3's was: 4b
+  `chunk_attempts`, the 100-character best floor), **4b** (✅ spec #25 — polish: all four palettes
+  re-derived to clear WCAG AA, closing #21; server-resolved catalog **search** and **sort** composing
+  with the **language filter**; an accessibility sweep across all four screens with the
+  `color-contrast` axe carve-out removed) and **4c** (spec #26 — an E2E gap audit against this
+  glossary and a CI coverage floor). The order is load-bearing the same way Phase 3's was: 4b
   polishes and 4c covers a typing screen whose measurement axis 4a defines, so both would have to be
   redone against it otherwise.
 
@@ -224,7 +229,20 @@ Use these terms as defined here; do not drift to synonyms.
   page, never a 400. This does not weaken the locale-independence rule: content language and UI
   locale remain two different things that happen to share vocabulary, the filter is a guess held in
   the URL rather than a stored preference, and `all` is always reachable. Added in Phase 3c
-  (spec #19).
+  (spec #19). Since Phase 4b (spec #25) it shares the library page with two more controls that hold
+  the exact same posture — URL-held, resolved server-side in the same load, never client-only:
+  **search** (`?q=`, matching **title** or **author**, case- and accent-insensitively, by substring)
+  and **sort** (`?sort=default|title|length`; `title` collates locale-aware via `Intl.Collator`,
+  `length` orders ascending by chunk count; `default` is the explicit name for `listBooks`' own
+  order, not an absence). Both fall back **silently** on the same terms as `?lang`: an empty or
+  whitespace-only `?q` means no search, not zero results, and an unrecognised `?sort` behaves exactly
+  like the absent case rather than erroring. All three **compose** — changing one preserves the other
+  two, and back/forward restores all three together, since none of it is anything but query params.
+  `libraryHref` (`src/lib/library/url.ts`) is the single function every control's link is built from,
+  which is what keeps changing one from silently dropping another. A search with no match renders an
+  informative empty state naming what was searched, not a blank grid, and **continue reading** narrows
+  with the active filter and search exactly as it already did with the filter alone, since all three
+  draw from the same already-resolved `books` list.
 - **Continue reading** — The library's section above the grid, signed-in users only: the 3
   **in-progress books** (`chunks_completed > 0` and `< chunk_count`) most recently active by
   `book_progress.last_active_at`, descending, drawn from the already language-filtered list so the
