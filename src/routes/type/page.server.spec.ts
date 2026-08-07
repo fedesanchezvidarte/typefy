@@ -120,6 +120,10 @@ function loadEvent(
 		bookProgress?: Result;
 		/** The raw `?lang` value, exactly as a URL would carry it. */
 		lang?: string | null;
+		/** The raw `?q` value, exactly as a URL would carry it. */
+		q?: string | null;
+		/** The raw `?sort` value, exactly as a URL would carry it. */
+		sort?: string | null;
 	} = {}
 ) {
 	const supabase = mockSupabase({
@@ -129,6 +133,12 @@ function loadEvent(
 	const url = new URL('http://localhost/type');
 	if (options.lang !== undefined && options.lang !== null) {
 		url.searchParams.set('lang', options.lang);
+	}
+	if (options.q !== undefined && options.q !== null) {
+		url.searchParams.set('q', options.q);
+	}
+	if (options.sort !== undefined && options.sort !== null) {
+		url.searchParams.set('sort', options.sort);
 	}
 	const event = {
 		url,
@@ -378,6 +388,133 @@ describe('/type load — the ?lang filter (spec #19 §4)', () => {
 	});
 });
 
+describe('/type load — the ?q search (spec #25 §2)', () => {
+	it('returns null and applies no filter when ?q is absent', async () => {
+		const { event } = loadEvent({ user: null });
+
+		const data = await runLoad(event);
+
+		expect(data.query).toBeNull();
+		expect(data.books).toHaveLength(3);
+	});
+
+	it('narrows to a title match, case-insensitively', async () => {
+		const { event } = loadEvent({ user: null, q: 'QUIJOTE' });
+
+		const data = await runLoad(event);
+
+		expect(data.query).toBe('QUIJOTE');
+		expect(data.books.map((book: TypeableTextSummary) => book.id)).toEqual(['don-quijote']);
+	});
+
+	it('narrows to an author match', async () => {
+		const { event } = loadEvent({ user: null, q: 'austen' });
+
+		const data = await runLoad(event);
+
+		expect(data.books.map((book: TypeableTextSummary) => book.id)).toEqual(['pride-and-prejudice']);
+	});
+
+	it('treats a whitespace-only ?q as no search, not zero results', async () => {
+		const { event } = loadEvent({ user: null, q: '   ' });
+
+		const data = await runLoad(event);
+
+		expect(data.query).toBeNull();
+		expect(data.books).toHaveLength(3);
+	});
+
+	it('composes with ?lang — the two narrow together, neither resets the other', async () => {
+		const { event } = loadEvent({ user: null, lang: 'en', q: 'never' });
+
+		const data = await runLoad(event);
+
+		expect(data.language).toBe('en');
+		expect(data.query).toBe('never');
+		expect(data.books.map((book: TypeableTextSummary) => book.id)).toEqual(['never-opened']);
+	});
+
+	it('renders an empty book list, not an error, when nothing matches', async () => {
+		const { event } = loadEvent({ user: null, q: 'nonexistent-title-xyz' });
+
+		const data = await runLoad(event);
+
+		expect(data.query).toBe('nonexistent-title-xyz');
+		expect(data.books).toEqual([]);
+	});
+});
+
+describe('/type load — the ?sort order (spec #25 §2)', () => {
+	it('defaults to "default" and preserves listBooks’ own order when ?sort is absent', async () => {
+		const { event } = loadEvent({ user: null });
+
+		const data = await runLoad(event);
+
+		expect(data.sort).toBe('default');
+		expect(data.books.map((book: TypeableTextSummary) => book.id)).toEqual([
+			'pride-and-prejudice',
+			'don-quijote',
+			'never-opened'
+		]);
+	});
+
+	it('sorts by title, locale-aware', async () => {
+		const { event } = loadEvent({ user: null, sort: 'title' });
+
+		const data = await runLoad(event);
+
+		expect(data.sort).toBe('title');
+		expect(data.books.map((book: TypeableTextSummary) => book.title)).toEqual([
+			'Don Quijote',
+			'Never Opened',
+			'Pride and Prejudice'
+		]);
+	});
+
+	it('sorts by length, ascending chunkCount', async () => {
+		const { event } = loadEvent({ user: null, sort: 'length' });
+
+		const data = await runLoad(event);
+
+		expect(data.sort).toBe('length');
+		expect(data.books.map((book: TypeableTextSummary) => book.id)).toEqual([
+			'never-opened',
+			'don-quijote',
+			'pride-and-prejudice'
+		]);
+	});
+
+	it('falls back silently to "default" for an unrecognised ?sort — no error status', async () => {
+		const { event } = loadEvent({ user: null, sort: 'bogus' });
+
+		const data = await runLoad(event);
+
+		expect(data.sort).toBe('default');
+	});
+
+	it('composes with ?lang — both resolve and both are applied', async () => {
+		const { event, supabase } = loadEvent({ user: null, lang: 'en', sort: 'title' });
+
+		const data = await runLoad(event);
+
+		expect(data.language).toBe('en');
+		expect(data.sort).toBe('title');
+		// The mock doesn't simulate the `.eq('language', ...)` predicate's row-narrowing
+		// effect, so this asserts the predicate was actually issued rather than the
+		// (mock-only) resulting row set.
+		const languagePredicate = supabase.calls.find(
+			(call) => call.method === 'eq' && call.args[0] === 'language'
+		)?.args[1];
+		expect(languagePredicate).toBe('en');
+		// Sort still applies to whatever `listBooks` returned, locale-aware.
+		expect(data.books.map((book: TypeableTextSummary) => book.title)).toEqual([
+			'Don Quijote',
+			'Never Opened',
+			'Pride and Prejudice'
+		]);
+	});
+});
+
 describe('/type load — continueReading (spec #19 §5)', () => {
 	it('returns the in-progress books, most recently active first', async () => {
 		const { event } = loadEvent({
@@ -443,6 +580,27 @@ describe('/type load — continueReading (spec #19 §5)', () => {
 		const data = await runLoad(event);
 
 		expect(data.continueReading).toEqual([]);
+	});
+
+	it('narrows with an active search too, not just the language filter — the page can never contradict itself', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			q: 'quijote',
+			bookProgress: {
+				data: [
+					// Both books have progress; only QUIJOTE's title matches the search.
+					progressRow(PRIDE_UUID, 2, '2026-07-29T09:00:00Z'),
+					progressRow(QUIJOTE_UUID, 1, '2026-07-31T09:00:00Z')
+				],
+				error: null
+			}
+		});
+
+		const data = await runLoad(event);
+
+		expect(data.continueReading.map((book: TypeableTextSummary) => book.id)).toEqual([
+			'don-quijote'
+		]);
 	});
 
 	it('hands the grid the very same object, so devalue deduplicates the duplicate card', async () => {

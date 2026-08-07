@@ -641,44 +641,17 @@ test.describe('windowed reading (spec #18)', () => {
 		 * band is dominated by advisory landmark/heading-order rules whose "fix" would be to
 		 * restructure a page around the tool rather than around the reader.
 		 *
-		 * ## The one carve-out: `color-contrast`
-		 *
-		 * `--muted` fails WCAG AA for normal text in the two LIGHT palettes, on every page the
-		 * app has — measured: `#8c7f6a` on `#f3ede2` is **3.36:1** in `warm-light` (the default)
-		 * and `#68737f` on `#edf0f3` is **4.22:1** in `cool-light`, against the 4.5:1 AA needs.
-		 * The two dark palettes pass (5.0-6.0:1). It lands on the header nav, the font and
-		 * language toggles, the book line, the passage meta and the hero copy — everything that
-		 * uses the token, which is most of the chrome.
-		 *
-		 * It is NOT a spec #18 regression and NOT fixable from here. `--muted` is a brand design
-		 * token with two sources of truth kept in lockstep by a parity test
-		 * (`src/routes/layout.css` and `src/lib/theme/palettes.ts`, asserted by `theme.spec.ts`),
-		 * so changing it restyles every surface in the product across four palettes — a decision
-		 * for whoever owns the palette, not a fix a test author should guess at. Reported
-		 * separately rather than patched quietly: **issue #21**
-		 * (https://github.com/fedesanchezvidarte/typefy/issues/21) carries the measurements, the
-		 * affected surfaces and `#756955` as a warm-light starting point.
-		 *
-		 * **Delete this carve-out when #21 is fixed.** It is a dated exception to an a11y gate,
-		 * not a standing policy, and the moment the token clears AA it starts hiding real
-		 * regressions instead of a known one.
-		 *
-		 * The carve-out is by RULE NAME and nothing else, which is what keeps it from becoming a
-		 * blanket. Still failing this gate, on every state below: any `critical` violation of any
-		 * rule (contrast is only ever `serious`, so nothing hides here), and any `serious`
-		 * violation of any OTHER rule — including anything spec #18's awaiting panel, live region
-		 * or summary might introduce.
+		 * No rule carve-outs (spec #25 §1, closes #21): `--muted` used to fail WCAG AA contrast
+		 * in the two light palettes and was excluded here by rule name while #21 was open. The
+		 * palette pass re-derived every foreground token to clear 4.5:1 against both `bg` and
+		 * `sheet` on all four palettes (`src/lib/theme/theme.spec.ts`'s `WCAG AA contrast`
+		 * block is the automated gate for that), so `color-contrast` runs like every other rule
+		 * here now — nothing excluded.
 		 */
-		const KNOWN_PREEXISTING_RULES = new Set(['color-contrast']);
-
 		async function seriousViolations(page: Page) {
 			const results = await new AxeBuilder({ page }).analyze();
 			return results.violations
 				.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')
-				.filter(
-					(violation) =>
-						violation.impact === 'critical' || !KNOWN_PREEXISTING_RULES.has(violation.id)
-				)
 				.map((violation) => `${violation.impact}: ${violation.id} — ${violation.help}`);
 		}
 
@@ -710,57 +683,6 @@ test.describe('windowed reading (spec #18)', () => {
 			}
 			await expect(page.getByTestId('session-summary')).toBeVisible();
 			expect(await seriousViolations(page), 'axe: typing screen, finished').toEqual([]);
-		});
-
-		/**
-		 * The pin that keeps the carve-out above honest.
-		 *
-		 * A rule exclusion with a comment is a promise; this is the part that enforces it. It
-		 * runs ONLY `color-contrast`, collects the FOREGROUND COLOUR of every failing node, and
-		 * asserts the set is exactly the one known token. So:
-		 *
-		 * - a NEW contrast defect, in any other colour, on the landing page or on either state
-		 *   of the typing screen, fails this test — the carve-out does not hide it;
-		 * - and when `--muted` is finally fixed, the set goes empty and this test fails too,
-		 *   which is the point: the exclusion cannot outlive the defect it was written for.
-		 */
-		test('the only contrast failures are the known --muted ones', async ({ page }) => {
-			test.setTimeout(120_000);
-
-			/** Every distinct foreground colour axe reports as failing contrast, right now. */
-			async function failingForegrounds(page: Page): Promise<string[]> {
-				const results = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze();
-				const colors = new Set<string>();
-				for (const violation of results.violations) {
-					for (const node of violation.nodes) {
-						for (const check of node.any) {
-							const match = check.message.match(/foreground color: (#[0-9a-f]{6})/i);
-							if (match) colors.add(match[1].toLowerCase());
-						}
-					}
-				}
-				return [...colors].sort();
-			}
-
-			/** `--muted` in `warm-light`, the default palette. 3.36:1 against `--bg`. */
-			const MUTED = ['#8c7f6a'];
-
-			await setFeatured(service, prideAndPrejudiceExcerpt.id, true);
-			try {
-				await page.goto('/');
-				await expect(page.getByTestId('landing-hero')).toBeVisible();
-				expect(await failingForegrounds(page), 'contrast: landing').toEqual(MUTED);
-			} finally {
-				await setFeatured(service, prideAndPrejudiceExcerpt.id, false);
-			}
-
-			await page.route(CHUNKS_ROUTE, (route: Route) => route.abort('failed'));
-			await openBook(page, long);
-			expect(await failingForegrounds(page), 'contrast: typing screen, active').toEqual(MUTED);
-
-			await typePassages(page, long, 0, WINDOW_SIZE - 1);
-			await expect(awaitingPanel(page)).toHaveAttribute('data-state', 'stalled');
-			expect(await failingForegrounds(page), 'contrast: typing screen, awaiting').toEqual(MUTED);
 		});
 
 		test('the landing hero has no serious violations', async ({ page }) => {

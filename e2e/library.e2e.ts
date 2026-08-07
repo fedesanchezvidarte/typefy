@@ -8,23 +8,36 @@ import { donQuijoteExcerpt } from '../src/lib/fixtures/es';
 import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
 
 /**
- * Spec #19 §4 (language filter) and §5 (continue reading), end to end.
+ * Spec #19 §4 (language filter) and §5 (continue reading), and spec #25 §2 (catalog search and
+ * sort), end to end.
  *
- * The pure filter rules (`parseLanguageFilter`, `defaultLanguageFilter`) and the pure
- * selection rule (`selectContinueReading`) already have unit coverage under `src/lib/`;
- * nothing here re-litigates them. What only a real browser can prove is that the URL, the
- * server load and the rendered library actually agree: the default resolves from the UI
- * locale, an unrecognised value fails open rather than 400ing, the active option is
- * keyboard-reachable and exposed to assistive tech, and a signed-in user's in-progress books
- * appear (or do not) exactly where §5 says they should.
+ * The pure filter/search/sort rules (`parseLanguageFilter`, `defaultLanguageFilter`,
+ * `parseSearchQuery`, `matchesSearch`, `parseBookSort`, `sortBooks`, `libraryHref`) and the pure
+ * selection rule (`selectContinueReading`) already have unit coverage under `src/lib/`; nothing
+ * here re-litigates them. What only a real browser can prove is that the URL, the server load
+ * and the rendered library actually agree: the default resolves from the UI locale, an
+ * unrecognised value fails open rather than 400ing, the active option is keyboard-reachable and
+ * exposed to assistive tech, a signed-in user's in-progress books appear (or do not) exactly
+ * where §5 says they should, and — the new §2 surface — that all three controls (`?lang`, `?q`,
+ * `?sort`) compose without ever silently dropping one another, that search results are already
+ * correct in the document the SERVER sends (no post-hydration flash), and that back/forward
+ * restores the whole state together.
+ *
+ * The three seeded fixtures are exactly what local `db:reset` provides — the shelf holding 12
+ * books is a production fact, not a local-stack one — so every search/sort assertion below is
+ * built against these three, not against a round number from the spec's prose.
  */
 
-const EN_ID = prideAndPrejudiceExcerpt.id;
-const ES_ID = donQuijoteExcerpt.id;
-const SHORT_ID = tortoiseAndHare.id;
+const EN_ID = prideAndPrejudiceExcerpt.id; // "Pride and Prejudice (excerpt)", Jane Austen, en, 6 chunks
+const ES_ID = donQuijoteExcerpt.id; // "Don Quijote de la Mancha (fragmento)", Miguel de Cervantes, es, 5 chunks
+const SHORT_ID = tortoiseAndHare.id; // "The Tortoise and the Hare", Aesop, en, 3 chunks
 
 function filterOption(page: Page, value: 'en' | 'es' | 'all') {
 	return page.getByTestId(`library-language-filter-${value}`);
+}
+
+function sortOption(page: Page, value: 'default' | 'title' | 'length') {
+	return page.getByTestId(`library-sort-${value}`);
 }
 
 /**
@@ -39,6 +52,51 @@ async function gotoLibrary(page: Page, path: string) {
 		await page.goto(path);
 		await expect(page.getByTestId('text-picker')).toBeVisible({ timeout: 2000 });
 	}).toPass();
+}
+
+/**
+ * The grid's book slugs in DOM order — what `sortBooks` actually produced, as rendered, not as
+ * asserted against in isolation by `sort.spec.ts`.
+ */
+async function gridOrder(page: Page): Promise<string[]> {
+	const cards = page.getByTestId('text-picker').locator('[data-testid^="text-picker-option-"]');
+	const ids: string[] = [];
+	for (let i = 0; i < (await cards.count()); i += 1) {
+		ids.push((await cards.nth(i).getAttribute('data-testid'))!.replace('text-picker-option-', ''));
+	}
+	return ids;
+}
+
+/**
+ * Fills and submits the search form, retried.
+ *
+ * On the local `npm run dev` server the SSR'd markup (including this input, already carrying
+ * its server-resolved value) paints well before hydration attaches — Vite serves the app as
+ * ~40 unbundled modules there. A `.fill()` landing inside that window sets the DOM value, but
+ * the moment hydration claims the node it re-applies `value={query ?? ''}` from props and the
+ * typed text is silently gone by the time `submit` is clicked — not a `libraryHref`/search bug,
+ * a pre-hydration race the same shape `smoke.e2e.ts` and `typing.e2e.ts` already retry around
+ * for their own hydration-dependent interactions. Retrying the whole fill+submit+assert unit
+ * means a first attempt lost to the race simply tries again once hydration has settled.
+ */
+async function submitSearch(page: Page, query: string) {
+	await expect(async () => {
+		await page.getByTestId('library-search-input').fill(query);
+		await page.getByTestId('library-search-submit').click();
+		await expect(page).toHaveURL(new RegExp(`q=${query}`), { timeout: 2000 });
+	}).toPass();
+}
+
+/**
+ * The HTML the SERVER produced, fetched through the browser context so it carries the same
+ * cookies/locale the page would. No JavaScript runs on it: whatever is asserted here is what
+ * the user's first paint shows — the thing that makes "no post-hydration flash" a checkable
+ * claim rather than an assumption about timing.
+ */
+async function serverHtml(page: Page, path: string): Promise<string> {
+	const response = await page.context().request.get(path);
+	expect(response.ok(), `GET ${path} → ${response.status()}`).toBe(true);
+	return response.text();
 }
 
 test.describe('language filter', () => {
@@ -223,26 +281,236 @@ guestTest.describe('continue reading issues no progress query for a guest', () =
 });
 
 /**
- * Phase 8 (accessibility) for the library page's two new affordances (spec #19). The typing
- * screen itself is `windowed-reading.e2e.ts`'s to audit; this covers what §4/§5 add: the
- * filter control and the continue-reading section, filtered and unfiltered, guest and
- * signed-in.
+ * Spec #25 §2: `?q` catalog search, server-resolved, matching title or author.
+ */
+test.describe('search', () => {
+	test('matches title and author case-insensitively, resolved server-side with no post-hydration flash', async ({
+		page
+	}) => {
+		// Read the raw response the SERVER sent — no JS has run on it — so a pass here proves
+		// the filtering already happened in the load, not that the browser narrowed it after.
+		const html = await serverHtml(page, '/type?lang=all&q=QUIJOTE');
+		expect(html).toContain(`text-picker-option-${ES_ID}`);
+		expect(html).not.toContain(`text-picker-option-${EN_ID}`);
+		expect(html).not.toContain(`text-picker-option-${SHORT_ID}`);
+
+		// Author, not just title, and mixed case.
+		const byAuthor = await serverHtml(page, '/type?lang=all&q=austen');
+		expect(byAuthor).toContain(`text-picker-option-${EN_ID}`);
+		expect(byAuthor).not.toContain(`text-picker-option-${ES_ID}`);
+	});
+
+	test('matches accent-insensitively — a query carrying accents the source text does not still matches', async ({
+		page
+	}) => {
+		// "Cervantes" itself carries no accent; the query adds one on each side deliberately, so
+		// a pass here can only be explained by both sides folding through normalizeForSearch,
+		// not by a lucky literal match.
+		const html = await serverHtml(page, `/type?lang=all&q=${encodeURIComponent('Cérvantès')}`);
+		expect(html).toContain(`text-picker-option-${ES_ID}`);
+	});
+
+	test('composes with ?lang= — narrows within the language rather than resetting it', async ({
+		page
+	}) => {
+		await gotoLibrary(page, '/type?lang=es&q=quijote');
+		await expect(gridCard(page, ES_ID)).toBeVisible();
+		expect(await gridOrder(page)).toEqual([ES_ID]);
+		await expect(filterOption(page, 'es')).toHaveAttribute('aria-current', 'page');
+	});
+
+	test('?lang= and ?q= never contradict — a language-appropriate query with no match in that language is the empty state, not the other language leaking in', async ({
+		page
+	}) => {
+		// "tortoise" matches the EN-only fixture by title; under lang=es it must match nothing
+		// rather than falling back to the unfiltered catalog.
+		await page.goto('/type?lang=es&q=tortoise');
+		await expect(page.getByTestId('library-empty-state')).toBeVisible();
+		await expect(page.getByTestId('text-picker')).toHaveCount(0);
+	});
+
+	test('a whitespace-only q behaves as no search — the full list, not the empty state', async ({
+		page
+	}) => {
+		await gotoLibrary(page, '/type?lang=all&q=%20%20%20');
+		await expect(page.getByTestId('library-empty-state')).toHaveCount(0);
+		await expect(gridCard(page, EN_ID)).toBeVisible();
+		await expect(gridCard(page, ES_ID)).toBeVisible();
+		await expect(gridCard(page, SHORT_ID)).toBeVisible();
+	});
+
+	test('a query matching nothing renders the empty state, not a blank grid, and its reset link clears only the search', async ({
+		page
+	}) => {
+		await page.goto('/type?lang=all&q=frankenstein');
+		await expect(page.getByTestId('text-picker')).toHaveCount(0);
+		const empty = page.getByTestId('library-empty-state');
+		await expect(empty).toBeVisible();
+		await expect(empty).toContainText('frankenstein');
+
+		await page.getByTestId('library-empty-reset').click();
+		await expect(page).not.toHaveURL(/q=/);
+		// The reset link only clears the search — it must not also silently drop lang=all.
+		await expect(page).toHaveURL(/lang=all/);
+		await expect(page.getByTestId('library-empty-state')).toHaveCount(0);
+		await expect(gridCard(page, EN_ID)).toBeVisible();
+		await expect(gridCard(page, ES_ID)).toBeVisible();
+	});
+
+	test('the search input is keyboard-operable: type and submit reach the same URL a click would', async ({
+		page
+	}) => {
+		await gotoLibrary(page, '/type?lang=all');
+		// Hydration-safe retry (see `submitSearch`'s comment): typed text landing before
+		// hydration attaches is silently overwritten, so the whole type+submit+assert unit
+		// retries rather than the keystrokes alone.
+		await expect(async () => {
+			await page.getByTestId('library-search-input').focus();
+			await page.keyboard.press('Control+A');
+			await page.keyboard.type('quijote');
+			await page.keyboard.press('Enter');
+			await expect(page).toHaveURL(/q=quijote/, { timeout: 2000 });
+		}).toPass();
+		await expect(gridCard(page, ES_ID)).toBeVisible();
+	});
+});
+
+/**
+ * Spec #25 §2: `?sort` catalog ordering, server-resolved, composing with filter and search.
+ */
+test.describe('sort', () => {
+	test('?sort=title reorders the grid with locale-aware collation', async ({ page }) => {
+		await gotoLibrary(page, '/type?lang=all&sort=title');
+		// "Don Quijote…" < "Pride…" < "The Tortoise…"
+		expect(await gridOrder(page)).toEqual([ES_ID, EN_ID, SHORT_ID]);
+		await expect(sortOption(page, 'title')).toHaveAttribute('aria-current', 'page');
+	});
+
+	test('?sort=length reorders the grid ascending by chunk count', async ({ page }) => {
+		await gotoLibrary(page, '/type?lang=all&sort=length');
+		// tortoise (3) < don-quijote (5) < pride-and-prejudice (6)
+		expect(await gridOrder(page)).toEqual([SHORT_ID, ES_ID, EN_ID]);
+		await expect(sortOption(page, 'length')).toHaveAttribute('aria-current', 'page');
+	});
+
+	test('an unrecognised ?sort falls back silently to default, never an error page', async ({
+		page
+	}) => {
+		const response = await page.goto('/type?lang=all&sort=bogus');
+		expect(response?.status()).toBe(200);
+		// Default: listBooks' own order (language, then title) — en before es.
+		expect(await gridOrder(page)).toEqual([EN_ID, SHORT_ID, ES_ID]);
+		await expect(sortOption(page, 'default')).toHaveAttribute('aria-current', 'page');
+	});
+});
+
+/**
+ * Spec #25 §2: the three controls compose — changing one never silently drops the other two —
+ * and back/forward restores the whole state together, not just the URL of whichever control was
+ * clicked last.
+ */
+test.describe('filter, search and sort compose', () => {
+	test('changing the sort preserves an active search and language filter', async ({ page }) => {
+		await gotoLibrary(page, '/type?lang=all&q=quijote');
+		await expect(gridCard(page, ES_ID)).toBeVisible();
+
+		await sortOption(page, 'title').click();
+		await expect(page).toHaveURL(/\/type\?lang=all&sort=title&q=quijote$/);
+		expect(await gridOrder(page)).toEqual([ES_ID]);
+		await expect(filterOption(page, 'all')).toHaveAttribute('aria-current', 'page');
+		await expect(page.getByTestId('library-search-input')).toHaveValue('quijote');
+	});
+
+	test('changing the language filter preserves an active search and sort', async ({ page }) => {
+		await gotoLibrary(page, '/type?lang=all&sort=length&q=o');
+		const before = await gridOrder(page);
+		expect(before.length).toBeGreaterThan(1); // "o" matches more than one seeded title/author
+
+		await filterOption(page, 'en').click();
+		await expect(page).toHaveURL(/\/type\?lang=en&sort=length&q=o$/);
+		await expect(sortOption(page, 'length')).toHaveAttribute('aria-current', 'page');
+		await expect(page.getByTestId('library-search-input')).toHaveValue('o');
+	});
+
+	test('changing the search preserves the active language filter and sort', async ({ page }) => {
+		await gotoLibrary(page, '/type?lang=all&sort=title');
+		await submitSearch(page, 'don');
+		// A GET form serialises fields in DOM order (q, then the hidden lang/sort) — unlike the
+		// `libraryHref`-built links elsewhere, which are always lang, sort, q. Both orders carry
+		// the same three values; only the link-click tests above can assert an exact order.
+		await expect(page).toHaveURL(/\/type\?q=don&lang=all&sort=title$/);
+		expect(await gridOrder(page)).toEqual([ES_ID]);
+		await expect(sortOption(page, 'title')).toHaveAttribute('aria-current', 'page');
+	});
+
+	test('back/forward restores filter, search and sort together', async ({ page }) => {
+		await gotoLibrary(page, '/type'); // state 0: default (en, sort=default, no query)
+
+		await filterOption(page, 'all').click(); // state 1: lang=all
+		await expect(page).toHaveURL(/lang=all/);
+
+		await sortOption(page, 'length').click(); // state 2: lang=all, sort=length
+		await expect(page).toHaveURL(/sort=length/);
+		expect(await gridOrder(page)).toEqual([SHORT_ID, ES_ID, EN_ID]);
+
+		await submitSearch(page, 'don'); // state 3: + q=don
+		expect(await gridOrder(page)).toEqual([ES_ID]);
+
+		// One step back restores state 2: the filter and sort stay, the search is gone.
+		//
+		// The URL updates on `popstate` synchronously; the re-render from the load it triggers
+		// does not. Waiting for a card the search had excluded to reappear is what turns "the
+		// address bar changed" into "the page actually shows the restored state" before reading
+		// the grid's order — and it is also why this test steps back/forward ONE state at a
+		// time rather than queuing several history moves before asserting: a second navigation
+		// fired before the first has settled races the load it triggered.
+		await page.goBack();
+		await expect(page).toHaveURL(/sort=length/);
+		await expect(page).not.toHaveURL(/q=don/);
+		await expect(gridCard(page, SHORT_ID)).toBeVisible();
+		expect(await gridOrder(page)).toEqual([SHORT_ID, ES_ID, EN_ID]);
+
+		// One step forward restores state 3: filter, sort AND search together.
+		await page.goForward();
+		await expect(page).toHaveURL(/q=don/);
+		await expect(gridCard(page, ES_ID)).toBeVisible();
+		await expect(gridCard(page, SHORT_ID)).toHaveCount(0);
+		expect(await gridOrder(page)).toEqual([ES_ID]);
+	});
+
+	test('continue reading narrows with an active search, not just the language filter', async ({
+		page,
+		authUser
+	}) => {
+		test.skip(
+			!isLocalStack,
+			`refusing to create throwaway users against a non-local Supabase (${SUPABASE_URL})`
+		);
+		await authUser.completePassages(EN_ID, [0]);
+		await authUser.completePassages(ES_ID, [0]);
+
+		// Both have progress, but only EN_ID's title matches "pride".
+		await page.goto('/type?lang=all&q=pride');
+		await expect(sectionCard(page, EN_ID)).toBeVisible();
+		await expect(
+			page.getByTestId('continue-reading').getByTestId(`text-picker-option-${ES_ID}`)
+		).toHaveCount(0);
+	});
+});
+
+/**
+ * Phase 8 (accessibility) for the library page's affordances (spec #19 §4/§5, spec #25 §2's
+ * search/sort/empty-state). The typing screen itself is `windowed-reading.e2e.ts`'s to audit.
  *
- * Same gate and the same carve-out as `windowed-reading.e2e.ts`'s a11y block, for the same
- * reason: `--muted` fails WCAG AA contrast in the two light palettes today, tracked
- * separately as issue #21, and is not something a filter/continue-reading feature should
- * silently "fix" by picking different tokens than the rest of the chrome.
+ * Same gate as `windowed-reading.e2e.ts`'s a11y block, and — since spec #25 §1 closed #21 by
+ * re-deriving every palette token to clear WCAG AA — no rule carve-outs anywhere: `color-contrast`
+ * runs like every other axe rule here.
  */
 test.describe('library accessibility (phase 8)', () => {
-	const KNOWN_PREEXISTING_RULES = new Set(['color-contrast']);
-
 	async function seriousViolations(page: Page) {
 		const results = await new AxeBuilder({ page }).analyze();
 		return results.violations
 			.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')
-			.filter(
-				(violation) => violation.impact === 'critical' || !KNOWN_PREEXISTING_RULES.has(violation.id)
-			)
 			.map((violation) => `${violation.impact}: ${violation.id} — ${violation.help}`);
 	}
 
@@ -291,5 +559,76 @@ test.describe('library accessibility (phase 8)', () => {
 				'library-language-filter-en';
 		}
 		expect(reached, 'Tab should reach the active filter option within 20 stops').toBe(true);
+	});
+
+	test('the sort control is reachable in page tab order and its active option is announced, not just coloured', async ({
+		page
+	}) => {
+		await page.goto('/type?sort=length');
+		const active = sortOption(page, 'length');
+		// Same non-colour signal as the language filter (spec #25 §2): `aria-current="page"` is
+		// a standard ARIA state, exposed to assistive tech independently of the filled-pill
+		// styling that carries the same information visually.
+		await expect(active).toHaveAttribute('aria-current', 'page');
+		await expect(sortOption(page, 'title')).not.toHaveAttribute('aria-current', 'page');
+
+		let reached = false;
+		for (let i = 0; i < 20 && !reached; i += 1) {
+			await page.keyboard.press('Tab');
+			reached =
+				(await page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? '')) ===
+				'library-sort-length';
+		}
+		expect(reached, 'Tab should reach the active sort option within 20 stops').toBe(true);
+	});
+
+	test('the three library controls sit in one sane tab order: language, then sort, then search', async ({
+		page
+	}) => {
+		await page.goto('/type');
+
+		/** Tabs forward until it lands on `testId`, or fails the walk is bounded so a control
+		 *  moved out of order (or dropped from the tab sequence entirely) fails loudly rather
+		 *  than hanging. */
+		async function tabTo(testId: string, budget: number) {
+			for (let i = 0; i < budget; i += 1) {
+				await page.keyboard.press('Tab');
+				const current = await page.evaluate(
+					() => document.activeElement?.getAttribute('data-testid') ?? ''
+				);
+				if (current === testId) return true;
+			}
+			return false;
+		}
+
+		// Each step's budget only needs to cover the ground BETWEEN the previous control and
+		// this one, so a sane order — not a specific absolute stop count — is what this proves.
+		expect(await tabTo('library-language-filter-en', 25)).toBe(true);
+		expect(await tabTo('library-sort-default', 5)).toBe(true);
+		expect(await tabTo('library-search-input', 5)).toBe(true);
+		expect(await tabTo('library-search-submit', 3)).toBe(true);
+	});
+
+	test("the search input's label is programmatically associated, not just visually adjacent", async ({
+		page
+	}) => {
+		await page.goto('/type');
+		// getByLabel resolves through the accessibility tree's label/control association
+		// (here, <label for="library-search-input">) — it would find nothing for a label that
+		// merely sits next to the input in the markup without the `for`/`id` pairing.
+		const input = page.getByLabel(/search by title or author/i);
+		await expect(input).toHaveAttribute('data-testid', 'library-search-input');
+	});
+
+	test('a book card keeps its accessible name once the grid is filtered, searched and sorted together', async ({
+		page
+	}) => {
+		await gotoLibrary(page, '/type?lang=all&sort=title&q=quijote');
+		// The card is a single <a> whose accessible name is its full text content (title,
+		// author, passage count) — GeneratedCover's title/author spans are plain text inside
+		// it, not hidden from assistive tech, so the accessible name still carries the title.
+		const card = page.getByRole('link', { name: /Don Quijote de la Mancha/ });
+		await expect(card).toBeVisible();
+		await expect(card).toHaveAttribute('data-testid', `text-picker-option-${ES_ID}`);
 	});
 });

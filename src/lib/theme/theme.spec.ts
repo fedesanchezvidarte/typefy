@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { contrastRatio, meetsAA } from './contrast';
 import { coverTitleSize } from './cover';
 import { DEFAULT_FONT, FONT_IDS, FONTS, isFontId } from './fonts';
 import {
@@ -48,6 +49,49 @@ describe('palettes', () => {
 		expect(PALETTES[DEFAULT_LIGHT_PALETTE].scheme).toBe('light');
 		expect(DEFAULT_DARK_PALETTE).toBe('soft-dark');
 		expect(PALETTES[DEFAULT_DARK_PALETTE].scheme).toBe('dark');
+	});
+});
+
+describe('WCAG AA contrast', () => {
+	// Closes #21 (spec #25 §1). This is the automated check the brief asks for — a one-off
+	// measurement would drift the moment a palette value changes again.
+	//
+	// Text tokens (fg, dim, muted, accent, error) are held to the 4.5:1 "normal text" bar
+	// against BOTH surfaces a token can sit on (bg, sheet), rather than trying to classify
+	// some of them as "large text" (the 3:1 exception): the passage renders at 18px/21px
+	// (TypingSurface.svelte), below the ~24px/18pt large-text threshold, and accent/error
+	// both appear as link/text-sized UI elsewhere in the app. Requiring 4.5:1 uniformly is
+	// the simpler, defensibly-conservative rule, and it strictly subsumes 3:1, so nothing
+	// that would pass the spec's stated bar fails this stricter one.
+	//
+	// caret is a non-text UI indicator (the blinking cursor bar), so it only needs 3:1.
+	//
+	// border and errorTint are deliberately EXCLUDED, not silently skipped:
+	//   - border is a decorative content divider, not a UI component that conveys state on
+	//     its own — WCAG 1.4.11 (non-text contrast) doesn't reach a plain card/input border.
+	//   - errorTint is a BACKGROUND tint (behind an incorrect character), not a foreground
+	//     token — "against bg and sheet" doesn't apply to a background the same way.
+	const TEXT_TOKENS: readonly (keyof PaletteTokens)[] = ['fg', 'dim', 'muted', 'accent', 'error'];
+	const SURFACES: readonly (keyof PaletteTokens)[] = ['bg', 'sheet'];
+
+	describe.each(PALETTE_IDS)('%s', (id) => {
+		const tokens = PALETTES[id].tokens;
+
+		it.each(TEXT_TOKENS)('%s clears 4.5:1 against bg and sheet', (token) => {
+			for (const surface of SURFACES) {
+				const ratio = contrastRatio(tokens[token], tokens[surface]);
+				expect(meetsAA(ratio, 'text'), `${id}.${token} vs ${surface} = ${ratio.toFixed(2)}`).toBe(
+					true
+				);
+			}
+		});
+
+		it('caret clears 3:1 against bg and sheet (non-text UI)', () => {
+			for (const surface of SURFACES) {
+				const ratio = contrastRatio(tokens.caret, tokens[surface]);
+				expect(meetsAA(ratio, 'ui'), `${id}.caret vs ${surface} = ${ratio.toFixed(2)}`).toBe(true);
+			}
+		});
 	});
 });
 

@@ -531,26 +531,17 @@ test.describe('the session summary', () => {
  */
 test.describe('accessibility (phase 8)', () => {
 	/**
-	 * Critical and serious violations only, with one carve-out by RULE NAME.
-	 *
-	 * The helper is deliberately a copy of the one in `windowed-reading.e2e.ts` rather than
-	 * an import: that file documents the carve-out in full — `--muted` fails AA for normal
-	 * text in the two LIGHT palettes (3.36:1 in the default `warm-light`), it is a brand
-	 * token with a parity test binding two sources of truth, and it is tracked as issue #21
-	 * with its own pin test asserting the failing set is EXACTLY that one colour. Nothing
-	 * here weakens that: this file adds states to check, not exceptions.
-	 *
-	 * Delete the carve-out here when #21 is fixed.
+	 * Critical and serious violations only. No rule carve-outs (spec #25 §1, closes #21):
+	 * `--muted` used to fail WCAG AA contrast in the two light palettes and was excluded here
+	 * by rule name while #21 was open. The palette pass re-derived every foreground token to
+	 * clear 4.5:1 against both `bg` and `sheet` on all four palettes
+	 * (`src/lib/theme/theme.spec.ts`'s `WCAG AA contrast` block is the automated gate for
+	 * that), so `color-contrast` runs like every other rule here now.
 	 */
-	const KNOWN_PREEXISTING_RULES = new Set(['color-contrast']);
-
 	async function seriousViolations(page: Page) {
 		const results = await new AxeBuilder({ page }).analyze();
 		return results.violations
 			.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')
-			.filter(
-				(violation) => violation.impact === 'critical' || !KNOWN_PREEXISTING_RULES.has(violation.id)
-			)
 			.map((violation) => `${violation.impact}: ${violation.id} — ${violation.help}`);
 	}
 
@@ -578,52 +569,6 @@ test.describe('accessibility (phase 8)', () => {
 	});
 
 	/**
-	 * The pin that keeps the carve-out above honest on the surfaces THIS spec adds — the Zen
-	 * chrome and the two-tile summary, neither of which existed when `windowed-reading.e2e.ts`
-	 * wrote its own pin.
-	 *
-	 * It runs only `color-contrast`, collects the FOREGROUND COLOUR of every failing node,
-	 * and asserts the set is exactly the one known token. So a new contrast defect introduced
-	 * by the Zen note or by anything else on these surfaces fails here rather than hiding
-	 * behind the rule exclusion — and when #21 is fixed, the set goes empty and this fails
-	 * too, which is the point: the exclusion cannot outlive the defect it was written for.
-	 */
-	test('the only contrast failures on the Zen surfaces are the known --muted ones', async ({
-		page
-	}) => {
-		test.setTimeout(180_000);
-
-		async function failingForegrounds(page: Page): Promise<string[]> {
-			const results = await new AxeBuilder({ page }).withRules(['color-contrast']).analyze();
-			const colors = new Set<string>();
-			for (const violation of results.violations) {
-				for (const node of violation.nodes) {
-					for (const check of node.any) {
-						const match = check.message.match(/foreground color: (#[0-9a-f]{6})/i);
-						if (match) colors.add(match[1].toLowerCase());
-					}
-				}
-			}
-			return [...colors].sort();
-		}
-
-		/** `--muted` in `warm-light`, the default palette. 3.36:1 against `--bg`. */
-		const MUTED = ['#8c7f6a'];
-
-		await openBook(page, SHORT_ID);
-		await zenToggle(page).click();
-		await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
-		expect(await failingForegrounds(page), 'contrast: typing screen, zen').toEqual(MUTED);
-
-		for (const chunk of tortoiseAndHare.chunks) {
-			await type(page, chunk.content);
-		}
-		await expect(page.getByTestId('session-summary')).toBeVisible();
-		await expect(page.getByTestId('summary-zen-note')).toBeVisible();
-		expect(await failingForegrounds(page), 'contrast: session summary, zen').toEqual(MUTED);
-	});
-
-	/**
 	 * The whole flow with the mouse unplugged: open a book from the library, switch mode,
 	 * type, switch back. The failure this guards against is not a missing attribute but a
 	 * stranded focus — a toggle that moves focus to `<body>` ends the session for anyone
@@ -635,15 +580,20 @@ test.describe('accessibility (phase 8)', () => {
 		await page.goto('/type');
 		await expect(page.getByTestId('text-picker')).toBeVisible();
 
+		// 30, not 20: spec #25 §2 added the sort control and the search form ahead of the grid
+		// (language filter, sort pills, search input + submit — 8 stops), on top of the header
+		// chrome (palette, font, language switcher, nav, auth — ~12 stops). 20 was correct
+		// before that control group existed; the budget still bounds the walk, it just accounts
+		// for the controls the spec deliberately put there.
 		let reached = false;
-		for (let i = 0; i < 20 && !reached; i++) {
+		for (let i = 0; i < 30 && !reached; i++) {
 			await page.keyboard.press('Tab');
 			const testId = await page.evaluate(
 				() => document.activeElement?.getAttribute('data-testid') ?? ''
 			);
 			reached = testId.startsWith('text-picker-option-');
 		}
-		expect(reached, 'Tab should reach a book card within 20 stops').toBe(true);
+		expect(reached, 'Tab should reach a book card within 30 stops').toBe(true);
 
 		await expect(async () => {
 			await page.keyboard.press('Enter');

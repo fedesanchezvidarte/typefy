@@ -158,7 +158,7 @@ describe('listBooks', () => {
 		it('filters on the language when one is asked for', async () => {
 			const { client, calls } = mockSupabase({ data: [], error: null });
 
-			await listBooks(client, 'es');
+			await listBooks(client, { language: 'es' });
 
 			expect(calls.filter((c) => c.method === 'eq').map((c) => c.args)).toEqual([
 				['language', 'es']
@@ -168,7 +168,7 @@ describe('listBooks', () => {
 		it('applies no language predicate for `all`', async () => {
 			const { client, calls } = mockSupabase({ data: [], error: null });
 
-			await listBooks(client, 'all');
+			await listBooks(client, { language: 'all' });
 
 			expect(calls.some((c) => c.method === 'eq')).toBe(false);
 		});
@@ -181,10 +181,18 @@ describe('listBooks', () => {
 			expect(calls.some((c) => c.method === 'eq')).toBe(false);
 		});
 
+		it('defaults to the whole catalog when options is an empty object', async () => {
+			const { client, calls } = mockSupabase({ data: [], error: null });
+
+			await listBooks(client, {});
+
+			expect(calls.some((c) => c.method === 'eq')).toBe(false);
+		});
+
 		it('keeps the display order whatever the filter is', async () => {
 			const { client, calls } = mockSupabase({ data: [], error: null });
 
-			await listBooks(client, 'en');
+			await listBooks(client, { language: 'en' });
 
 			expect(calls.filter((c) => c.method === 'order').map((c) => c.args)).toEqual([
 				['language'],
@@ -197,10 +205,82 @@ describe('listBooks', () => {
 			// and would silently become the only gate the day someone "consolidated" the two.
 			const { client, calls } = mockSupabase({ data: [], error: null });
 
-			await listBooks(client, 'en');
+			await listBooks(client, { language: 'en' });
 
 			const args = JSON.stringify(calls.map((c) => c.args));
 			expect(args).not.toContain('published_at');
+		});
+	});
+
+	// The `?q` catalog search (spec #25 §2): matched in JS against rows already fetched by
+	// the (unchanged) language-filtered query — no `ilike`, no `unaccent`, no new predicate.
+	describe('the search filter', () => {
+		const rows = [
+			{
+				id: 'b1',
+				slug: 'pride-and-prejudice',
+				title: 'Pride and Prejudice',
+				author: 'Jane Austen',
+				language: 'en',
+				chunk_count: 6,
+				cover_url: null
+			},
+			{
+				id: 'b2',
+				slug: 'don-quijote',
+				title: 'Don Quijote de la Mancha',
+				author: 'Miguel de Cervantes',
+				language: 'es',
+				chunk_count: 5,
+				cover_url: null
+			}
+		];
+
+		it('applies no filter and issues no extra query when query is absent', async () => {
+			const { client } = mockSupabase({ data: rows, error: null });
+			const books = await listBooks(client, {});
+			expect(books).toHaveLength(2);
+		});
+
+		it('applies no filter when query is null', async () => {
+			const { client } = mockSupabase({ data: rows, error: null });
+			const books = await listBooks(client, { query: null });
+			expect(books).toHaveLength(2);
+		});
+
+		it('narrows to books matching title or author, case- and accent-insensitively', async () => {
+			const { client } = mockSupabase({ data: rows, error: null });
+			const books = await listBooks(client, { query: 'cervantes' });
+			expect(books.map((b) => b.id)).toEqual(['don-quijote']);
+		});
+
+		it('matches accent-insensitively even when the query itself carries no accent', async () => {
+			const { client } = mockSupabase({ data: rows, error: null });
+			const books = await listBooks(client, { query: 'quijote' });
+			expect(books.map((b) => b.id)).toEqual(['don-quijote']);
+		});
+
+		it('returns an empty array when nothing matches, without erroring', async () => {
+			const { client } = mockSupabase({ data: rows, error: null });
+			const books = await listBooks(client, { query: 'frankenstein' });
+			expect(books).toEqual([]);
+		});
+
+		it('composes with the language filter — both narrow together', async () => {
+			const { client, calls } = mockSupabase({ data: [rows[1]], error: null });
+			const books = await listBooks(client, { language: 'es', query: 'quijote' });
+			expect(calls.filter((c) => c.method === 'eq').map((c) => c.args)).toEqual([
+				['language', 'es']
+			]);
+			expect(books.map((b) => b.id)).toEqual(['don-quijote']);
+		});
+
+		it('issues no ilike or unaccent predicate — matching happens in JS, not Postgres', async () => {
+			const { client, calls } = mockSupabase({ data: rows, error: null });
+			await listBooks(client, { query: 'quijote' });
+			expect(calls.some((c) => c.method === 'ilike')).toBe(false);
+			const args = JSON.stringify(calls.map((c) => c.args));
+			expect(args).not.toContain('unaccent');
 		});
 	});
 });

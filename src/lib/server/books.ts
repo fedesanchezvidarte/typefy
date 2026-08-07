@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
+import { matchesSearch } from '$lib/library/search';
 import type {
 	Chunk,
 	Language,
@@ -75,30 +76,50 @@ function toTypeableText(row: BookWithChunksRow): TypeableText {
 	return { ...toSummary(row), chunks };
 }
 
+/** Options for {@link listBooks} — both narrow the result, independently of each other. */
+export interface ListBooksOptions {
+	/** Content-language filter (spec #19 §4). Default `'all'` — no predicate. */
+	language?: LanguageFilter;
+	/**
+	 * Catalog search (spec #25 §2), already resolved by `parseSearchQuery` — `null`/absent
+	 * means "no search". Matched in JS against the already-fetched, already-language-filtered
+	 * rows (see `matchesSearch`): the catalog is 12 rows, `unaccent` is not installed, and
+	 * there is no Postgres text-search predicate to add for this.
+	 */
+	query?: string | null;
+}
+
 /**
  * All published books as metadata (no chunk content), in a stable display order, optionally
- * narrowed to one content language (spec #19 §4). Filtering here rather than in the browser is
- * what makes the first paint already correct — no hydration flash, and no list that visibly
- * narrows after the user has seen it.
+ * narrowed to one content language (spec #19 §4) and/or a search query (spec #25 §2).
+ * Filtering here rather than in the browser is what makes the first paint already correct —
+ * no hydration flash, and no list that visibly narrows after the user has seen it.
  *
  * **The language filter is an ADDITION to the publication gate, never a substitute.** There is
  * still no `published_at` predicate: RLS owns publication (ADR-0006), which is what makes the
  * guarantee hold for every caller rather than for this one. Do not "consolidate" the two — a
  * query filter that looks like a gate becomes the only gate the day someone removes it.
+ *
+ * **Sorting is deliberately NOT done here.** `sortBooks` needs a locale, and locale is a
+ * Paraglide/UI concern this Supabase-facing service shouldn't have to import — the caller
+ * (the route) sorts the result itself, same as it already resolves `getLocale()` for the
+ * language filter's default.
  */
 export async function listBooks(
 	client: Client,
-	language: LanguageFilter = 'all'
+	options: ListBooksOptions = {}
 ): Promise<TypeableTextSummary[]> {
-	let query = client.from('books').select(BOOK_SUMMARY_COLUMNS);
+	const { language = 'all', query = null } = options;
+	let dbQuery = client.from('books').select(BOOK_SUMMARY_COLUMNS);
 	if (language !== 'all') {
-		query = query.eq('language', language);
+		dbQuery = dbQuery.eq('language', language);
 	}
-	const { data, error } = await query.order('language').order('title');
+	const { data, error } = await dbQuery.order('language').order('title');
 	if (error) {
 		throw error;
 	}
-	return (data as BookSummaryRow[]).map(toSummary);
+	const books = (data as BookSummaryRow[]).map(toSummary);
+	return query === null ? books : books.filter((book) => matchesSearch(book, query));
 }
 
 /**
