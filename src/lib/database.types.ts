@@ -104,38 +104,47 @@ export type Database = {
 			};
 			chunk_attempts: {
 				Row: {
-					accuracy_raw: number;
+					accuracy_raw: number | null;
 					book_id: string;
 					chunk_id: string;
 					completed: boolean;
 					created_at: string;
 					elapsed_ms: number;
-					gross_wpm: number;
+					gross_wpm: number | null;
 					id: string;
+					measured_chars: number;
+					measured_ms: number;
+					mode: string;
 					started_at: string;
 					user_id: string;
 				};
 				Insert: {
-					accuracy_raw: number;
+					accuracy_raw?: number | null;
 					book_id: string;
 					chunk_id: string;
 					completed: boolean;
 					created_at?: string;
 					elapsed_ms: number;
-					gross_wpm: number;
+					gross_wpm?: number | null;
 					id?: string;
+					measured_chars?: number;
+					measured_ms?: number;
+					mode?: string;
 					started_at: string;
 					user_id: string;
 				};
 				Update: {
-					accuracy_raw?: number;
+					accuracy_raw?: number | null;
 					book_id?: string;
 					chunk_id?: string;
 					completed?: boolean;
 					created_at?: string;
 					elapsed_ms?: number;
-					gross_wpm?: number;
+					gross_wpm?: number | null;
 					id?: string;
+					measured_chars?: number;
+					measured_ms?: number;
+					mode?: string;
 					started_at?: string;
 					user_id?: string;
 				};
