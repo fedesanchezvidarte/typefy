@@ -80,8 +80,21 @@ import {
  * it is a fixture module, not a spec. Keep it that way.
  */
 
-/** Metrics for a seeded completion. Plausible, and never asserted on — only completion is. */
-const SEEDED_ATTEMPT = { gross_wpm: 55, accuracy_raw: 0.97, elapsed_ms: 30_000 } as const;
+/**
+ * Metrics for a seeded completion. Plausible, and never asserted on — only completion is.
+ *
+ * Fully-Normal since spec #24 (`measured_ms = elapsed_ms`, a measured span past the
+ * 100-character best guard), so a seeded passage looks exactly like one the app would have
+ * written in Normal rather than like a row that opted out of measurement.
+ */
+const SEEDED_ATTEMPT = {
+	gross_wpm: 55,
+	accuracy_raw: 0.97,
+	elapsed_ms: 30_000,
+	mode: 'normal',
+	measured_ms: 30_000,
+	measured_chars: 420
+} as const;
 
 export interface AuthUser {
 	/** `auth.users.id`, which is also every progress row's `user_id`. */
