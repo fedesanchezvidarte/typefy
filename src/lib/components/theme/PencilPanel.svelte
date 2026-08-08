@@ -65,9 +65,19 @@
 </div>
 
 <style>
+	/*
+	 * The wrap stretches over the header's vertical padding (negative margin + matching
+	 * padding, `--header-pad-y` set by AppHeader) so its bottom edge IS the header's bottom
+	 * edge. That is what makes RibbonPanel's `top: 100%` hang from the header rule instead of
+	 * from the 36px icon, which used to leave the panel overlapping the header.
+	 */
 	.trigger-wrap {
 		position: relative;
 		display: inline-flex;
+		align-items: center;
+		align-self: stretch;
+		margin-block: calc(-1 * var(--header-pad-y, 0px));
+		padding-block: var(--header-pad-y, 0px);
 	}
 
 	.icon-trigger {

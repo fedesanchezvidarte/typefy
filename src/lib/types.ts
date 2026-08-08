@@ -32,8 +32,8 @@ export function isMode(value: unknown): value is Mode {
  * become a third filter option by construction.
  *
  * It is NOT a UI locale. The two coincide on two strings today and stay independent by rule
- * (CONTEXT.md); `defaultLanguageFilter` maps between them explicitly rather than asserting
- * that the coincidence is an identity.
+ * (CONTEXT.md) — which is why the starting filter is the locale-independent
+ * `DEFAULT_LANGUAGE_FILTER` (`all`) rather than anything derived from `getLocale()`.
  */
 export type LanguageFilter = Language | 'all';
 

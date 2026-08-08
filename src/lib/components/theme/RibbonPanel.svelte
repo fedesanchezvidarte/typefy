@@ -140,7 +140,9 @@
 	 */
 	.ribbon-panel {
 		position: absolute;
-		top: 100%;
+		/* +1px clears the header's own bottom border, so the panel hangs off the rule
+		   rather than sitting on top of it. */
+		top: calc(100% + 1px);
 		right: 0;
 		margin-top: 0;
 		max-width: calc(100vw - 32px);

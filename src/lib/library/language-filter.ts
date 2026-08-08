@@ -27,21 +27,12 @@ export function parseLanguageFilter(raw: unknown, fallback: LanguageFilter): Lan
 }
 
 /**
- * The filter to start from for a UI locale — a guess that saves a visitor a click, never a
- * stored preference and never a constraint (`all` is always reachable).
+ * The filter an unparameterised `/type` starts on: the whole library.
  *
- * Written as an **explicit mapping** rather than `locale as LanguageFilter`, even though the
- * two vocabularies coincide on `en` and `es` today. UI locale and content language are
- * independent by rule (CONTEXT.md); an assignment would quietly encode the coincidence as an
- * identity, and the next locale to be added would inherit a filter that does not exist.
+ * Deliberately NOT derived from the UI locale (it used to be, via `defaultLanguageFilter`).
+ * UI locale and content language are independent by rule (CONTEXT.md), and a locale-derived
+ * default hid half the catalogue behind a control a first-time visitor had not noticed yet.
+ * Showing everything and letting the reader narrow is the honest starting state; `en`/`es`
+ * remain one click away and are still what a shared `?lang=` link restores.
  */
-export function defaultLanguageFilter(locale: string): LanguageFilter {
-	switch (locale) {
-		case 'es':
-			return 'es';
-		case 'en':
-			return 'en';
-		default:
-			return 'en';
-	}
-}
+export const DEFAULT_LANGUAGE_FILTER: LanguageFilter = 'all';

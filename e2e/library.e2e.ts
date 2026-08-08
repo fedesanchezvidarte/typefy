@@ -18,7 +18,7 @@ import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
  * Spec #19 §4 (language filter) and §5 (continue reading), and spec #25 §2 (catalog search and
  * sort), end to end.
  *
- * The pure filter/search/sort rules (`parseLanguageFilter`, `defaultLanguageFilter`,
+ * The pure filter/search/sort rules (`parseLanguageFilter`, `DEFAULT_LANGUAGE_FILTER`,
  * `parseSearchQuery`, `matchesSearch`, `parseBookSort`, `sortBooks`, `libraryHref`) and the pure
  * selection rule (`selectContinueReading`) already have unit coverage under `src/lib/`; nothing
  * here re-litigates them. What only a real browser can prove is that the URL, the server load
@@ -107,21 +107,23 @@ async function serverHtml(page: Page, path: string): Promise<string> {
 }
 
 test.describe('language filter', () => {
-	test('defaults to the UI locale content language at /type', async ({ page }) => {
+	test('defaults to `all` at /type — the whole library, not the UI locale', async ({ page }) => {
 		await gotoLibrary(page, '/type');
-		await expect(filterOption(page, 'en')).toHaveAttribute('aria-current', 'page');
-		await expect(filterOption(page, 'es')).not.toHaveAttribute('aria-current', 'page');
+		await expect(filterOption(page, 'all')).toHaveAttribute('aria-current', 'page');
+		await expect(filterOption(page, 'en')).not.toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId(`text-picker-option-${EN_ID}`)).toBeVisible();
 		await expect(page.getByTestId(`text-picker-option-${SHORT_ID}`)).toBeVisible();
-		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).not.toBeVisible();
+		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).toBeVisible();
 	});
 
-	test('defaults to the UI locale content language at /es/type', async ({ page }) => {
+	test('defaults to `all` at /es/type too — the default is locale-independent', async ({
+		page
+	}) => {
 		await gotoLibrary(page, '/es/type');
-		await expect(filterOption(page, 'es')).toHaveAttribute('aria-current', 'page');
-		await expect(filterOption(page, 'en')).not.toHaveAttribute('aria-current', 'page');
+		await expect(filterOption(page, 'all')).toHaveAttribute('aria-current', 'page');
+		await expect(filterOption(page, 'es')).not.toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).toBeVisible();
-		await expect(page.getByTestId(`text-picker-option-${EN_ID}`)).not.toBeVisible();
+		await expect(page.getByTestId(`text-picker-option-${EN_ID}`)).toBeVisible();
 	});
 
 	test('?lang=all shows every seeded language at once', async ({ page }) => {
@@ -137,27 +139,28 @@ test.describe('language filter', () => {
 	}) => {
 		const response = await page.goto('/type?lang=fr');
 		expect(response?.status()).toBe(200);
-		// Falls back to 'en' (the UI locale default), exactly as an unfiltered '/type' would.
-		await expect(filterOption(page, 'en')).toHaveAttribute('aria-current', 'page');
+		// Falls back to DEFAULT_LANGUAGE_FILTER ('all'), exactly as an unfiltered '/type' would.
+		await expect(filterOption(page, 'all')).toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId(`text-picker-option-${EN_ID}`)).toBeVisible();
-		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).not.toBeVisible();
+		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).toBeVisible();
 	});
 
 	test('the control is keyboard-operable and back/forward restores the previous filter', async ({
 		page
 	}) => {
+		// Starts on the 'all' default, narrows to 'en' by keyboard, and comes back.
 		await page.goto('/type');
-		await filterOption(page, 'all').focus();
-		await expect(filterOption(page, 'all')).toBeFocused();
+		await filterOption(page, 'en').focus();
+		await expect(filterOption(page, 'en')).toBeFocused();
 		await page.keyboard.press('Enter');
-		await expect(page).toHaveURL(/\?lang=all/);
-		await expect(filterOption(page, 'all')).toHaveAttribute('aria-current', 'page');
-		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).toBeVisible();
-
-		await page.goBack();
-		await expect(page).not.toHaveURL(/\?lang=all/);
+		await expect(page).toHaveURL(/\?lang=en/);
 		await expect(filterOption(page, 'en')).toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).not.toBeVisible();
+
+		await page.goBack();
+		await expect(page).not.toHaveURL(/\?lang=en/);
+		await expect(filterOption(page, 'all')).toHaveAttribute('aria-current', 'page');
+		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).toBeVisible();
 	});
 });
 
@@ -249,8 +252,8 @@ test.describe('continue reading', () => {
 		await authUser.completePassages(EN_ID, [0]);
 		await authUser.completePassages(ES_ID, [0]);
 
-		// Default ('en'): only the EN book is offered to continue.
-		await page.goto('/type');
+		// 'en': only the EN book is offered to continue.
+		await page.goto('/type?lang=en');
 		await expect(sectionCard(page, EN_ID)).toBeVisible();
 		await expect(
 			page.getByTestId('continue-reading').getByTestId(`text-picker-option-${ES_ID}`)
@@ -511,9 +514,9 @@ test.describe('filter, search and sort compose', () => {
 	});
 
 	test('back/forward restores filter, search and sort together', async ({ page }) => {
-		await gotoLibrary(page, '/type'); // state 0: default (en, sort=default, no query)
+		await gotoLibrary(page, '/type'); // state 0: default (all, sort=default, no query)
 
-		await filterOption(page, 'all').click(); // state 1: lang=all
+		await filterOption(page, 'all').click(); // state 1: lang=all, now explicit in the URL
 		await expect(page).toHaveURL(/lang=all/);
 
 		await sortOption(page, 'length').click(); // state 2: lang=all, sort=length
@@ -608,7 +611,7 @@ test.describe('library accessibility (phase 8)', () => {
 		page
 	}) => {
 		await page.goto('/type');
-		const active = filterOption(page, 'en');
+		const active = filterOption(page, 'all');
 		// aria-current is the non-colour half of the signal (spec #19 §4): a link element with
 		// this attribute exposes it to assistive tech through the accessible-name/state API by
 		// definition (it is a standard ARIA state, not a custom data attribute), so asserting

@@ -38,14 +38,19 @@
 </script>
 
 <nav aria-label={m.language_switcher_label()}>
-	<ul class="flex gap-0.5">
+	<!-- Two equal halves, sized to match the font and palette rows above them (spec #30 polish):
+	     the segments read as a control, not as two words. Selected is the same accent hairline on
+	     a sheet fill the other two groups use. -->
+	<ul class="flex gap-2">
 		{#each locales as locale (locale)}
-			<li>
+			<li class="flex-1">
 				<button
 					type="button"
 					class={[
-						'rounded-md px-2 py-1 text-xs tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-						getLocale() === locale ? 'bg-fg font-semibold text-bg' : 'text-muted hover:text-fg'
+						'w-full rounded-lg border px-3 py-2 text-[13px] tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+						getLocale() === locale
+							? 'border-accent bg-sheet font-semibold text-fg'
+							: 'border-border text-muted hover:text-fg'
 					]}
 					aria-label={labels[locale].full()}
 					aria-current={getLocale() === locale ? 'true' : undefined}

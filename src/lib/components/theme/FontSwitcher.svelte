@@ -29,21 +29,67 @@
 </script>
 
 <!-- Phase 5a (spec #30 §2): a specimen list, not a pill row — each option is set in its own
-     face so the choice is legible before it's made, rendered inside PencilPanel. -->
-<div class="flex flex-col gap-0.5" role="group" aria-label={m.theme_font_group_label()}>
+     face so the choice is legible before it's made, rendered inside PencilPanel. The row shows
+     a specimen phrase in the face plus the face's own name; the accessible name stays the short
+     axis label ("Sans"/"Serif"/"Mono") via aria-label, since the specimen text is decoration.
+     Selection is an accent hairline on a sheet fill, matching PaletteSwitcher and the library
+     filter pills — not a filled-dark chip. -->
+<div class="flex flex-col gap-1" role="group" aria-label={m.theme_font_group_label()}>
 	{#each FONT_IDS as id (id)}
 		<button
 			type="button"
 			data-testid="font-{id}"
-			class={[
-				'rounded-md px-2.5 py-1.5 text-left text-[15px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-				selected === id ? 'bg-fg text-bg' : 'text-fg hover:bg-border/40'
-			]}
-			style:font-family={FONTS[id].stack}
+			class={['specimen', selected === id && 'specimen-selected']}
+			aria-label={labels[id]()}
 			aria-pressed={selected === id}
 			onclick={() => choose(id)}
 		>
-			{labels[id]()}
+			<span class="specimen-text" style:font-family={FONTS[id].stack}>{m.font_specimen()}</span>
+			<span class="specimen-name">{FONTS[id].name}</span>
 		</button>
 	{/each}
 </div>
+
+<style>
+	.specimen {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		width: 100%;
+		border: 1px solid transparent;
+		border-radius: 8px;
+		padding: 7px 10px;
+		text-align: left;
+		cursor: pointer;
+		transition:
+			border-color 120ms ease,
+			background-color 120ms ease;
+	}
+
+	.specimen:hover:not(.specimen-selected) {
+		background: color-mix(in srgb, var(--fg) 6%, transparent);
+	}
+
+	.specimen-selected {
+		border-color: var(--accent);
+		background: var(--sheet);
+	}
+
+	.specimen:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+
+	.specimen-text {
+		font-size: 15px;
+		line-height: 1.2;
+		color: var(--fg);
+	}
+
+	.specimen-name {
+		font-size: 10px;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--muted);
+	}
+</style>

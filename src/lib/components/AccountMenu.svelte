@@ -83,9 +83,14 @@
 </div>
 
 <style>
+	/* Same header-edge anchoring as PencilPanel — see the comment there. */
 	.trigger-wrap {
 		position: relative;
 		display: inline-flex;
+		align-items: center;
+		align-self: stretch;
+		margin-block: calc(-1 * var(--header-pad-y, 0px));
+		padding-block: var(--header-pad-y, 0px);
 	}
 
 	.avatar-trigger {

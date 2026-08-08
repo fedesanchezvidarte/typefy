@@ -24,7 +24,7 @@
      replacing the old top-anchored layout. 61px accounts for the sticky header's rendered
      height (py-3 + 36px icon row + border). -->
 <main
-	class="mx-auto flex min-h-[calc(100vh-61px)] w-full max-w-[860px] flex-col items-center justify-center px-6 py-12"
+	class="mx-auto flex min-h-[calc(100vh-61px)] w-full max-w-[860px] flex-col items-center justify-center px-6 pt-12 pb-20"
 >
 	<p class="mb-3.5 text-center text-xs tracking-[0.18em] text-muted uppercase">
 		{m.landing_kicker()}
@@ -32,7 +32,11 @@
 	<AnimatedHeadline frozen={heroFrozen} />
 
 	{#if data.heroBook}
-		<LandingHero book={data.heroBook} onInteract={() => (heroFrozen = true)} />
+		<!-- The demo reads as its own block, so it gets air above the headline it follows
+		     rather than sitting right under the type. -->
+		<div class="mt-8 w-full">
+			<LandingHero book={data.heroBook} onInteract={() => (heroFrozen = true)} />
+		</div>
 		<p class="mt-4 text-center text-[13px] text-muted">{m.landing_hint()}</p>
 	{/if}
 

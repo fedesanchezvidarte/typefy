@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { LANGUAGE_FILTERS, defaultLanguageFilter, parseLanguageFilter } from './language-filter.js';
+import {
+	DEFAULT_LANGUAGE_FILTER,
+	LANGUAGE_FILTERS,
+	parseLanguageFilter
+} from './language-filter.js';
 
 /**
  * The `?lang` filter (spec #19 §4). Pure: the URL and the locale are both passed in, so this
@@ -48,22 +52,12 @@ describe('parseLanguageFilter', () => {
 	});
 });
 
-describe('defaultLanguageFilter', () => {
-	it('starts an English UI on English books and a Spanish UI on Spanish books', () => {
-		expect(defaultLanguageFilter('en')).toBe('en');
-		expect(defaultLanguageFilter('es')).toBe('es');
+describe('DEFAULT_LANGUAGE_FILTER', () => {
+	it('is `all` — an unparameterised /type shows the whole library', () => {
+		expect(DEFAULT_LANGUAGE_FILTER).toBe('all');
 	});
 
-	it('falls back to English for a locale with no content language', () => {
-		// The mapping is explicit, not a cast: UI locale and content language are different
-		// vocabularies that happen to share two strings (CONTEXT.md locale independence).
-		expect(defaultLanguageFilter('fr')).toBe('en');
-		expect(defaultLanguageFilter('')).toBe('en');
-	});
-
-	it('never defaults to `all` — a visitor sees books they can read', () => {
-		for (const locale of ['en', 'es', 'de']) {
-			expect(defaultLanguageFilter(locale)).not.toBe('all');
-		}
+	it('is one of the offered filters, so the default is always reachable from the control', () => {
+		expect(LANGUAGE_FILTERS).toContain(DEFAULT_LANGUAGE_FILTER);
 	});
 });

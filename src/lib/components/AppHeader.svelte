@@ -29,8 +29,8 @@
      single Sign-in button in the avatar's position. Theme axis switchers now live inside
      PencilPanel, not in this row. -->
 <header
-	class="sticky top-0 z-20 flex items-center justify-between border-b border-border px-4 py-3 backdrop-blur-[10px] sm:px-6"
-	style="background: color-mix(in srgb, var(--bg) 86%, transparent);"
+	class="sticky top-0 z-20 flex items-center justify-between border-b border-border px-4 py-[var(--header-pad-y)] backdrop-blur-[10px] sm:px-6"
+	style="--header-pad-y: 12px; background: color-mix(in srgb, var(--bg) 86%, transparent);"
 >
 	<a
 		href={resolve(localizeHref('/') as Pathname)}

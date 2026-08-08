@@ -3,7 +3,7 @@ import type { LanguageFilter, TypeableTextSummary } from '$lib/types';
 import { getLocale } from '$lib/paraglide/runtime';
 import { listBooks } from '$lib/server/books';
 import { getBookActivity } from '$lib/server/progress';
-import { defaultLanguageFilter, parseLanguageFilter } from '$lib/library/language-filter';
+import { DEFAULT_LANGUAGE_FILTER, parseLanguageFilter } from '$lib/library/language-filter';
 import { selectContinueReading } from '$lib/library/continue-reading';
 import { parseSearchQuery } from '$lib/library/search';
 import { parseBookSort, sortBooks, type BookSort } from '$lib/library/sort';
@@ -59,10 +59,7 @@ export const load = (async ({ locals, url }): Promise<LibraryPageData> => {
 	// Reading `?lang` from `url.searchParams` is also what makes SvelteKit re-run this load
 	// when a filter link is followed. Anything unrecognised falls back SILENTLY — the
 	// `?passage=N` posture: a hand-edited or stale link still opens the page, never 400.
-	const language = parseLanguageFilter(
-		url.searchParams.get('lang'),
-		defaultLanguageFilter(getLocale())
-	);
+	const language = parseLanguageFilter(url.searchParams.get('lang'), DEFAULT_LANGUAGE_FILTER);
 	const query = parseSearchQuery(url.searchParams.get('q'));
 	const sort = parseBookSort(url.searchParams.get('sort'));
 	const unsorted = await listBooks(locals.supabase, { language, query });

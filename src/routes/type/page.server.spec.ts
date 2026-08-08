@@ -315,24 +315,26 @@ describe('/type load — the ?lang filter (spec #19 §4)', () => {
 	const languageFiltered = (supabase: ReturnType<typeof mockSupabase>) =>
 		supabase.calls.find((call) => call.method === 'eq' && call.args[0] === 'language')?.args[1];
 
-	it('defaults to the UI locale’s content language when ?lang is absent', async () => {
+	it('defaults to `all` when ?lang is absent, whatever the UI locale', async () => {
 		overwriteGetLocale(() => 'es');
 		const { event, supabase } = loadEvent({ user: null });
 
 		const data = await runLoad(event);
 
-		// A visitor sees books they can read without touching a control.
-		expect(data.language).toBe('es');
-		expect(languageFiltered(supabase)).toBe('es');
+		// The starting filter is the whole library, not a guess derived from the UI locale:
+		// the two vocabularies are independent (CONTEXT.md), and a locale-derived default hid
+		// half the catalogue behind a control a first-time visitor had not noticed yet.
+		expect(data.language).toBe('all');
+		expect(languageFiltered(supabase)).toBeUndefined();
 	});
 
-	it('defaults to en for the English UI', async () => {
+	it('defaults to `all` for the English UI too', async () => {
 		overwriteGetLocale(() => 'en');
 		const { event } = loadEvent({ user: null });
 
 		const data = await runLoad(event);
 
-		expect(data.language).toBe('en');
+		expect(data.language).toBe('all');
 	});
 
 	it('honours an explicit ?lang over the locale default', async () => {
@@ -351,7 +353,7 @@ describe('/type load — the ?lang filter (spec #19 §4)', () => {
 
 		const data = await runLoad(event);
 
-		// `all` must stay reachable: the locale default is a guess, never a constraint.
+		// `all` is the default too, but an explicit `?lang=all` must resolve identically.
 		expect(data.language).toBe('all');
 		expect(languageFiltered(supabase)).toBeUndefined();
 	});
@@ -364,8 +366,8 @@ describe('/type load — the ?lang filter (spec #19 §4)', () => {
 		// exactly the posture `?passage=N` takes.
 		const data = await runLoad(event);
 
-		expect(data.language).toBe('en');
-		expect(languageFiltered(supabase)).toBe('en');
+		expect(data.language).toBe('all');
+		expect(languageFiltered(supabase)).toBeUndefined();
 	});
 
 	it('falls back for a value that differs only in case', async () => {
@@ -374,7 +376,7 @@ describe('/type load — the ?lang filter (spec #19 §4)', () => {
 
 		const data = await runLoad(event);
 
-		expect(data.language).toBe('es');
+		expect(data.language).toBe('all');
 	});
 
 	it('returns the RESOLVED filter, so the control never renders as “nothing current”', async () => {
@@ -383,8 +385,8 @@ describe('/type load — the ?lang filter (spec #19 §4)', () => {
 
 		const data = await runLoad(event);
 
-		// The page was reached with a junk param; the control must still mark `es` active.
-		expect(data.language).toBe('es');
+		// The page was reached with a junk param; the control must still mark `all` active.
+		expect(data.language).toBe('all');
 	});
 });
 

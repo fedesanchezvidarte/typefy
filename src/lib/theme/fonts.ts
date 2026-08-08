@@ -19,12 +19,17 @@
 export interface FontFamily {
 	/** CSS font-family stack, applied to book text via `--reading-font-stack`. */
 	readonly stack: string;
+	/**
+	 * The face's own name, shown under each specimen in `FontSwitcher`. A brand name, so it
+	 * lives here rather than in `messages/` — it reads the same in every UI locale.
+	 */
+	readonly name: string;
 }
 
 export const FONTS = {
-	sans: { stack: "'Roboto', system-ui, sans-serif" },
-	serif: { stack: "'Roboto Serif', Georgia, serif" },
-	mono: { stack: "'Roboto Mono', ui-monospace, monospace" }
+	sans: { stack: "'Roboto', system-ui, sans-serif", name: 'Roboto' },
+	serif: { stack: "'Roboto Serif', Georgia, serif", name: 'Roboto Serif' },
+	mono: { stack: "'Roboto Mono', ui-monospace, monospace", name: 'Roboto Mono' }
 } as const satisfies Record<string, FontFamily>;
 
 export type FontId = keyof typeof FONTS;
