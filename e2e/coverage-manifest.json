@@ -327,7 +327,7 @@
 		"citations": [
 			{
 				"file": "e2e/library.e2e.ts",
-				"testTitleContains": "defaults to the UI locale content language at /type"
+				"testTitleContains": "defaults to `all` at /type — the whole library, not the UI locale"
 			}
 		]
 	},
