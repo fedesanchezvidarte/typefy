@@ -59,6 +59,17 @@ library sub-copy are trimmed, and a `/profile` stub route lands. Implementation 
 update are done; **QA sign-off for spec #30 had not yet landed in the issue as of this writing** —
 treat this Phase 5a entry as pending confirmation until that lands.
 
+The rest of Phase 5 is **specified but not implemented**: **5b** (spec #32), **5c** (spec #33) and
+**5d** (spec #34), written together in one design session and approved in that order. They replace the
+**passage** with the **page** — a screenful sized by a dual character/line budget, carrying the
+source's paragraph breaks as newlines the user actually types — then derive **chapter** structure at
+ingestion, then spend both on a **book detail screen** where a reader can see a book and start from
+any chapter. Glossary entries below carry a _(specified, spec #NN — not yet shipped)_ marker until the
+code lands; the unmarked definitions are what the code does **today**. Two consequences are worth
+stating once here: 5b **discards all existing progress** (re-chunking would otherwise leave progress
+rows pointing at text that no longer exists at that `chunk_id`), and the "never say page" rule this
+glossary has carried since Phase 0 is **amended**, not abandoned — see **Page**.
+
 Phased roadmap:
 
 - **Phase 0** — ✅ Scaffolding + baseline i18n: SvelteKit+TS, Tailwind, Vitest/Playwright,
@@ -85,10 +96,18 @@ Phased roadmap:
   glossary closing five gaps, plus a CI coverage-manifest floor). The order is load-bearing the same
   way Phase 3's was: 4b polishes and 4c covers a typing screen whose measurement axis 4a defines, so
   both would have to be redone against it otherwise.
-- **Phase 5** — ✅ Header, landing and library polish. **5a** (✅ spec #30 — narrows **Font family**
-  to **Reading font**, scoped to book text only, with an IBM Plex → Roboto family swap and the
-  optical-matching/no-reflow guarantee dropped for that axis; header pencil panel and account
-  menu; landing headline and library copy trimmed; `/profile` stub route).
+- **Phase 5** — 🚧 Polish, then the page model and the book's structure. **5a** (✅ spec #30 — narrows
+  **Font family** to **Reading font**, scoped to book text only, with an IBM Plex → Roboto family swap
+  and the optical-matching/no-reflow guarantee dropped for that axis; header pencil panel and account
+  menu; landing headline and library copy trimmed; `/profile` stub route), **5b** (📋 spec #32 — the
+  **page** model: dual-budget chunking, newlines the user types, the **teleprompter**, the **page
+  navigator**, **in-page restore**, an `--allow-recut` ingestion guard and a full progress wipe),
+  **5c** (📋 spec #33 — **chapter** structure derived at ingestion from the HTML edition, aligned back
+  to the cleaned text, stored in a `chapters` table; no UI) and **5d** (📋 spec #34 — the **book detail
+  screen** at `/books/[slug]`, chapter picker and Open Library metadata). The order is load-bearing
+  the way Phases 3 and 4 were, and more strictly: a chapter's start position **is** a chunk index, and
+  5b re-chunks every book, so recording structure before 5b lands would record it against indices that
+  are about to change.
 
 ## Glossary
 
@@ -102,9 +121,38 @@ Use these terms as defined here; do not drift to synonyms.
 - **Chunk** — Atomic unit of a typeable text and of progress. A text is split into chunks **by paragraphs
   with a size target** (~400-600 characters, never cutting a sentence). Book progress = completed chunks
   / total. Presented to users as a **passage**.
+
+  _Phase 5b (spec #32) rewrites the sizing rule, not the concept._ A chunk becomes a **page**: several
+  paragraphs joined by real `\n` characters, sized by a **dual budget** — `MAX_CHARS` (1600) **and**
+  `MAX_LINES` (24) estimated rendered lines, where a paragraph costs
+  `max(1, ceil(length / CHARS_PER_LINE))` with `CHARS_PER_LINE` = 66. Whichever budget binds first
+  closes the chunk; the never-cut-a-sentence rule survives. The budget is an estimate against a fixed
+  nominal measure, never a DOM measurement — chunk boundaries are the progress key and must be
+  identical on every device. `chunk` remains the term in code, schema, engine and tests.
+- **Line budget** _(specified, spec #32 — not yet shipped)_ — The second half of a chunk's dual budget,
+  and the reason a page of short dialogue lines fills the screen without being long in characters.
+  Honest only because the typing surface's measure is pinned in **`ch` units** (`max-width: 66ch`),
+  which keeps characters-per-line constant across the three **reading font** faces where a px measure
+  would not.
 - **Passage** — The user-facing name for a chunk (`pasaje` in the ES UI). `chunk` stays the term in
   code, schema, engine and tests; the UI never says "chunk" — and never "page", which would be a false
   claim about the book's real pagination. Paraglide keys use `passage_*`.
+
+  _Superseded by **page** in Phase 5b (spec #32)._ The "never page" rule was written when a chunk was
+  ~500 characters, where calling it a page really was a false claim. It is amended rather than ignored:
+  see **Page**.
+- **Page** _(specified, spec #32 — not yet shipped)_ — The user-facing name for a chunk once the dual
+  budget lands (`página` in the ES UI), replacing **passage**. A page is **a screenful — deliberately
+  not any print edition's page**, and the product never displays a print page count anywhere, so there
+  is never a second, contradicting number for the same book. Paraglide keys become `page_*`; the
+  canonical query parameter becomes `?page=N`, with `?passage=N` still accepted so existing links work.
+- **Chapter** _(specified, spec #33 — not yet shipped)_ — A **navigational overlay** on a book's chunks:
+  a title and a start chunk index, stored in a `chapters` table and derived at ingestion from the
+  source's **HTML edition** while the typing text continues to come from the plain-text edition.
+  Chapters never constrain chunk boundaries — **a page may span a chapter boundary** — and a page
+  belongs to the chapter its **first character** falls in, so chapter page-ranges are contiguous and
+  progress stays a count rather than a weighted sum. A book with no derivable structure legally has no
+  chapters.
 - **Window** — A contiguous run of **chunks** addressed by absolute index: the unit a typeable text is
   delivered in since Phase 3b (spec #18). Ten chunks (~5 KB) per window; the typing screen
   server-renders the first one from the resume index and fetches the rest from
@@ -287,6 +335,13 @@ Use these terms as defined here; do not drift to synonyms.
   is `pending` or `incorrect`, so one unreachable glyph would make a passage impossible to finish
   and silently wall off the rest of the book. Stored text is therefore not byte-faithful to its
   source; `books.source_url` is the fidelity story.
+
+  _Phase 5b (spec #32) puts the newline to work._ The set is unchanged — the newline has always been
+  in it — but chunks begin to **contain** newlines, and the user types them by pressing Enter. A `\n`
+  is an ordinary character in every respect: it takes a **character state**, it can be `incorrect` and
+  then `corrected`, and it **counts** toward `char_count`, `measured_chars`, accuracy and the WPM
+  denominator. Accepted consequence, recorded rather than compensated for: WPM drifts slightly upward
+  on dialogue-heavy books relative to dense-prose ones.
 - **Progress / sync** — Per-user progress persisted in Supabase under Row Level Security (each user
   sees only their own). The store is an append-only history of **chunk attempts** (the source of truth)
   plus rolled-up per-chunk and per-book tables for cheap reads
@@ -345,6 +400,31 @@ Use these terms as defined here; do not drift to synonyms.
   book's chunk count — silently falls back to the computed index rather than erroring. A fully
   completed book resumes at the first passage (index 0) — there is no "finished" state. Guests always
   resume at the first passage, since nothing is persisted for them to resume from.
+
+  _Phases 5b and 5d (specs #32, #34) lean on this rather than change it._ Because resume is the first
+  **gap** and not the furthest page reached, free **page navigation** and starting from an arbitrary
+  **chapter** need no new resume logic: typing chapter 4 first leaves the computed index inside
+  chapter 1. The override parameter becomes `?page=N`, with `?passage=N` still accepted.
+- **Page navigator** _(specified, spec #32 — not yet shipped)_ — Previous / next arrows plus a
+  "page N of M" jump box in the typing screen's meta line, 1-based. Free movement anywhere in the
+  book, forward to read ahead or back to review what was typed. No keyboard shortcuts, deliberately.
+- **Teleprompter** _(specified, spec #32 — not yet shipped)_ — The typing surface's scroll model once
+  a page is a screenful: the line holding the cursor is held inside a fixed middle band and the text
+  moves under it. Needs DOM measurement, which is **display-only** and never feeds back into chunking.
+  Documented fallback if it feels wrong in practice: natural page scroll with `scrollIntoView`.
+- **In-page restore** _(specified, spec #32 — not yet shipped)_ — A page left half-typed is persisted
+  locally (the **attempt buffer**'s machinery, never the server) and restored on return, which is what
+  makes free navigation safe at ~1600 characters a page. The restored prefix replays as
+  already-correct but **unmeasured**: only the **measured span** typed in the current sitting sets
+  `measured_chars` and `measured_ms`, so returning to a page never fabricates a WPM for time the user
+  was away, and the 100-character best floor excludes trivial tails from personal bests.
+- **Book detail screen** _(specified, spec #34 — not yet shipped)_ — `/books/[slug]`, the canonical
+  page for a book and the destination of every library entry point, continue reading included. Cover
+  left; title, author, year, page count and summary right; the **chapter** list below with per-chapter
+  progress and a start action each. The page count shown is **ours**, never a print edition's.
+  `year` (the work's first publication year) and `summary` are fetched at ingestion from Open Library
+  by a **manifest**-declared work id — never by search — with a per-locale summary override in the
+  manifest winning where present. A failed lookup is not fatal: the book ships without them.
 - **Profile** — A signed-in user's identity row (display name, avatar, optional locale preference),
   created automatically on first sign-in and readable/editable only by that user. A null `locale` means
   "no explicit preference", leaving the cookie > `Accept-Language` > EN detection to apply.
