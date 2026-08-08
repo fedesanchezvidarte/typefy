@@ -49,6 +49,16 @@ trigger level, **G4** a long `awaiting` stall no longer decays cumulative WPM, a
 `cover_url` that fails to load falls back to the generated cover — plus a CI **coverage-manifest**
 gate that keeps every glossary promise honestly cited against a real E2E test going forward.
 
+Phase 5 is in progress. **5a** (spec #30 — header, landing and library polish) narrows the font
+axis to **reading font**, scoped to book text only (the typing screen's passage and the landing
+hero's passage) rather than the whole app, and swaps its three faces from IBM Plex to
+Roboto/Roboto Serif/Roboto Mono, dropping the optical-matching/no-reflow guarantee that swap can
+no longer make (ADR-0011's Phase 5a amendment); the header gains an icon-based pencil panel
+(reading font / palette / interface language) and an account menu, the landing headline and
+library sub-copy are trimmed, and a `/profile` stub route lands. Implementation and this glossary
+update are done; **QA sign-off for spec #30 had not yet landed in the issue as of this writing** —
+treat this Phase 5a entry as pending confirmation until that lands.
+
 Phased roadmap:
 
 - **Phase 0** — ✅ Scaffolding + baseline i18n: SvelteKit+TS, Tailwind, Vitest/Playwright,
@@ -75,6 +85,10 @@ Phased roadmap:
   glossary closing five gaps, plus a CI coverage-manifest floor). The order is load-bearing the same
   way Phase 3's was: 4b polishes and 4c covers a typing screen whose measurement axis 4a defines, so
   both would have to be redone against it otherwise.
+- **Phase 5** — ✅ Header, landing and library polish. **5a** (✅ spec #30 — narrows **Font family**
+  to **Reading font**, scoped to book text only, with an IBM Plex → Roboto family swap and the
+  optical-matching/no-reflow guarantee dropped for that axis; header pencil panel and account
+  menu; landing headline and library copy trimmed; `/profile` stub route).
 
 ## Glossary
 
@@ -338,9 +352,17 @@ Use these terms as defined here; do not drift to synonyms.
   sheet, fg, dim, muted, border, accent, error, errorTint, caret + light/dark scheme) that never
   assumes a typeface. Launch set: warm-light (default), cool-light, soft-dark, near-black. Defined in
   `src/lib/theme/palettes.ts`, painted by `src/routes/layout.css`.
-- **Font family** — The other theming axis: type and only type (sans / serif / mono — IBM Plex,
-  self-hosted), never assuming a background. Optically matched by the superfamily's shared metrics, so
-  switching family never reflows the passage.
+- **Font family** — Superseded in effect by **Reading font** (Phase 5a, spec #30): the axis now
+  applies only to book text, not interface chrome. Kept as a redirect entry because ADR-0011 and
+  earlier phase-roadmap prose still say "Font family."
+- **Reading font** — The font-family axis, narrowed by Phase 5a (spec #30) to the two places a
+  user reads or types a book's own text: the typing screen's passage and the landing hero's
+  passage. Interface chrome (header, library, all UI text) is fixed to Roboto and does not vary
+  with this choice. Three faces at launch — Roboto (default), Roboto Serif, Roboto Mono — self-
+  hosted via Fontsource. Persisted in `typefy-font` / `data-font`, the same cookie and attribute
+  name the axis has carried since Phase 0 (spec #9) — only the display scope narrowed, not the
+  wire format. Unlike the original **Font family** entry, the three faces no longer share an
+  optical-matching guarantee: switching may reflow the passage (ADR-0011's Phase 5a amendment).
 - **Sheet** — The typing surface's own page region: `sheet` background one step off `bg`, minimal
   border, generous padding. The passage renders on it **tonally**: pending = dim, correct/corrected =
   full foreground, incorrect = the only chromatic event (error + tint + wavy underline). No green.

@@ -101,10 +101,10 @@ describe('fonts', () => {
 		expect(DEFAULT_FONT).toBe('sans');
 	});
 
-	it('every stack self-hosts an IBM Plex face with a generic fallback', () => {
-		expect(FONTS.sans.stack).toMatch(/^'IBM Plex Sans'.*sans-serif$/);
-		expect(FONTS.serif.stack).toMatch(/^'IBM Plex Serif'.*serif$/);
-		expect(FONTS.mono.stack).toMatch(/^'IBM Plex Mono'.*monospace$/);
+	it('every stack self-hosts a Roboto face with a generic fallback', () => {
+		expect(FONTS.sans.stack).toMatch(/^'Roboto'.*sans-serif$/);
+		expect(FONTS.serif.stack).toMatch(/^'Roboto Serif'.*serif$/);
+		expect(FONTS.mono.stack).toMatch(/^'Roboto Mono'.*monospace$/);
 	});
 });
 

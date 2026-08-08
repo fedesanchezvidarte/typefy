@@ -132,6 +132,7 @@
 		border: 1px solid var(--border);
 		border-radius: 12px;
 		padding: 24px 26px;
+		font-family: var(--reading-font-stack);
 		font-size: 18px;
 		line-height: 1.85;
 		color: var(--fg);

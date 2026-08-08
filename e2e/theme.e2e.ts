@@ -1,9 +1,18 @@
 import { expect, test, type Page } from '@playwright/test';
+import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
 
 /**
  * Two-axis theming (spec #9, ADR-0011): palette and font are independent,
  * cookie-persisted, applied as data attributes on <html> with no FOUC, and the
  * system colour scheme only picks the initial default.
+ *
+ * Phase 5a (spec #30) relocated both switchers off the header row and into the
+ * pencil trigger's ribbon panel (`PencilPanel`), so every test below opens the
+ * panel first — the buttons are not interactable, let alone visible, while it
+ * is closed. The font axis's display scope also narrowed to "reading font"
+ * only (ADR-0011's Phase 5a amendment): `body`/chrome is now fixed Roboto and
+ * never varies, so the font-axis assertion reads `TypingSurface`'s `.surface`
+ * element instead of `document.body`.
  */
 
 const WARM_LIGHT_BG = 'rgb(243, 237, 226)'; // #F3EDE2
@@ -17,9 +26,22 @@ function bodyBg(page: Page) {
 	});
 }
 
+/**
+ * Opens the pencil panel via its trigger, retried: the click only takes
+ * effect once the page has hydrated (the same hydration-safe retry pattern
+ * `smoke.e2e.ts` and `library.e2e.ts` already use for their first interaction).
+ */
+async function openPencilPanel(page: Page) {
+	await expect(async () => {
+		await page.getByRole('button', { name: 'Theme and language settings' }).click();
+		await expect(page.getByRole('button', { name: 'Warm light' })).toBeVisible({ timeout: 2000 });
+	}).toPass();
+}
+
 test.describe('palette axis', () => {
 	test('a palette dot applies instantly and survives a reload via cookie', async ({ page }) => {
 		await page.goto('/');
+		await openPencilPanel(page);
 
 		await expect(async () => {
 			await page.getByRole('button', { name: 'Near black' }).click();
@@ -58,10 +80,17 @@ test.describe('palette axis', () => {
 });
 
 test.describe('font axis', () => {
-	test('a font choice applies instantly, survives reload, and never touches the palette', async ({
+	test('a font choice applies to the reading surface only, survives reload, and never touches the palette or chrome', async ({
 		page
 	}) => {
-		await page.goto('/');
+		// A rendered TypingSurface is required to observe --reading-font-stack; the library
+		// route gets one with no featured-book arrangement needed (unlike the landing hero).
+		await page.goto('/type');
+		await expect(page.getByTestId('text-picker')).toBeVisible();
+		await page.getByTestId(`text-picker-option-${prideAndPrejudiceExcerpt.id}`).click();
+		await expect(page.getByTestId('typing-surface')).toBeVisible();
+
+		await openPencilPanel(page);
 
 		// Fix the palette first so axis independence is observable.
 		await expect(async () => {
@@ -73,8 +102,19 @@ test.describe('font axis', () => {
 
 		await page.getByRole('button', { name: 'Serif' }).click();
 		await expect(page.locator('html')).toHaveAttribute('data-font', 'serif');
-		const family = await page.evaluate(() => getComputedStyle(document.body).fontFamily);
-		expect(family).toContain('IBM Plex Serif');
+
+		const surfaceFamily = await page.evaluate(
+			() => getComputedStyle(document.querySelector('[data-testid="typing-surface"]')!).fontFamily
+		);
+		expect(surfaceFamily).toContain('Roboto Serif');
+
+		// Chrome (the header wordmark) is fixed Roboto and never adopts the reading-font
+		// choice — the amendment this axis carries per ADR-0011's Phase 5a note.
+		const wordmarkFamily = await page.evaluate(
+			() => getComputedStyle(document.querySelector('[data-testid="wordmark"]')!).fontFamily
+		);
+		expect(wordmarkFamily).not.toContain('Roboto Serif');
+		expect(wordmarkFamily).toContain('Roboto');
 
 		// Strict separation (brief condition 1): the palette did not move.
 		await expect(page.locator('html')).toHaveAttribute('data-palette', 'warm-light');
@@ -110,5 +150,53 @@ test.describe('self-hosted fonts', () => {
 		expect(fontHosts.length).toBeGreaterThan(0);
 		expect(fontHosts.every((host) => host === new URL(page.url()).host)).toBe(true);
 		expect(externalRequests.filter((u) => u.includes('fonts.g'))).toEqual([]);
+	});
+});
+
+/**
+ * Phase 5a (spec #30 §2): the pencil trigger's ribbon panel — opening, closing on outside
+ * click and Escape, and that it hosts all three theme/language groups (brief §2's
+ * `PencilPanel`/`RibbonPanel` shell). Complements the axis-specific tests above, which only
+ * prove the CONTROLS inside the panel still work once it's open.
+ */
+test.describe('pencil panel', () => {
+	test('opening it via click reveals reading-font, palette and language controls', async ({
+		page
+	}) => {
+		await page.goto('/');
+		const trigger = page.getByRole('button', { name: 'Theme and language settings' });
+		await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+		await openPencilPanel(page);
+		await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+		await expect(page.getByRole('button', { name: 'Sans' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Serif' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Mono' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Warm light' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Near black' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'English' })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Español' })).toBeVisible();
+	});
+
+	test('a click outside the panel closes it', async ({ page }) => {
+		await page.goto('/');
+		await openPencilPanel(page);
+
+		await page.mouse.click(10, 10);
+		await expect(page.getByRole('button', { name: 'Warm light' })).toBeHidden();
+		await expect(page.getByRole('button', { name: 'Theme and language settings' })).toHaveAttribute(
+			'aria-expanded',
+			'false'
+		);
+	});
+
+	test('Escape closes the panel and returns focus to the trigger', async ({ page }) => {
+		await page.goto('/');
+		await openPencilPanel(page);
+
+		await page.keyboard.press('Escape');
+		await expect(page.getByRole('button', { name: 'Warm light' })).toBeHidden();
+		await expect(page.getByRole('button', { name: 'Theme and language settings' })).toBeFocused();
 	});
 });

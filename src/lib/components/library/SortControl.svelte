@@ -34,15 +34,19 @@
 			<li>
 				<!-- `'default'` renders as an explicit pill rather than being treated as an
 				     absence of choice — it is "listBooks' own order," a real, reachable option,
-				     matching how `LanguageFilter` always renders `all` explicitly. The filled
-				     pill and semibold weight are the non-colour half of the active signal. -->
+				     matching how `LanguageFilter` always renders `all` explicitly. The active
+				     pill is a `sheet` fill with an `accent` hairline (spec #30), matching
+				     `LanguageFilter`'s treatment; semibold weight and the border are the
+				     non-colour half of the active signal. -->
 				<a
 					data-testid="library-sort-{value}"
 					href={resolve(localizeHref(libraryHref({ language, query, sort: value })) as Pathname)}
 					aria-current={value === active ? 'page' : undefined}
 					class={[
-						'block rounded-md px-2 py-1 text-xs tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-						value === active ? 'bg-fg font-semibold text-bg' : 'text-muted hover:text-fg'
+						'block rounded-md border px-2 py-1 text-xs tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+						value === active
+							? 'border-accent bg-sheet font-semibold text-fg'
+							: 'border-transparent text-muted hover:text-fg'
 					]}
 				>
 					{labels[value]()}

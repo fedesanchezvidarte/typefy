@@ -4,9 +4,15 @@
 	import { m } from '$lib/paraglide/messages';
 	import { localizeHref } from '$lib/paraglide/runtime';
 	import LandingHero from '$lib/components/landing/LandingHero.svelte';
+	import AnimatedHeadline from '$lib/components/landing/AnimatedHeadline.svelte';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	// Freezes the headline tail permanently the instant the hero surface sees a real
+	// keystroke (spec #30) — a plain flag, not reset by anything, since the freeze is for
+	// the lifetime of this page view.
+	let heroFrozen = $state(false);
 </script>
 
 <svelte:head>
@@ -14,49 +20,27 @@
 	<meta name="description" content={m.tagline()} />
 </svelte:head>
 
-<main class="mx-auto w-full max-w-[860px] px-6 pt-13 pb-24">
+<!-- Kicker → h1 → hero → hint → CTA centered as one block in the viewport (spec #30),
+     replacing the old top-anchored layout. 61px accounts for the sticky header's rendered
+     height (py-3 + 36px icon row + border). -->
+<main
+	class="mx-auto flex min-h-[calc(100vh-61px)] w-full max-w-[860px] flex-col items-center justify-center px-6 py-12"
+>
 	<p class="mb-3.5 text-center text-xs tracking-[0.18em] text-muted uppercase">
 		{m.landing_kicker()}
 	</p>
-	<h1
-		class="mx-auto mb-3.5 text-center text-[clamp(28px,5vw,46px)] leading-[1.12] font-semibold tracking-[-0.025em] text-balance"
-	>
-		{m.landing_headline()}
-	</h1>
-	<p
-		class="mx-auto mb-10 max-w-[540px] text-center text-base leading-relaxed text-pretty text-muted"
-	>
-		{m.landing_sub()}
-	</p>
+	<AnimatedHeadline frozen={heroFrozen} />
 
 	{#if data.heroBook}
-		<LandingHero book={data.heroBook} />
+		<LandingHero book={data.heroBook} onInteract={() => (heroFrozen = true)} />
 		<p class="mt-4 text-center text-[13px] text-muted">{m.landing_hint()}</p>
 	{/if}
 
-	<div class="mt-18 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-7">
-		<div>
-			<h2 class="mb-1.5 text-[15px] font-semibold">{m.landing_feature_read_title()}</h2>
-			<p class="text-sm leading-relaxed text-muted">{m.landing_feature_read_body()}</p>
-		</div>
-		<div>
-			<h2 class="mb-1.5 text-[15px] font-semibold">{m.landing_feature_tonal_title()}</h2>
-			<p class="text-sm leading-relaxed text-muted">{m.landing_feature_tonal_body()}</p>
-		</div>
-		<div>
-			<h2 class="mb-1.5 text-[15px] font-semibold">{m.landing_feature_guest_title()}</h2>
-			<p class="text-sm leading-relaxed text-muted">{m.landing_feature_guest_body()}</p>
-		</div>
-	</div>
-
-	<div class="mt-16 flex flex-col items-center gap-4.5">
-		<p class="text-xs tracking-[0.16em] text-muted uppercase">{m.landing_library_kicker()}</p>
-		<a
-			data-testid="start-typing-cta"
-			href={resolve(localizeHref('/type') as Pathname)}
-			class="rounded-[10px] border border-border bg-sheet px-5.5 py-3 text-[15px] text-fg transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-		>
-			{m.landing_library_cta()}
-		</a>
-	</div>
+	<a
+		data-testid="start-typing-cta"
+		href={resolve(localizeHref('/type') as Pathname)}
+		class="mt-10 rounded-[10px] border border-border bg-sheet px-5.5 py-3 text-[15px] text-fg transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+	>
+		{m.landing_library_cta()}
+	</a>
 </main>

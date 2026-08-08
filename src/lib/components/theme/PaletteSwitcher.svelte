@@ -48,41 +48,84 @@
 	}
 </script>
 
-<div class="flex gap-1.5" role="group" aria-label={m.theme_palette_group_label()}>
+<!-- Phase 5a (spec #30 §2): each option is a miniature page specimen — bg rect, sheet card,
+     two fg text rules, one accent mark — rather than a half-circle bg/fg chip. -->
+<div class="flex gap-2" role="group" aria-label={m.theme_palette_group_label()}>
 	{#each PALETTE_IDS as id (id)}
 		<button
 			type="button"
 			data-testid="palette-{id}"
-			class={['dot', selected === id && 'dot-selected']}
-			style:--dot-bg={PALETTES[id].tokens.bg}
-			style:--dot-fg={PALETTES[id].tokens.fg}
+			class={['page', selected === id && 'page-selected']}
+			style:--page-bg={PALETTES[id].tokens.bg}
+			style:--page-sheet={PALETTES[id].tokens.sheet}
+			style:--page-fg={PALETTES[id].tokens.fg}
+			style:--page-accent={PALETTES[id].tokens.accent}
 			aria-label={labels[id]()}
 			aria-pressed={selected === id}
 			title={labels[id]()}
 			onclick={() => choose(id)}
-		></button>
+		>
+			<span class="page-sheet">
+				<span class="page-rule"></span>
+				<span class="page-rule page-rule-short"></span>
+				<span class="page-accent"></span>
+			</span>
+		</button>
 	{/each}
 </div>
 
 <style>
-	/* A dot previews its palette with the palette's own bg/fg split — these two
-	   colours are the palette's identity, not themeable chrome. */
-	.dot {
-		width: 20px;
-		height: 20px;
-		border-radius: 50%;
-		padding: 0;
+	/* A miniature page: the button IS the bg rect, a sheet card sits inset on it, two fg
+	   rules stand in for text, and one accent mark completes the palette's four-colour
+	   identity — the same split the real typing surface renders. */
+	.page {
+		width: 56px;
+		height: 44px;
+		padding: 6px;
+		border-radius: 8px;
 		cursor: pointer;
 		border: 1px solid var(--border);
-		background: linear-gradient(135deg, var(--dot-bg) 0 50%, var(--dot-fg) 50% 100%);
+		background: var(--page-bg);
 	}
 
-	.dot-selected {
+	.page-selected {
 		border: 2px solid var(--accent);
 	}
 
-	.dot:focus-visible {
+	.page:focus-visible {
 		outline: 2px solid var(--accent);
 		outline-offset: 2px;
+	}
+
+	.page-sheet {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		width: 100%;
+		height: 100%;
+		border-radius: 4px;
+		padding: 5px 6px;
+		background: var(--page-sheet);
+	}
+
+	.page-rule {
+		display: block;
+		height: 2px;
+		border-radius: 1px;
+		width: 100%;
+		background: var(--page-fg);
+	}
+
+	.page-rule-short {
+		width: 65%;
+	}
+
+	.page-accent {
+		display: block;
+		margin-top: 2px;
+		width: 30%;
+		height: 2px;
+		border-radius: 1px;
+		background: var(--page-accent);
 	}
 </style>
