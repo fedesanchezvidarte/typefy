@@ -25,15 +25,21 @@
 </svelte:head>
 
 <main class="mx-auto w-full max-w-[1040px] px-6 pt-11 pb-24">
-	<h1 class="mb-1.5 text-[26px] font-semibold tracking-[-0.02em]">{m.library_heading()}</h1>
-	<p class="mb-5 text-[15px] text-muted">{m.library_sub()}</p>
+	<h1 class="mb-9 text-[26px] font-semibold tracking-[-0.02em]">{m.library_heading()}</h1>
 
 	<!-- One coherent control group (spec #25 §2): each control carries the other two through
 	     `libraryHref` so changing any one preserves the rest, and none of the three can drop
-	     the others on navigation or submit. -->
-	<div class="mb-9 flex flex-wrap items-end gap-x-6 gap-y-4">
-		<LanguageFilter active={data.language} query={data.query} sort={data.sort} />
-		<SortControl language={data.language} query={data.query} active={data.sort} />
+	     the others on navigation or submit. One bordered toolbar row, a hairline divider
+	     between the language and sort groups, search right-aligned inside the same card
+	     (spec #30). -->
+	<div
+		class="mb-9 flex flex-wrap items-center justify-between gap-x-6 gap-y-4 rounded-xl border border-border bg-sheet px-4 py-3"
+	>
+		<div class="flex flex-wrap items-center gap-x-5 gap-y-3">
+			<LanguageFilter active={data.language} query={data.query} sort={data.sort} />
+			<div class="h-5 w-px bg-border" aria-hidden="true"></div>
+			<SortControl language={data.language} query={data.query} active={data.sort} />
+		</div>
 		<SearchInput language={data.language} sort={data.sort} query={data.query} />
 	</div>
 
@@ -50,7 +56,9 @@
 			<h2 id="continue-reading-heading" class="mb-4 text-[15px] font-semibold">
 				{m.library_continue_heading()}
 			</h2>
-			<div class="grid grid-cols-[repeat(auto-fill,minmax(158px,1fr))] gap-x-[22px] gap-y-[26px]">
+			<div
+				class="grid auto-rows-[auto_auto_auto] grid-cols-[repeat(auto-fill,minmax(158px,1fr))] gap-x-[22px] gap-y-[26px]"
+			>
 				{#each data.continueReading as book (book.id)}
 					<BookCard {book} progress={percent(book)} />
 				{/each}
@@ -72,7 +80,7 @@
 			</h2>
 			<div
 				data-testid="text-picker"
-				class="grid grid-cols-[repeat(auto-fill,minmax(158px,1fr))] gap-x-[22px] gap-y-[26px]"
+				class="grid auto-rows-[auto_auto_auto] grid-cols-[repeat(auto-fill,minmax(158px,1fr))] gap-x-[22px] gap-y-[26px]"
 			>
 				{#each data.books as book (book.id)}
 					<BookCard {book} progress={percent(book)} />

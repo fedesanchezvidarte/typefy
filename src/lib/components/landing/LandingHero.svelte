@@ -7,9 +7,16 @@
 
 	interface Props {
 		book: TypeableText;
+		/**
+		 * Fired the instant the hero surface sees a real typing event (`char` or
+		 * `backspace`) — never on chunk restarts. The landing page uses this to
+		 * freeze its headline animation permanently for the page view (spec #30):
+		 * the moment someone actually engages with the demo, the tail stops moving.
+		 */
+		onInteract?: () => void;
 	}
 
-	let { book }: Props = $props();
+	let { book, onInteract }: Props = $props();
 
 	/*
 	 * The landing hero IS a live typing surface (brief §5): a real passage,
@@ -30,6 +37,9 @@
 	);
 
 	function dispatch(event: SessionEvent) {
+		if (event.type === 'char' || event.type === 'backspace') {
+			onInteract?.();
+		}
 		let next = applySessionEvent(session, event);
 		if (next.status === 'finished') {
 			next = applySessionEvent(next, { type: 'restart-session' }); // loop, no summary

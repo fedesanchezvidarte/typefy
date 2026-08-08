@@ -51,3 +51,43 @@ is built on contrast, not hue.
 - **Runtime-injected CSS variables from JS only (no CSS blocks)** — one source of truth, but
   themes flash on load without SSR stamping and break with JS disabled; the parity test keeps
   the duplication honest instead.
+
+## Phase 5a amendment (spec #30)
+
+**Font family → reading font, scoped to book text.**
+
+The font axis is no longer app-wide. Interface chrome (header, library, all UI text) is fixed
+to Roboto and does not vary with the user's choice. The axis — renamed in effect **reading
+font** — now applies only to the two places a user reads/types a book's own text: the typing
+screen's `TypingSurface` and the landing hero's `TypingSurface` instance. `FontId`/`FONTS`
+(`src/lib/theme/fonts.ts`) keep their shape and their wire format: the cookie name
+(`typefy-font`) and the `data-font` attribute are unchanged, so an existing user's saved
+preference still resolves correctly with no migration. Only the *display* concept — what the
+choice visibly controls — narrows.
+
+The three faces also change: IBM Plex Sans/Serif/Mono → Roboto/Roboto Serif/Roboto Mono
+(self-hosted via Fontsource, same import mechanism, static weights 400/500/600 pinned per
+face — Roboto Mono ships 400/500 only). Roboto is also the fixed chrome face, so the `sans`
+reading-font option and chrome now happen to render in the same family at different weights —
+an accepted overlap, not a merge of the two axes: chrome is never user-selectable, and the
+other two reading-font options (serif, mono) still diverge from chrome.
+
+**The optical-matching/no-reflow condition is dropped for this axis.** ADR-0011's original
+decision required the three font faces to share metrics precisely so switching the axis never
+reflowed the passage — true when all three were cuts of one superfamily (IBM Plex). Roboto,
+Roboto Serif and Roboto Mono are three unrelated font families with different x-heights,
+character widths and line-height defaults; guaranteeing zero reflow across them is not a
+condition Fontsource's metric data lets us cheaply hold, and the spec does not ask for it.
+Switching reading font may now reflow the passage the user is typing — the character-state
+model already tolerates a passage's rendered width changing (it re-derives from character
+index, not pixel position), so this costs nothing functionally, only the visual promise ADR-
+0011 originally made. The palette axis's conditions (colour-and-only-colour, no typeface
+assumption) are unaffected.
+
+**Consequence for the "no theme can carry a typographic identity" line.** Still holds: chrome
+never adopts a reading-font identity, and no combo preset is introduced by this spec.
+
+Mechanically: `--font-stack` (one variable, applied to `body`) is split into
+`--chrome-font-stack` (fixed Roboto, applied to `body`) and `--reading-font-stack` (driven by
+`data-font`, consumed only inside `TypingSurface`'s scoped CSS — `src/routes/layout.css`,
+`src/lib/theme/fonts.ts`, `src/lib/components/typing/TypingSurface.svelte`).

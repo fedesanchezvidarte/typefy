@@ -1,19 +1,26 @@
 @import 'tailwindcss';
 
 /*
- * Self-hosted IBM Plex (spec #9, brief ask #1): sans/serif/mono at 400/500/600
- * (mono 400/500). Fontsource serves them from our own origin — no external
- * font requests. The three faces are one superfamily with shared metrics,
- * which is what keeps the passage from reflowing when the family switches.
+ * Self-hosted Roboto family (spec #9, amended by the Phase 5a brief, spec #30
+ * §3.3): sans/serif/mono at static weights 400/500/600 (mono 400/500).
+ * Fontsource serves them from our own origin — no external font requests.
+ * Roboto Serif ships as a variable font upstream; these are its static
+ * per-weight cuts, matching the existing single-weight-file import pattern
+ * rather than pulling the full variable range.
+ *
+ * Unlike the IBM Plex superfamily these three replace, Roboto/Roboto
+ * Serif/Roboto Mono are unrelated families with different metrics — the
+ * reading-font axis no longer guarantees zero reflow when it switches
+ * (ADR-0011's Phase 5a amendment).
  */
-@import '@fontsource/ibm-plex-sans/400.css';
-@import '@fontsource/ibm-plex-sans/500.css';
-@import '@fontsource/ibm-plex-sans/600.css';
-@import '@fontsource/ibm-plex-serif/400.css';
-@import '@fontsource/ibm-plex-serif/500.css';
-@import '@fontsource/ibm-plex-serif/600.css';
-@import '@fontsource/ibm-plex-mono/400.css';
-@import '@fontsource/ibm-plex-mono/500.css';
+@import '@fontsource/roboto/400.css';
+@import '@fontsource/roboto/500.css';
+@import '@fontsource/roboto/600.css';
+@import '@fontsource/roboto-serif/400.css';
+@import '@fontsource/roboto-serif/500.css';
+@import '@fontsource/roboto-serif/600.css';
+@import '@fontsource/roboto-mono/400.css';
+@import '@fontsource/roboto-mono/500.css';
 
 /*
  * Two-axis theme contract (spec #9, ADR-0011). The palette records in
@@ -39,7 +46,15 @@
 	--caret: #2a251e;
 	color-scheme: light;
 
-	--font-stack: 'IBM Plex Sans', system-ui, sans-serif;
+	/*
+	 * Chrome vs. reading font (Phase 5a amendment, spec #30 §3): interface
+	 * chrome is fixed to Roboto and never varies with the user's choice.
+	 * --reading-font-stack is the one that follows data-font, consumed only
+	 * by the two components that render a book's own text (TypingSurface's
+	 * scoped CSS, both on the typing screen and via the landing hero).
+	 */
+	--chrome-font-stack: 'Roboto', system-ui, sans-serif;
+	--reading-font-stack: 'Roboto', system-ui, sans-serif;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -115,15 +130,15 @@
 }
 
 :root[data-font='sans'] {
-	--font-stack: 'IBM Plex Sans', system-ui, sans-serif;
+	--reading-font-stack: 'Roboto', system-ui, sans-serif;
 }
 
 :root[data-font='serif'] {
-	--font-stack: 'IBM Plex Serif', Georgia, serif;
+	--reading-font-stack: 'Roboto Serif', Georgia, serif;
 }
 
 :root[data-font='mono'] {
-	--font-stack: 'IBM Plex Mono', ui-monospace, monospace;
+	--reading-font-stack: 'Roboto Mono', ui-monospace, monospace;
 }
 
 /*
@@ -142,13 +157,13 @@
 	--color-error: var(--error);
 	--color-error-tint: var(--error-tint);
 	--color-caret: var(--caret);
-	--font-app: var(--font-stack);
+	--font-app: var(--chrome-font-stack);
 }
 
 body {
 	background-color: var(--bg);
 	color: var(--fg);
-	font-family: var(--font-stack);
+	font-family: var(--chrome-font-stack);
 	transition:
 		background-color 0.25s ease,
 		color 0.25s ease;

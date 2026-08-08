@@ -41,16 +41,20 @@
 				     state and a shared URL are never ambiguous; `/type` with no param still
 				     works and still defaults. `aria-current="page"` rather than "true": these
 				     are links to a URL that IS the current view. (LanguageSwitcher uses "true"
-				     because its controls are buttons — the divergence is deliberate.) The
-				     filled pill and semibold weight are the non-colour half of the signal:
-				     colour alone would not carry the active option. -->
+				     because its controls are buttons — the divergence is deliberate.) The active
+				     pill is a `sheet` fill with an `accent` hairline (spec #30), not a filled-dark
+				     chip — semibold weight plus the border are the non-colour half of the signal:
+				     colour alone would not carry the active option. A transparent border of the
+				     same width on inactive pills keeps the border from shifting layout. -->
 				<a
 					data-testid="library-language-filter-{value}"
 					href={resolve(localizeHref(libraryHref({ language: value, query, sort })) as Pathname)}
 					aria-current={value === active ? 'page' : undefined}
 					class={[
-						'block rounded-md px-2 py-1 text-xs tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-						value === active ? 'bg-fg font-semibold text-bg' : 'text-muted hover:text-fg'
+						'block rounded-md border px-2 py-1 text-xs tracking-wide transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+						value === active
+							? 'border-accent bg-sheet font-semibold text-fg'
+							: 'border-transparent text-muted hover:text-fg'
 					]}
 				>
 					{labels[value]()}

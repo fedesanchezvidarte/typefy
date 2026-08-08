@@ -65,9 +65,10 @@
 		"vitest-browser-svelte": "^2.1.1"
 	},
 	"dependencies": {
-		"@fontsource/ibm-plex-mono": "^5.3.0",
-		"@fontsource/ibm-plex-sans": "^5.3.0",
-		"@fontsource/ibm-plex-serif": "^5.3.0",
+		"@fontsource/roboto": "^5.3.0",
+		"@fontsource/roboto-mono": "^5.3.0",
+		"@fontsource/roboto-serif": "^5.3.0",
+		"@lucide/svelte": "^1.30.0",
 		"@supabase/ssr": "^0.12.3",
 		"@supabase/supabase-js": "^2.110.8"
 	}

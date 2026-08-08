@@ -465,7 +465,7 @@
 		"citations": [
 			{
 				"file": "e2e/theme.e2e.ts",
-				"testTitleContains": "a font choice applies instantly, survives reload, and never touches the palette"
+				"testTitleContains": "a font choice applies to the reading surface only, survives reload, and never touches the palette or chrome"
 			}
 		]
 	},

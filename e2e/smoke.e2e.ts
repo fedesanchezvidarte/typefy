@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import {
 	isLocalStack,
 	localSecretKey,
@@ -9,20 +9,46 @@ import {
 import { setFeatured } from './support/probe-books';
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
 
-const EN_HEADLINE = 'Type through a book, one passage at a time.';
-const ES_HEADLINE = 'Escribe un libro entero, pasaje a pasaje.';
+/**
+ * The static prefix + first tail word ("book" / "un libro") — the ALWAYS-true accessible
+ * name of the landing <h1> (spec #30), regardless of the animated tail's current frame.
+ * The visible text now animates (book → page → passage → word, looping), so a literal
+ * text-content assertion would be flaky/wrong; `getByRole('heading', { name })` resolves
+ * through Playwright's accessible-name computation, which reads the `sr-only` span, not
+ * the `aria-hidden` animated one.
+ */
+const EN_HEADLINE = 'Type through a book';
+const ES_HEADLINE = 'Escribe un libro';
+
+/**
+ * The language switcher moved off the header row into the pencil trigger's ribbon panel
+ * (spec #30 §2) — its buttons aren't interactable, let alone visible, until the panel is
+ * opened. Retried: the click only takes effect once the page has hydrated.
+ *
+ * Opens via `data-testid`, not the trigger's accessible name: this test switches locale
+ * mid-run (English → Spanish → English), and `header_pencil_aria_label` is itself localized
+ * (see `messages/en.json` / `messages/es.json`), so a role-name lookup for the English string
+ * would stop resolving the moment the UI is in Spanish. The testid is locale-invariant; the
+ * accessible name itself is exercised in `account.e2e.ts`'s and `theme.e2e.ts`'s a11y specs.
+ */
+async function openPencilPanel(page: Page) {
+	await expect(async () => {
+		await page.getByTestId('pencil-trigger').click();
+		await expect(page.getByRole('button', { name: 'English' })).toBeVisible({ timeout: 2000 });
+	}).toPass();
+}
 
 test.describe('landing page', () => {
 	test('/ renders the English UI', async ({ page }) => {
 		await page.goto('/');
 		await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-		await expect(page.getByRole('heading', { level: 1 })).toHaveText(EN_HEADLINE);
+		await expect(page.getByRole('heading', { level: 1, name: EN_HEADLINE })).toBeVisible();
 	});
 
 	test('/es renders the Spanish UI', async ({ page }) => {
 		await page.goto('/es');
 		await expect(page.locator('html')).toHaveAttribute('lang', 'es');
-		await expect(page.getByRole('heading', { level: 1 })).toHaveText(ES_HEADLINE);
+		await expect(page.getByRole('heading', { level: 1, name: ES_HEADLINE })).toBeVisible();
 	});
 
 	/**
@@ -93,6 +119,7 @@ test.describe('landing page', () => {
 		page
 	}) => {
 		await page.goto('/');
+		await openPencilPanel(page);
 
 		// The click only works once the page has hydrated; retry until it takes effect.
 		await expect(async () => {
@@ -101,19 +128,51 @@ test.describe('landing page', () => {
 		}).toPass();
 
 		await expect(page.locator('html')).toHaveAttribute('lang', 'es');
-		await expect(page.getByText(ES_HEADLINE)).toBeVisible();
+		await expect(page.getByRole('heading', { level: 1, name: ES_HEADLINE })).toBeVisible();
 
 		// The saved preference (cookie) wins on a fresh unprefixed visit.
 		await page.goto('/');
 		await expect(page).toHaveURL(/\/es\/?$/);
-		await expect(page.getByText(ES_HEADLINE)).toBeVisible();
+		await expect(page.getByRole('heading', { level: 1, name: ES_HEADLINE })).toBeVisible();
 
 		// Switching back to English updates the cookie too.
+		await openPencilPanel(page);
 		await expect(async () => {
 			await page.getByRole('button', { name: 'English' }).click();
 			await expect(page.locator('html')).toHaveAttribute('lang', 'en', { timeout: 2000 });
 		}).toPass();
-		await expect(page.getByText(EN_HEADLINE)).toBeVisible();
+		await expect(page.getByRole('heading', { level: 1, name: EN_HEADLINE })).toBeVisible();
+	});
+
+	/**
+	 * `AnimatedHeadline` gates its own type/backspace cycle behind
+	 * `matchMedia('(prefers-reduced-motion: reduce)')` (see the component's `reducedMotion()`
+	 * guard in its mount `$effect`) and its CSS disables the caret's blink keyframe under the
+	 * same media query. Nothing in the existing landing-page or a11y specs sets
+	 * `reducedMotion: 'reduce'`, so this is the only place that claim is actually exercised.
+	 */
+	test.describe('reduced motion', () => {
+		test('the animated headline never starts its type/backspace cycle', async ({ page }) => {
+			// `page.emulateMedia` rather than `test.use({ reducedMotion: 'reduce' })`: the
+			// context-option form does not reach `matchMedia` in this Chromium/Playwright
+			// combination (verified directly — `window.matchMedia('(prefers-reduced-motion:
+			// reduce)').matches` stayed `false` under it), while `emulateMedia` before
+			// navigation does.
+			await page.emulateMedia({ reducedMotion: 'reduce' });
+			await page.goto('/');
+			const tail = page.locator('h1 .tail');
+			const initialText = await tail.textContent();
+
+			// The cycle's first hold is 1800ms (HOLD_MS) before it would start backspacing;
+			// waiting past that plus a few character-interval steps is enough to catch a cycle
+			// that ignored the media query, without coupling the test to the exact constant.
+			await page.waitForTimeout(2500);
+
+			await expect(tail).toHaveText(initialText ?? '');
+			// The heading's accessible name (the sr-only span) is unaffected either way — a
+			// static assertion, not one this test needs to repeat from the smoke test above.
+			await expect(page.getByRole('heading', { level: 1, name: EN_HEADLINE })).toBeVisible();
+		});
 	});
 });
 
@@ -124,7 +183,7 @@ test.describe('first-visit language negotiation', () => {
 		test('lands on the Spanish UI', async ({ page }) => {
 			await page.goto('/');
 			await expect(page).toHaveURL(/\/es\/?$/);
-			await expect(page.getByText(ES_HEADLINE)).toBeVisible();
+			await expect(page.getByRole('heading', { level: 1, name: ES_HEADLINE })).toBeVisible();
 		});
 	});
 
@@ -134,7 +193,7 @@ test.describe('first-visit language negotiation', () => {
 		test('falls back to English', async ({ page }) => {
 			await page.goto('/');
 			await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-			await expect(page.getByText(EN_HEADLINE)).toBeVisible();
+			await expect(page.getByRole('heading', { level: 1, name: EN_HEADLINE })).toBeVisible();
 		});
 	});
 });

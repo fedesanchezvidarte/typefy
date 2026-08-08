@@ -35,7 +35,12 @@
 
 <!-- Coherence comes from the frame, not the contents (brief §3): art and
      generated covers share the same 2/3 frame and card treatment. The hover
-     3D tilt is the one place tactile playfulness is welcome. -->
+     3D tilt is the one place tactile playfulness is welcome.
+
+     Cover / title+author / progress are three direct grid children so the card can
+     subgrid into the parent's row tracks (spec #30): every card in the same visual
+     row aligns its cover top, its progress bar, and everything between, regardless
+     of whether this card's title+author runs one line or three. -->
 <a
 	data-testid="text-picker-option-{book.id}"
 	href={resolve(localizeHref(`/type/${book.id}`) as Pathname)}
@@ -56,21 +61,29 @@
 			<GeneratedCover {book} />
 		{/if}
 	</div>
-	<div class="mt-[11px]">
+	<div class="self-start">
 		<span class="block text-sm leading-[1.25] font-semibold text-fg">{book.title}</span>
 		<span class="mt-px block text-[13px] text-muted">{book.author}</span>
-		<span class="mt-1 block text-xs text-muted">{m.passage_count({ count: book.chunkCount })}</span>
-		<span class="mt-[9px] flex items-center gap-2">
-			<span class="h-[3px] flex-1 overflow-hidden rounded-sm bg-border" aria-hidden="true">
-				<span class="block h-full bg-accent" style:width="{progress}%"></span>
-			</span>
-			<span class="text-[11px] text-muted tabular-nums">{progress}%</span>
-		</span>
 	</div>
+	<span class="flex items-center gap-2 self-end">
+		<span class="h-[3px] flex-1 overflow-hidden rounded-sm bg-border" aria-hidden="true">
+			<span class="block h-full bg-accent" style:width="{progress}%"></span>
+		</span>
+		<span class="text-[11px] text-muted tabular-nums">{progress}%</span>
+	</span>
 </a>
 
 <style>
 	.card {
+		display: grid;
+		grid-row: span 3;
+		grid-template-rows: subgrid;
+		/* Overrides the parent's row-gap (26px, meant for the gap BETWEEN cards) for the
+		   gaps WITHIN this card's own three subgridded rows only — the boundary gap between
+		   this card's last row and the next card row still uses the parent's value. Visual-
+		   taste value (brief §4), picked to read close to the previous mt-[11px]/mt-[9px]
+		   spacing it replaces. */
+		row-gap: 10px;
 		perspective: 900px;
 	}
 
