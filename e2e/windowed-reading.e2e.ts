@@ -1,4 +1,4 @@
-import AxeBuilder from '@axe-core/playwright';
+﻿import AxeBuilder from '@axe-core/playwright';
 import type { Page, Route } from '@playwright/test';
 import { expect, guestTest as test } from './fixtures/auth';
 import {
@@ -82,14 +82,14 @@ const PAYLOAD_SLUG = 'window-probe-payload';
  */
 const CHUNKS_ROUTE = /\/api\/books\/[^/]+\/chunks\?/;
 
-const META = 'passage-meta';
+const META = 'page-meta';
 
 function meta(page: Page) {
 	return page.getByTestId(META);
 }
 
 function awaitingPanel(page: Page) {
-	return page.getByTestId('passage-awaiting');
+	return page.getByTestId('page-awaiting');
 }
 
 function typingInput(page: Page) {
@@ -127,7 +127,7 @@ async function typePassages(
 	delay = 0
 ): Promise<void> {
 	for (let index = from; index <= to; index += 1) {
-		await expect(meta(page)).toContainText(`Passage ${index + 1} of ${book.chunkCount}`);
+		await expect(meta(page)).toContainText(`Page ${index + 1} of ${book.chunkCount}`);
 		await expect(page.getByTestId('typing-surface')).toContainText(book.contents[index]);
 		await typePassage(page, book.contents[index], delay);
 	}
@@ -166,7 +166,7 @@ async function openBook(
 	options: { search?: string; passage?: number } = {}
 ): Promise<void> {
 	await page.goto(`/type/${book.slug}${options.search ?? ''}`);
-	await expect(meta(page)).toContainText(`Passage ${options.passage ?? 1} of ${book.chunkCount}`, {
+	await expect(meta(page)).toContainText(`Page ${options.passage ?? 1} of ${book.chunkCount}`, {
 		timeout: PAGE_READY_TIMEOUT
 	});
 }
@@ -185,9 +185,9 @@ async function watchForAwaiting(page: Page): Promise<void> {
 	await page.evaluate(() => {
 		const state = { seen: 0 };
 		(window as unknown as { __awaiting: typeof state }).__awaiting = state;
-		if (document.querySelector('[data-testid="passage-awaiting"]')) state.seen += 1;
+		if (document.querySelector('[data-testid="page-awaiting"]')) state.seen += 1;
 		new MutationObserver(() => {
-			if (document.querySelector('[data-testid="passage-awaiting"]')) state.seen += 1;
+			if (document.querySelector('[data-testid="page-awaiting"]')) state.seen += 1;
 		}).observe(document.body, { childList: true, subtree: true });
 	});
 }
@@ -305,7 +305,7 @@ test.describe('windowed reading (spec #18)', () => {
 			// Chunks 0..9 are the SSR window; 10 is the first passage that only exists because a
 			// second window arrived. Typing through 10 and into 11 proves the join is seamless.
 			await typePassages(page, long, 0, LONG_CHUNK_COUNT - 2, HUMAN_ISH_DELAY_MS);
-			await expect(meta(page)).toContainText(`Passage ${LONG_CHUNK_COUNT} of ${long.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page ${LONG_CHUNK_COUNT} of ${long.chunkCount}`);
 
 			// The whole point: the boundary was crossed and the user never saw a waiting state.
 			expect(
@@ -315,7 +315,7 @@ test.describe('windowed reading (spec #18)', () => {
 			await expect(typingInput(page)).toBeFocused();
 		});
 
-		test('the prefetch fires at three passages remaining and never blocks input', async ({
+		test('the prefetch fires with PREFETCH_THRESHOLD passages of cover left and never blocks input', async ({
 			page
 		}) => {
 			test.setTimeout(120_000);
@@ -337,30 +337,46 @@ test.describe('windowed reading (spec #18)', () => {
 			await openBook(page, long);
 			await watchForAwaiting(page);
 
-			// Up to and including passage 6 (index 5): the active index is then 6, and with the
-			// window loaded to 10 that is four passages of cover — one more than the threshold.
+			// One short of PREFETCH_THRESHOLD + 1 passages of cover: the active index is still more
+			// than PREFETCH_THRESHOLD away from the loaded end, so nothing has fired yet.
 			const lastQuietIndex = WINDOW_SIZE - PREFETCH_THRESHOLD - 1;
 			await typePassages(page, long, 0, lastQuietIndex - 1);
-			await expect(meta(page)).toContainText(`Passage ${lastQuietIndex + 1} of ${long.chunkCount}`);
-			expect(requests, 'nothing should be fetched while four passages of cover remain').toEqual([]);
+			await expect(meta(page)).toContainText(`Page ${lastQuietIndex + 1} of ${long.chunkCount}`);
+			expect(
+				requests,
+				`nothing should be fetched while more than PREFETCH_THRESHOLD (${PREFETCH_THRESHOLD}) passages of cover remain`
+			).toEqual([]);
 
 			// One more completion puts the active index at exactly PREFETCH_THRESHOLD from the
 			// loaded end, which is where the prefetch is specified to fire.
 			await typePassage(page, long.contents[lastQuietIndex]);
 			await expect
-				.poll(() => requests, { message: 'the prefetch should fire at three passages remaining' })
+				.poll(() => requests, {
+					message: `the prefetch should fire at PREFETCH_THRESHOLD (${PREFETCH_THRESHOLD}) passages remaining`
+				})
 				.toEqual([`?from=${WINDOW_SIZE}&limit=${WINDOW_SIZE}`]);
 
-			// Still in flight — and typing carries on through two more whole passages regardless.
-			await typePassages(page, long, lastQuietIndex + 1, lastQuietIndex + 2);
-			await expect(meta(page)).toContainText(`Passage ${lastQuietIndex + 4} of ${long.chunkCount}`);
+			// Still in flight — and the passage that just fired the prefetch (the one already
+			// active when it fired) is itself still typeable regardless of the outstanding
+			// request. At PREFETCH_THRESHOLD's retuned value this is the ONLY passage still
+			// covered: the window is deliberately tight (brief §3.5's refire-gap arithmetic), so
+			// there is no further loaded cover beyond it to type through as well.
+			await typePassage(page, long.contents[lastQuietIndex + 1]);
 			expect(requests, 'single-flight: the threshold must not restart the request').toHaveLength(1);
-			expect(await awaitingSightings(page)).toBe(0);
+
+			// With nothing further loaded, the session now waits on the request it already made
+			// — a real `awaiting`, not a failure, and still not a second request. Distinct from
+			// the stalled state (spec §8): this is "loading", because the fetch that will
+			// resolve it is provably still in flight.
+			await expect(awaitingPanel(page)).toHaveAttribute('data-state', 'loading');
+			expect(requests, 'single-flight: awaiting must not restart the request either').toHaveLength(
+				1
+			);
 
 			release();
 			// And once it lands the session simply carries on past the boundary.
-			await typePassages(page, long, lastQuietIndex + 3, WINDOW_SIZE);
-			await expect(meta(page)).toContainText(`Passage ${WINDOW_SIZE + 2} of ${long.chunkCount}`);
+			await typePassages(page, long, lastQuietIndex + 2, WINDOW_SIZE);
+			await expect(meta(page)).toContainText(`Page ${WINDOW_SIZE + 2} of ${long.chunkCount}`);
 		});
 
 		test('?passage=N beyond the first window opens the window containing N', async ({ page }) => {
@@ -381,7 +397,7 @@ test.describe('windowed reading (spec #18)', () => {
 
 			// Typing it is not blocked either — the passage is genuinely loaded, not a placeholder.
 			await typePassage(page, long.contents[index]);
-			await expect(meta(page)).toContainText(`Passage ${passage + 1} of ${long.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page ${passage + 1} of ${long.chunkCount}`);
 		});
 	});
 
@@ -411,7 +427,7 @@ test.describe('windowed reading (spec #18)', () => {
 			// The session says it ran out, and says WHICH of the two stopped states this is.
 			await expect(awaitingPanel(page)).toBeVisible();
 			await expect(awaitingPanel(page)).toHaveAttribute('data-state', 'stalled');
-			await expect(page.getByTestId('passage-awaiting-hint')).toBeVisible();
+			await expect(page.getByTestId('page-awaiting-hint')).toBeVisible();
 
 			// Distinct from finishing the book: none of the summary exists.
 			await expect(page.getByTestId('session-summary')).toHaveCount(0);
@@ -449,12 +465,12 @@ test.describe('windowed reading (spec #18)', () => {
 				await page.evaluate(() => window.dispatchEvent(new Event('online')));
 				await expect(awaitingPanel(page)).toHaveCount(0, { timeout: 2_000 });
 			}).toPass();
-			await expect(meta(page)).toContainText(`Passage ${WINDOW_SIZE + 1} of ${long.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page ${WINDOW_SIZE + 1} of ${long.chunkCount}`);
 			await expect(typingInput(page)).toBeFocused();
 
 			// The recovered passage is real text, typeable straight away.
 			await typePassage(page, long.contents[WINDOW_SIZE]);
-			await expect(meta(page)).toContainText(`Passage ${WINDOW_SIZE + 2} of ${long.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page ${WINDOW_SIZE + 2} of ${long.chunkCount}`);
 		});
 
 		/**
@@ -523,7 +539,7 @@ test.describe('windowed reading (spec #18)', () => {
 			await expect.poll(() => readBuffer(page)).toEqual([]);
 			// …and the session that had run out of text picks up where it stopped.
 			await expect(awaitingPanel(page)).toHaveCount(0);
-			await expect(meta(page)).toContainText(`Passage ${WINDOW_SIZE + 1} of ${long.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page ${WINDOW_SIZE + 1} of ${long.chunkCount}`);
 		});
 
 		/**
@@ -567,7 +583,7 @@ test.describe('windowed reading (spec #18)', () => {
 			release();
 			await expect(awaitingPanel(page)).toHaveCount(0);
 			await typePassage(page, long.contents[WINDOW_SIZE], HUMAN_ISH_DELAY_MS);
-			await expect(meta(page)).toContainText(`Passage ${WINDOW_SIZE + 2} of ${long.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page ${WINDOW_SIZE + 2} of ${long.chunkCount}`);
 
 			const metaText = (await meta(page).textContent()) ?? '';
 			const match = metaText.match(/(\d+)\s*wpm/);
@@ -603,7 +619,7 @@ test.describe('windowed reading (spec #18)', () => {
 
 			for (const [index, chunk] of tortoiseAndHare.chunks.entries()) {
 				await expect(meta(page)).toContainText(
-					`Passage ${index + 1} of ${tortoiseAndHare.chunkCount}`
+					`Page ${index + 1} of ${tortoiseAndHare.chunkCount}`
 				);
 				await typePassage(page, chunk.content);
 			}
@@ -860,11 +876,11 @@ test.describe('windowed reading (spec #18)', () => {
 			// Across the boundary, keyboard only, including a mistake and its correction — the
 			// path a real typist takes.
 			await typePassages(page, long, 0, WINDOW_SIZE - 1);
-			await expect(meta(page)).toContainText(`Passage ${WINDOW_SIZE + 1} of ${long.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page ${WINDOW_SIZE + 1} of ${long.chunkCount}`);
 			await page.keyboard.type('x', { delay: 0 });
 			await page.keyboard.press('Backspace');
 			await typePassage(page, long.contents[WINDOW_SIZE]);
-			await expect(meta(page)).toContainText(`Passage ${WINDOW_SIZE + 2} of ${long.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page ${WINDOW_SIZE + 2} of ${long.chunkCount}`);
 			await expect(typingInput(page)).toBeFocused();
 		});
 	});

@@ -1,5 +1,5 @@
 import { page } from 'vitest/browser';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { CHARS_PER_LINE } from '$lib/chunking/measure';
 import TypingSurface from './TypingSurface.svelte';
@@ -62,5 +62,84 @@ describe('TypingSurface — the ch measure', () => {
 		// real drift (a stray unit, or the measure landing on the wrong element).
 		expect(measuredWidth / oneCh).toBeGreaterThan(CHARS_PER_LINE - 0.5);
 		expect(measuredWidth / oneCh).toBeLessThan(CHARS_PER_LINE + 0.5);
+	});
+
+	/**
+	 * The rest of acceptance criterion #9 (spec #32, corrected per the Feature Brief's
+	 * conflict-flag on the "why it is not optional" section): the measure resolves to exactly
+	 * `CHARS_PER_LINE` `ch` in EVERY reading font, not only the default Roboto the test above
+	 * exercises — and separately, rendered characters-per-line is never BELOW `CHARS_PER_LINE`
+	 * in any of them. The two are deliberately not the same assertion: this one is what makes
+	 * the 24-line budget safe, and it is asserted as a floor, not an equality, because the
+	 * proportional faces are expected to fit MORE than 66 (ADR-0015's corrected rationale).
+	 */
+	describe('across all three reading fonts (ADR-0015)', () => {
+		/** `:root[data-font]` is what `layout.css` keys `--reading-font-stack` off of. */
+		function setReadingFont(font: 'sans' | 'serif' | 'mono') {
+			document.documentElement.dataset.font = font;
+		}
+
+		afterEach(() => {
+			delete document.documentElement.dataset.font;
+		});
+
+		/** Long enough to wrap several times at 66ch in every one of the three faces. */
+		const prose = 'the quick brown fox jumps over the lazy dog and then trots back again '.repeat(
+			6
+		);
+
+		for (const font of ['sans', 'serif', 'mono'] as const) {
+			it(`resolves to exactly CHARS_PER_LINE ch, and fits at least CHARS_PER_LINE characters on its first rendered line — ${font}`, async () => {
+				await page.viewport(1280, 800);
+				setReadingFont(font);
+
+				render(TypingSurface, {
+					text: prose,
+					display: Array.from(prose, () => 'pending' as const),
+					cursor: 0,
+					passageKey: 0,
+					onChar: () => {},
+					onBackspace: () => {},
+					onRestartChunk: () => {}
+				});
+
+				const measureEl = page.getByTestId('typing-measure').element() as HTMLElement;
+				const computed = getComputedStyle(measureEl);
+				const measuredWidth = measureEl.getBoundingClientRect().width;
+
+				const probe = document.createElement('span');
+				probe.style.position = 'absolute';
+				probe.style.visibility = 'hidden';
+				probe.style.whiteSpace = 'nowrap';
+				probe.style.fontFamily = computed.fontFamily;
+				probe.style.fontSize = computed.fontSize;
+				probe.style.width = '1ch';
+				document.body.appendChild(probe);
+				const oneCh = probe.getBoundingClientRect().width;
+				probe.remove();
+
+				// Part 1 — the contract: the measure itself is CHARS_PER_LINE ch, in THIS face.
+				expect(measuredWidth / oneCh).toBeGreaterThan(CHARS_PER_LINE - 0.5);
+				expect(measuredWidth / oneCh).toBeLessThan(CHARS_PER_LINE + 0.5);
+
+				// Part 2 — the property that makes the line budget safe: count how many
+				// characters actually land on the FIRST rendered line, by their offsetTop
+				// against the first character's. A face fitting fewer than CHARS_PER_LINE here
+				// would mean a page estimated at MAX_LINES really renders taller — the one
+				// direction the estimate must never be wrong in.
+				const spans = measureEl.querySelectorAll<HTMLElement>('.char');
+				expect(spans.length).toBeGreaterThan(CHARS_PER_LINE); // the fixture must wrap at all
+				const firstTop = spans[0].offsetTop;
+				let firstLineCount = 0;
+				for (const span of spans) {
+					if (span.offsetTop !== firstTop) break;
+					firstLineCount += 1;
+				}
+				expect(
+					firstLineCount,
+					`${font} fit only ${firstLineCount} chars on its first line, below CHARS_PER_LINE (${CHARS_PER_LINE})`
+				).toBeGreaterThanOrEqual(CHARS_PER_LINE);
+			});
+		}
 	});
 });

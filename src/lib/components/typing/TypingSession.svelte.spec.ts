@@ -4,7 +4,9 @@ import { render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
 import type { Chunk, ChunkWindow, TypeableTextSummary } from '$lib/types';
 import { ATTEMPT_BUFFER_KEY, type BufferedChunkAttempt } from '$lib/progress/buffer';
-import { PREFETCH_THRESHOLD, WINDOW_SIZE } from '$lib/reading/window';
+import { PAGE_STATE_KEY, savePageState, type PageState } from '$lib/progress/page-state';
+import { getAttemptStorage } from '$lib/progress/storage';
+import { PREFETCH_THRESHOLD, seekWindow, WINDOW_SIZE } from '$lib/reading/window';
 import TypingSession from './TypingSession.svelte';
 
 /**
@@ -21,6 +23,16 @@ const backfillChunkAttempt = vi.hoisted(() => vi.fn());
 const getBrowserSupabase = vi.hoisted(() => vi.fn(() => ({ __mock: 'supabase-client' })));
 const goto = vi.hoisted(() => vi.fn());
 const invalidateAll = vi.hoisted(() => vi.fn());
+// Hoisted (not inlined in the factory below) so the navigator tests can assert on calls: a
+// shallow-routing jump (spec #32 §10 D1) is only observable through `pushState`, since the
+// component never remounts and therefore never re-runs a load the way a `goto` would.
+const pushState = vi.hoisted(() => vi.fn());
+const beforeNavigateHandlers = vi.hoisted(() => [] as Array<() => void>);
+const beforeNavigate = vi.hoisted(() =>
+	vi.fn((handler: () => void) => {
+		beforeNavigateHandlers.push(handler);
+	})
+);
 
 /**
  * The window path is a plain `fetch` to a first-party endpoint — NOT a Supabase client call
@@ -53,8 +65,8 @@ vi.mock('$lib/progress/client', () => ({ recordChunkAttempt, backfillChunkAttemp
 vi.mock('$app/navigation', () => ({
 	goto,
 	invalidateAll,
-	beforeNavigate: vi.fn(),
-	pushState: vi.fn()
+	beforeNavigate,
+	pushState
 }));
 
 /** Reads the attempt buffer straight out of the real `localStorage` these tests run against. */
@@ -209,6 +221,8 @@ beforeEach(() => {
 	getBrowserSupabase.mockClear();
 	goto.mockClear();
 	invalidateAll.mockClear();
+	pushState.mockClear();
+	beforeNavigateHandlers.length = 0;
 	// Rejecting by default: a test that does not set up a window is asserting that none is
 	// asked for, and if one is asked for anyway the component must swallow it rather than
 	// surface it. Both properties are checked by this default, not hidden by it.
@@ -219,6 +233,7 @@ beforeEach(() => {
 	// enqueues into it. Without this, one test's buffered entries survive into the next and
 	// change what its drain trigger does — a shared-state leak, not a flake.
 	localStorage.removeItem(ATTEMPT_BUFFER_KEY);
+	localStorage.removeItem(PAGE_STATE_KEY);
 });
 
 afterEach(() => {
@@ -1178,5 +1193,215 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 		await expect
 			.poll(() => bufferEntries().map((entry) => entry.chunkId))
 			.toEqual(['chunk-0', 'chunk-1']);
+	});
+});
+
+describe('TypingSession.svelte — the page navigator, A′ seek (spec #32 §10 D1)', () => {
+	function nextButton() {
+		return page.getByTestId('page-nav-next');
+	}
+
+	function jumpBox() {
+		return page.getByTestId('page-nav-jump');
+	}
+
+	/** The last `?page=` pushState was called with, or null if it never was. */
+	function lastPushedPage(): string | null {
+		const call = pushState.mock.calls.at(-1) as [string, unknown] | undefined;
+		if (!call) return null;
+		const url = new URL(call[0], 'http://localhost');
+		return url.searchParams.get('page');
+	}
+
+	it('an in-window jump updates the URL via pushState and issues no fetch — the same session continues', async () => {
+		// Every page of a WINDOW_SIZE-long book is already loaded (chunkCount === contents.length),
+		// so "next" is a jump the session can serve entirely from what it already has: nothing
+		// outside the loaded map, and therefore nothing for `seekWindow` to go and fetch.
+		const all = passages(WINDOW_SIZE);
+		render(TypingSession, {
+			...loaded(all),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of');
+		await userEvent.click(nextButton());
+
+		await expect
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page 2 of ${WINDOW_SIZE}`);
+		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent(all[1]);
+		// The whole point of A′ over a remount: a jump the window already covers costs no
+		// request at all — `seekWindow` is never even asked to compute bounds.
+		expect(chunkRequests()).toEqual([]);
+		expect(lastPushedPage()).toBe('2');
+		// Typing on the page landed on proves the session is still the same live reducer, not a
+		// fresh one seeded at index 1 — a remount would also show "Page 2 of N", so this is the
+		// assertion that actually distinguishes the two.
+		await typeText(all[1]);
+		await expect
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page 3 of ${WINDOW_SIZE}`);
+	});
+
+	it('a jump outside the loaded window fetches a fresh window anchored at the target, then renders it', async () => {
+		const loadedCount = WINDOW_SIZE;
+		const chunkCount = WINDOW_SIZE + 3;
+		const all = passages(chunkCount);
+		const targetIndex = chunkCount - 1; // well past the first loaded window
+
+		const bounds = seekWindow(targetIndex, chunkCount);
+		fetchMock.mockImplementation(async () =>
+			jsonResponse({
+				from: bounds.from,
+				chunks: makeChunks(all.slice(bounds.from, bounds.from + bounds.limit), bounds.from),
+				chunkCount
+			})
+		);
+
+		render(TypingSession, {
+			...windowed(all.slice(0, loadedCount), chunkCount),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of');
+
+		await userEvent.fill(jumpBox(), String(targetIndex + 1));
+		await userEvent.keyboard('{Enter}');
+
+		// The seek's OWN fetch is anchored at the target with locally-clamped bounds
+		// (`seekWindow`). A plain "next page is one keystroke away" prefetch can ALSO fire
+		// concurrently off the same state update (`navigateToIndex`'s own comment: not routed
+		// through the single-flight lane, "an acceptable trade" against a second lane) — so the
+		// request list may hold more than one entry, and asserting on it is about the seek's
+		// request being IN there, not about being the only one.
+		await expect
+			.poll(() =>
+				chunkRequests().some(
+					(url) => url === `/api/books/test-book/chunks?from=${bounds.from}&limit=${bounds.limit}`
+				)
+			)
+			.toBe(true);
+		await expect
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page ${targetIndex + 1} of ${chunkCount}`);
+		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent(all[targetIndex]);
+		expect(lastPushedPage()).toBe(String(targetIndex + 1));
+	});
+
+	it('flushes a debounced in-page-restore save before the seek, via beforeNavigate', async () => {
+		// A save still in flight when a jump fires would otherwise race the seek and could write
+		// against the wrong index (TypingSession's own comment on `navigateToIndex`). This proves
+		// the flush actually happens rather than trusting the comment: `beforeNavigate`'s
+		// registered handler must exist and must not throw when the seek path calls it directly.
+		const all = passages(WINDOW_SIZE);
+		render(TypingSession, {
+			...loaded(all),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+		expect(beforeNavigate).toHaveBeenCalled();
+
+		await typeText(all[0].slice(0, 1)); // one keystroke, short of completion — schedules a debounced save
+		await userEvent.click(nextButton());
+
+		// The jump's own immediate flush (not the 2s debounce) is what actually wrote this —
+		// proven by it being present well before the debounce could have fired.
+		const raw = localStorage.getItem(PAGE_STATE_KEY);
+		expect(
+			raw,
+			'the half-typed first page should have been flushed before the jump'
+		).not.toBeNull();
+		const saved = JSON.parse(raw!) as PageState[];
+		expect(saved.find((entry) => entry.index === 0)?.prefixLength).toBe(1);
+	});
+});
+
+describe('TypingSession.svelte — in-page restore (spec #32 §8)', () => {
+	it('restores a saved prefix as already-correct-but-unjudged, and measures only the new span', async () => {
+		const content = 'abcdefghij';
+		const book = makeBook(1);
+		savePageState(
+			getAttemptStorage(PAGE_STATE_KEY),
+			{
+				bookId: book.bookId,
+				chunkId: 'chunk-0',
+				index: 0,
+				prefixLength: 4,
+				savedTextLength: content.length,
+				savedAt: Date.now()
+			},
+			Date.now()
+		);
+
+		render(TypingSession, {
+			book,
+			window: makeWindow([content], 1),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			mode: NORMAL,
+			userId: 'user-1'
+		});
+
+		// The restored prefix renders correct immediately, with no keystroke typed this sitting.
+		function chars(): NodeListOf<HTMLElement> {
+			return page.getByTestId('typing-surface').element().querySelectorAll<HTMLElement>('.char');
+		}
+		await expect.poll(() => chars().length).toBeGreaterThan(4);
+		for (let i = 0; i < 4; i += 1) {
+			expect(chars()[i].dataset.state).toBe('correct');
+		}
+		expect(chars()[4].className).toMatch(/caret/); // cursor sits right after the prefix
+
+		// Finish the page by typing only the remaining span.
+		recordChunkAttempt.mockResolvedValue({ saved: true });
+		await typeText(content.slice(4));
+
+		await expect.poll(() => recordChunkAttempt.mock.calls.length).toBe(1);
+		const [, attempt] = recordChunkAttempt.mock.calls[0] as [unknown, { measuredChars: number }];
+		// Only the six characters typed THIS sitting are measured — the restored four are
+		// correct-but-unjudged and contribute to neither the numerator nor the denominator.
+		expect(attempt.measuredChars).toBe(6);
+	});
+
+	it('an untouched saved page is cleared once its attempt is recorded, so a later visit does not restore a finished page', async () => {
+		const content = 'ab';
+		const book = makeBook(1);
+		savePageState(
+			getAttemptStorage(PAGE_STATE_KEY),
+			{
+				bookId: book.bookId,
+				chunkId: 'chunk-0',
+				index: 0,
+				prefixLength: 1,
+				savedTextLength: content.length,
+				savedAt: Date.now()
+			},
+			Date.now()
+		);
+
+		render(TypingSession, {
+			book,
+			window: makeWindow([content], 1),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			mode: NORMAL,
+			userId: null
+		});
+
+		await typeText(content.slice(1)); // completes the page
+		await expect.element(page.getByTestId('session-summary')).toBeInTheDocument();
+
+		const raw = localStorage.getItem(PAGE_STATE_KEY);
+		const saved = raw === null ? [] : (JSON.parse(raw) as PageState[]);
+		expect(saved.find((entry) => entry.index === 0)).toBeUndefined();
 	});
 });

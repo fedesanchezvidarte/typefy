@@ -23,7 +23,7 @@
 	},
 	{
 		"id": "passage-terminology",
-		"glossaryTerm": "Chunk/Passage",
+		"glossaryTerm": "Chunk/Page",
 		"status": "covered",
 		"citations": [
 			{
@@ -56,7 +56,7 @@
 		"citations": [
 			{
 				"file": "e2e/windowed-reading.e2e.ts",
-				"testTitleContains": "the prefetch fires at three passages remaining and never blocks input"
+				"testTitleContains": "the prefetch fires with PREFETCH_THRESHOLD passages of cover left and never blocks input"
 			}
 		]
 	},
@@ -499,6 +499,51 @@
 			{
 				"file": "e2e/progress-guest.e2e.ts",
 				"testTitleContains": "opens every book at passage 1, with every progress bar at 0%"
+			}
+		]
+	},
+	{
+		"id": "page-newline-measured",
+		"glossaryTerm": "Page",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/page-model.e2e.ts",
+				"testTitleContains": "a completed page's measured_chars includes its newline characters"
+			}
+		]
+	},
+	{
+		"id": "line-budget-ch-measure",
+		"glossaryTerm": "Line budget",
+		"status": "deferred",
+		"reason": "The measure-vs-render contract (acceptance criterion #9) is a component-level DOM fact, not a browser flow — pinned by src/lib/components/typing/TypingSurface.svelte.spec.ts's 'across all three reading fonts' block (both halves: resolves to exactly CHARS_PER_LINE ch, and never fits fewer than CHARS_PER_LINE characters on the first rendered line, looped over sans/serif/mono). The dual-budget arithmetic itself (chunkParagraphs closing on whichever of chars/lines binds first) is pure and pinned by src/lib/chunking/chunker.spec.ts and measure.spec.ts. Nothing here has a meaningful E2E shape beyond what those already prove."
+	},
+	{
+		"id": "page-navigator-arrows-and-jump",
+		"glossaryTerm": "Page navigator",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/page-model.e2e.ts",
+				"testTitleContains": "previous/next and the jump box move the session, and the URL carries ?page=N"
+			}
+		]
+	},
+	{
+		"id": "teleprompter-band-math",
+		"glossaryTerm": "Teleprompter",
+		"status": "deferred",
+		"reason": "The scroll math is pure (src/lib/components/typing/teleprompter.ts) and fully pinned by teleprompter.spec.ts's computeTranslateY cases (band entry, both clamps). The DOM half is a single $effect that only ever feeds it real measurements; asserting a translateY pixel value through a real browser would measure font-metric and line-height rounding rather than the feature, which is exactly the class of E2E flake the pure-math split exists to avoid needing (spec #32 Feature Brief §11 R7)."
+	},
+	{
+		"id": "in-page-restore-across-reload",
+		"glossaryTerm": "In-page restore",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/page-model.e2e.ts",
+				"testTitleContains": "restores the typed prefix, measures only the new span, and sets no best under the floor"
 			}
 		]
 	}
