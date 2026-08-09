@@ -23,6 +23,7 @@ const SIZE_EXCEPTIONS: Record<string, string> = {
 };
 
 const EN_ALLOWED = /^[A-Za-z0-9 .,;:!?'"()-]+$/;
+const EN_ALLOWED_WITH_NEWLINES = /^[A-Za-z0-9\n .,;:!?'"()-]+$/;
 const ES_ALLOWED = /^[A-Za-z0-9áéíóúüñÁÉÍÓÚÜÑ¿¡ .,;:!?'"()-]+$/;
 const SENTENCE_END = /[.?!]"?$/;
 
@@ -62,6 +63,11 @@ describe.each([
 		}
 	});
 
+	/*
+	 * These two long fixtures are single-paragraph flows and carry no newline, unlike the short
+	 * fixture below, which spec #32 amended to exercise `\n` as a typed character. The absence
+	 * here is a property of these texts, not a rule about fixtures.
+	 */
 	it('contains only the allowed character set (straight ASCII punctuation, no newlines)', () => {
 		for (const chunk of text.chunks) {
 			expect(chunk.content).toMatch(allowed);
@@ -110,9 +116,20 @@ describe('short fixture (The Tortoise and the Hare)', () => {
 		}
 	});
 
-	it('contains only the allowed character set', () => {
+	/*
+	 * Newlines are admitted here and only here (spec #32). This fixture is the one E2E specs
+	 * type end to end, so it is where `\n` as a typed character gets exercised without pointing
+	 * a test at catalog content. Its chunk 2 holds two paragraph breaks.
+	 */
+	it('contains only the allowed character set, newlines included', () => {
 		for (const chunk of tortoiseAndHare.chunks) {
-			expect(chunk.content).toMatch(EN_ALLOWED);
+			expect(chunk.content).toMatch(EN_ALLOWED_WITH_NEWLINES);
+		}
+	});
+
+	it('joins paragraphs with a single newline, never at the start or end of a chunk', () => {
+		for (const chunk of tortoiseAndHare.chunks) {
+			expect(chunk.content).not.toMatch(/^\n|\n$|\n\n/);
 		}
 	});
 

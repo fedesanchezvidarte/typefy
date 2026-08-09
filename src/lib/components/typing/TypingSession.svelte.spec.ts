@@ -4,6 +4,9 @@ import { render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
 import type { Chunk, ChunkWindow, TypeableTextSummary } from '$lib/types';
 import { ATTEMPT_BUFFER_KEY, type BufferedChunkAttempt } from '$lib/progress/buffer';
+import { PAGE_STATE_KEY, savePageState, type PageState } from '$lib/progress/page-state';
+import { getAttemptStorage } from '$lib/progress/storage';
+import { PREFETCH_THRESHOLD, seekWindow, WINDOW_SIZE } from '$lib/reading/window';
 import TypingSession from './TypingSession.svelte';
 
 /**
@@ -20,6 +23,16 @@ const backfillChunkAttempt = vi.hoisted(() => vi.fn());
 const getBrowserSupabase = vi.hoisted(() => vi.fn(() => ({ __mock: 'supabase-client' })));
 const goto = vi.hoisted(() => vi.fn());
 const invalidateAll = vi.hoisted(() => vi.fn());
+// Hoisted (not inlined in the factory below) so the navigator tests can assert on calls: a
+// shallow-routing jump (spec #32 §10 D1) is only observable through `pushState`, since the
+// component never remounts and therefore never re-runs a load the way a `goto` would.
+const pushState = vi.hoisted(() => vi.fn());
+const beforeNavigateHandlers = vi.hoisted(() => [] as Array<() => void>);
+const beforeNavigate = vi.hoisted(() =>
+	vi.fn((handler: () => void) => {
+		beforeNavigateHandlers.push(handler);
+	})
+);
 
 /**
  * The window path is a plain `fetch` to a first-party endpoint — NOT a Supabase client call
@@ -42,7 +55,19 @@ vi.mock('$lib/progress/client', () => ({ recordChunkAttempt, backfillChunkAttemp
 // and a spy is the only way to assert a call that must not happen. The component imports
 // neither directly for the drain; `invalidateAll` is here because the module is mocked
 // wholesale and `+layout.svelte`'s triggers are what may use it.
-vi.mock('$app/navigation', () => ({ goto, invalidateAll }));
+//
+// `beforeNavigate` and `pushState` are stubbed too (spec #32 §10 D1): the module is mocked
+// wholesale, so any real export the component calls at init (`beforeNavigate`, registered
+// unconditionally) or on a page-navigator jump (`pushState`) must exist here or the whole
+// component throws on mount. Neither is asserted on by name in this file — that is Phase 7's
+// navigator coverage — this is only what keeps the pre-existing spec #12/#15/#18/#24
+// coverage in this file loading a real component.
+vi.mock('$app/navigation', () => ({
+	goto,
+	invalidateAll,
+	beforeNavigate,
+	pushState
+}));
 
 /** Reads the attempt buffer straight out of the real `localStorage` these tests run against. */
 function bufferEntries(): BufferedChunkAttempt[] {
@@ -174,7 +199,7 @@ async function typeText(text: string) {
 }
 
 function metaText(): string {
-	return page.getByTestId('passage-meta').element().textContent ?? '';
+	return page.getByTestId('page-meta').element().textContent ?? '';
 }
 
 /**
@@ -196,6 +221,8 @@ beforeEach(() => {
 	getBrowserSupabase.mockClear();
 	goto.mockClear();
 	invalidateAll.mockClear();
+	pushState.mockClear();
+	beforeNavigateHandlers.length = 0;
 	// Rejecting by default: a test that does not set up a window is asserting that none is
 	// asked for, and if one is asked for anyway the component must swallow it rather than
 	// surface it. Both properties are checked by this default, not hidden by it.
@@ -206,6 +233,7 @@ beforeEach(() => {
 	// enqueues into it. Without this, one test's buffered entries survive into the next and
 	// change what its drain trigger does — a shared-state leak, not a flake.
 	localStorage.removeItem(ATTEMPT_BUFFER_KEY);
+	localStorage.removeItem(PAGE_STATE_KEY);
 });
 
 afterEach(() => {
@@ -223,9 +251,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 7 of 11 · 55%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 7 of 11 · 55%');
 	});
 
 	it('advances the displayed figure when a not-previously-completed passage is completed, with no reload', async () => {
@@ -237,15 +263,11 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 4 · 25%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 4 · 25%');
 
 		await typeText('c d'); // completes chunk-1, which had no prior completion
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 3 of 4 · 50%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 3 of 4 · 50%');
 	});
 
 	it('does not advance the displayed figure when an already-completed passage is re-completed, and never exceeds 100%', async () => {
@@ -259,19 +281,13 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 1 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 3 · 100%');
 
 		await typeText('a b');
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 100%');
 
 		await typeText('c d');
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 3 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 3 of 3 · 100%');
 	});
 
 	it('clamps the figure at 100% when the persisted count exceeds the book chunk count', async () => {
@@ -285,15 +301,11 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 1 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 3 · 100%');
 
 		await typeText('a b');
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 100%');
 	});
 
 	it('degrades a guest to the session-relative figure and attempts no write at all', async () => {
@@ -305,14 +317,12 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: null
 		});
 
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 1 of 4 · 0%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 4 · 0%');
 
 		await typeText('a b');
 
 		// Session-relative: one passage behind the cursor out of four.
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 4 · 25%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 4 · 25%');
 
 		await settleSaves();
 		expect(recordChunkAttempt).not.toHaveBeenCalled();
@@ -338,7 +348,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		});
 
 		await typeText('a b');
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 2 of 2');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 2');
 
 		// The first insert has resolved as a failure by now — and still nothing is shown
 		// while typing: no notice, no summary, no interruption of the passage.
@@ -352,7 +362,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 
 		await expect
 			.element(page.getByTestId('summary-save-failures'))
-			.toHaveTextContent("2 passages couldn't be saved.");
+			.toHaveTextContent("2 pages couldn't be saved.");
 		// One attempt per completion — two completions, two calls, no retry.
 		await settleSaves();
 		expect(recordChunkAttempt).toHaveBeenCalledTimes(2);
@@ -397,21 +407,17 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		await typeText('a b');
 
 		// Optimistically advanced to 1/3 — and NOT rewound once the failure lands.
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 3 · 33%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 33%');
 		await expect.poll(() => recordChunkAttempt.mock.calls.length).toBe(1);
 		await settleSaves();
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 3 · 33%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 33%');
 
 		await typeText('c d');
 		await typeText('e f');
 
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent("3 passages will be saved when you're back online.");
+			.toHaveTextContent("3 pages will be saved when you're back online.");
 		// Nothing is reported as lost: every failure here was transient and therefore buffered.
 		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
 		// No re-authentication flow: nothing navigated, and no sign-in prompt was raised
@@ -694,7 +700,7 @@ describe('TypingSession.svelte — a write path that cannot be loaded (spec #15 
 		// waiting on the network, not a passage thrown away.
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent("One passage will be saved when you're back online.");
+			.toHaveTextContent("One page will be saved when you're back online.");
 		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
 	});
 });
@@ -790,7 +796,7 @@ describe('TypingSession.svelte — focus and announcement at the completion boun
 
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent("One passage will be saved when you're back online.");
+			.toHaveTextContent("One page will be saved when you're back online.");
 		// Inserted into the established region, and focus was not disturbed to say so.
 		expect(summary.element().querySelector('[role="status"]')).toBe(region);
 		expect(document.activeElement).toBe(summary.element());
@@ -807,13 +813,13 @@ describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', (
 			userId: 'user-1'
 		});
 
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('— wpm');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('— wpm');
 
 		await typeText('a '); // first word boundary of the session
 		await expect.poll(metaText).toMatch(/· \d+ wpm ·/);
 
 		await typeText('b'); // completes passage 1; metrics must NOT reset to '—'
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 2 of 3');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3');
 		expect(metaText()).toMatch(/· \d+ wpm ·/);
 
 		await typeText('c '); // first word boundary of the SECOND passage
@@ -829,33 +835,47 @@ describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', (
  * Supabase client call, which is itself part of what these tests hold in place (§9).
  */
 describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
-	/** Eight passages, of which the session is handed the first four. */
+	/** Eight passages, of which the session is handed the first WINDOW_SIZE (spec #32 retune). */
 	const all = passages(8);
+	const loadedCount = WINDOW_SIZE;
+	/** How many passages must complete before PREFETCH_THRESHOLD remain loaded. */
+	const typedBeforeFire = loadedCount - PREFETCH_THRESHOLD;
 
-	/** The chunks endpoint's answer for the second window: passages 4..7. */
+	/** The chunks endpoint's answer for the second window: passages loadedCount..7. */
 	function secondWindow(): Response {
-		return jsonResponse({ from: 4, chunks: makeChunks(all.slice(4), 4), chunkCount: 8 });
+		return jsonResponse({
+			from: loadedCount,
+			chunks: makeChunks(all.slice(loadedCount), loadedCount),
+			chunkCount: 8
+		});
 	}
 
-	it('fires at three passages remaining, and not before', async () => {
+	it('fires when PREFETCH_THRESHOLD passages remain loaded, and not before', async () => {
 		fetchMock.mockImplementation(async () => secondWindow());
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		// Four passages loaded and none typed: one more than the threshold, so nothing is asked
-		// for. This is the half of the criterion that a bare "it eventually fetches" would miss.
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 1 of 8');
+		// A freshly landed window loaded and none typed: this is the refire check `window.ts`
+		// documents — the gap must stay ABOVE the threshold, or nothing here would ever be
+		// testable as "not before".
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 8');
 		expect(chunkRequests()).toEqual([]);
 
-		await typeText('a b'); // passage 1 done → 1, 2, 3 remain loaded → the threshold
+		for (let i = 0; i < typedBeforeFire - 1; i += 1) {
+			await typeText(all[i]);
+			expect(chunkRequests()).toEqual([]); // still short of the threshold
+		}
+		await typeText(all[typedBeforeFire - 1]); // crosses the threshold
 
-		await expect.poll(chunkRequests).toEqual(['/api/books/test-book/chunks?from=4&limit=10']);
+		await expect
+			.poll(chunkRequests)
+			.toEqual([`/api/books/test-book/chunks?from=${loadedCount}&limit=${WINDOW_SIZE}`]);
 	});
 
 	it('does not block input while the window is in flight', async () => {
@@ -864,41 +884,46 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		await typeText('a b'); // opens the prefetch
+		for (let i = 0; i < typedBeforeFire; i += 1) {
+			await typeText(all[i]); // the last of these crosses the threshold
+		}
 		await expect.poll(() => chunkRequests().length).toBe(1);
 
-		await typeText('c d');
-		await typeText('e f');
-
-		// Three passages typed against a request that has not come back, and the fourth is
-		// live and accepting keystrokes.
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 4 of 8');
-		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent('g h');
-		expect(page.getByTestId('passage-awaiting').query()).toBeNull();
+		// The last loaded passage is still live and accepting keystrokes against a request
+		// that has not come back.
+		await expect
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page ${loadedCount} of 8`);
+		await expect
+			.element(page.getByTestId('typing-surface'))
+			.toHaveTextContent(all[loadedCount - 1]);
+		expect(page.getByTestId('page-awaiting').query()).toBeNull();
 	});
 
 	it('is single-flight: overlapping triggers join one request', async () => {
 		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		await typeText('a b'); // trigger 1: the threshold effect
+		for (let i = 0; i < typedBeforeFire; i += 1) {
+			await typeText(all[i]); // trigger 1: the last of these crosses the threshold
+		}
 		await expect.poll(() => chunkRequests().length).toBe(1);
 
-		await typeText('c d'); // trigger 2: a completion, with the threshold still true
+		await typeText(all[typedBeforeFire]); // trigger 2: completes the last loaded chunk → awaiting
 		window.dispatchEvent(new Event('online')); // trigger 3: connectivity
 		window.dispatchEvent(new Event('online')); // and again, for good measure
 		await tick();
@@ -913,29 +938,38 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 			if (String(input).includes('/chunks?')) {
 				return secondWindow();
 			}
-			// The server does not know about `chunk-0` yet — it was completed a moment ago and
-			// its insert is still in flight. Replacing the set with this answer would drop it.
-			return jsonResponse({ from: 4, limit: 4, completedChunkIds: ['chunk-5', 'chunk-6'] });
+			// The server does not yet know about the passages just completed — their inserts
+			// are still in flight. Replacing the set with this answer would drop them.
+			return jsonResponse({
+				from: loadedCount,
+				limit: loadedCount,
+				completedChunkIds: ['chunk-5', 'chunk-6']
+			});
 		});
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: 'user-1'
 		});
 
-		await typeText('a b');
+		for (let i = 0; i < typedBeforeFire; i += 1) {
+			await typeText(all[i]);
+		}
 
-		// Three of eight: the two arriving ids ADDED to the one this session advanced
-		// optimistically at the completion instant. A replacement would read 25% — one passage
-		// silently dropped — which is the reading this test exists to fail on.
+		// typedBeforeFire completed this session + the two arriving ids, of eight total. A
+		// replacement would read the two arriving ids alone — fewer completed than this
+		// session alone has already done — which is the reading this test exists to fail on.
+		const completed = typedBeforeFire + 2;
+		const percent = Math.round((100 * completed) / 8);
 		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 8 · 38%');
-		expect(page.getByTestId('passage-meta').element().textContent).not.toContain('· 25%');
-		expect(progressRequests()).toEqual(['/api/books/test-book/progress?from=4&limit=4']);
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page ${typedBeforeFire + 1} of 8 · ${percent}%`);
+		expect(progressRequests()).toEqual([
+			`/api/books/test-book/progress?from=${loadedCount}&limit=${loadedCount}`
+		]);
 		await settleSaves();
 	});
 
@@ -943,14 +977,16 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		fetchMock.mockImplementation(async () => secondWindow());
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		await typeText('a b');
+		for (let i = 0; i < typedBeforeFire; i += 1) {
+			await typeText(all[i]);
+		}
 		await expect.poll(() => chunkRequests().length).toBe(1);
 		await tick();
 
@@ -966,19 +1002,20 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		fetchMock.mockImplementation(async () => secondWindow());
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		await typeText('a b');
-		await typeText('c d');
-		await typeText('e f');
-		await typeText('g h');
+		for (let i = 0; i < loadedCount; i += 1) {
+			await typeText(all[i]);
+		}
 		// Past the window boundary, into chunks only the endpoint could have supplied.
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 5 of 8');
+		await expect
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page ${loadedCount + 1} of 8`);
 
 		expect(invalidateAll).not.toHaveBeenCalled();
 	});
@@ -996,7 +1033,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 
 		await typeText('a b');
 		await typeText('c d');
-		expect(page.getByTestId('passage-awaiting').query()).toBeNull();
+		expect(page.getByTestId('page-awaiting').query()).toBeNull();
 		await typeText('e f');
 
 		await expect.element(page.getByTestId('session-summary')).toBeInTheDocument();
@@ -1013,7 +1050,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 	}
 
 	function awaitingPanel() {
-		return page.getByTestId('passage-awaiting');
+		return page.getByTestId('page-awaiting');
 	}
 
 	function statusRegion(): Element | null {
@@ -1045,8 +1082,8 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 		await typeText('a b'); // the only loaded passage — the session runs out of text
 
 		await expect.element(awaitingPanel()).toHaveAttribute('data-state', 'loading');
-		await expect.element(awaitingPanel()).toHaveTextContent('Loading the next passage');
-		expect(statusText()).toBe('Loading the next passage…');
+		await expect.element(awaitingPanel()).toHaveTextContent('Loading the next page');
+		expect(statusText()).toBe('Loading the next page…');
 		// Not the finished-book summary: the session has more book to go.
 		expect(page.getByTestId('session-summary').query()).toBeNull();
 		// Focus was neither moved nor trapped: the hidden input is still mounted and still has
@@ -1093,7 +1130,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 			.element(awaitingPanel())
 			.toHaveTextContent('as far as this book is loaded on this device');
 		await expect
-			.element(page.getByTestId('passage-awaiting-hint'))
+			.element(page.getByTestId('page-awaiting-hint'))
 			.toHaveTextContent('as soon as you');
 		// Announced through the region that was already there — the same node, not a new one.
 		expect(statusRegion()).toBe(region);
@@ -1127,7 +1164,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent('c d');
 		expect(awaitingPanel().query()).toBeNull();
 		expect(statusText()).toBe('');
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 2 of 8');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 8');
 	});
 
 	it('retries on the next completion after a failure, and keeps every completed passage buffered', async () => {
@@ -1156,5 +1193,215 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 		await expect
 			.poll(() => bufferEntries().map((entry) => entry.chunkId))
 			.toEqual(['chunk-0', 'chunk-1']);
+	});
+});
+
+describe('TypingSession.svelte — the page navigator, A′ seek (spec #32 §10 D1)', () => {
+	function nextButton() {
+		return page.getByTestId('page-nav-next');
+	}
+
+	function jumpBox() {
+		return page.getByTestId('page-nav-jump');
+	}
+
+	/** The last `?page=` pushState was called with, or null if it never was. */
+	function lastPushedPage(): string | null {
+		const call = pushState.mock.calls.at(-1) as [string, unknown] | undefined;
+		if (!call) return null;
+		const url = new URL(call[0], 'http://localhost');
+		return url.searchParams.get('page');
+	}
+
+	it('an in-window jump updates the URL via pushState and issues no fetch — the same session continues', async () => {
+		// Every page of a WINDOW_SIZE-long book is already loaded (chunkCount === contents.length),
+		// so "next" is a jump the session can serve entirely from what it already has: nothing
+		// outside the loaded map, and therefore nothing for `seekWindow` to go and fetch.
+		const all = passages(WINDOW_SIZE);
+		render(TypingSession, {
+			...loaded(all),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of');
+		await userEvent.click(nextButton());
+
+		await expect
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page 2 of ${WINDOW_SIZE}`);
+		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent(all[1]);
+		// The whole point of A′ over a remount: a jump the window already covers costs no
+		// request at all — `seekWindow` is never even asked to compute bounds.
+		expect(chunkRequests()).toEqual([]);
+		expect(lastPushedPage()).toBe('2');
+		// Typing on the page landed on proves the session is still the same live reducer, not a
+		// fresh one seeded at index 1 — a remount would also show "Page 2 of N", so this is the
+		// assertion that actually distinguishes the two.
+		await typeText(all[1]);
+		await expect
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page 3 of ${WINDOW_SIZE}`);
+	});
+
+	it('a jump outside the loaded window fetches a fresh window anchored at the target, then renders it', async () => {
+		const loadedCount = WINDOW_SIZE;
+		const chunkCount = WINDOW_SIZE + 3;
+		const all = passages(chunkCount);
+		const targetIndex = chunkCount - 1; // well past the first loaded window
+
+		const bounds = seekWindow(targetIndex, chunkCount);
+		fetchMock.mockImplementation(async () =>
+			jsonResponse({
+				from: bounds.from,
+				chunks: makeChunks(all.slice(bounds.from, bounds.from + bounds.limit), bounds.from),
+				chunkCount
+			})
+		);
+
+		render(TypingSession, {
+			...windowed(all.slice(0, loadedCount), chunkCount),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of');
+
+		await userEvent.fill(jumpBox(), String(targetIndex + 1));
+		await userEvent.keyboard('{Enter}');
+
+		// The seek's OWN fetch is anchored at the target with locally-clamped bounds
+		// (`seekWindow`). A plain "next page is one keystroke away" prefetch can ALSO fire
+		// concurrently off the same state update (`navigateToIndex`'s own comment: not routed
+		// through the single-flight lane, "an acceptable trade" against a second lane) — so the
+		// request list may hold more than one entry, and asserting on it is about the seek's
+		// request being IN there, not about being the only one.
+		await expect
+			.poll(() =>
+				chunkRequests().some(
+					(url) => url === `/api/books/test-book/chunks?from=${bounds.from}&limit=${bounds.limit}`
+				)
+			)
+			.toBe(true);
+		await expect
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page ${targetIndex + 1} of ${chunkCount}`);
+		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent(all[targetIndex]);
+		expect(lastPushedPage()).toBe(String(targetIndex + 1));
+	});
+
+	it('flushes a debounced in-page-restore save before the seek, via beforeNavigate', async () => {
+		// A save still in flight when a jump fires would otherwise race the seek and could write
+		// against the wrong index (TypingSession's own comment on `navigateToIndex`). This proves
+		// the flush actually happens rather than trusting the comment: `beforeNavigate`'s
+		// registered handler must exist and must not throw when the seek path calls it directly.
+		const all = passages(WINDOW_SIZE);
+		render(TypingSession, {
+			...loaded(all),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: null
+		});
+		expect(beforeNavigate).toHaveBeenCalled();
+
+		await typeText(all[0].slice(0, 1)); // one keystroke, short of completion — schedules a debounced save
+		await userEvent.click(nextButton());
+
+		// The jump's own immediate flush (not the 2s debounce) is what actually wrote this —
+		// proven by it being present well before the debounce could have fired.
+		const raw = localStorage.getItem(PAGE_STATE_KEY);
+		expect(
+			raw,
+			'the half-typed first page should have been flushed before the jump'
+		).not.toBeNull();
+		const saved = JSON.parse(raw!) as PageState[];
+		expect(saved.find((entry) => entry.index === 0)?.prefixLength).toBe(1);
+	});
+});
+
+describe('TypingSession.svelte — in-page restore (spec #32 §8)', () => {
+	it('restores a saved prefix as already-correct-but-unjudged, and measures only the new span', async () => {
+		const content = 'abcdefghij';
+		const book = makeBook(1);
+		savePageState(
+			getAttemptStorage(PAGE_STATE_KEY),
+			{
+				bookId: book.bookId,
+				chunkId: 'chunk-0',
+				index: 0,
+				prefixLength: 4,
+				savedTextLength: content.length,
+				savedAt: Date.now()
+			},
+			Date.now()
+		);
+
+		render(TypingSession, {
+			book,
+			window: makeWindow([content], 1),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			mode: NORMAL,
+			userId: 'user-1'
+		});
+
+		// The restored prefix renders correct immediately, with no keystroke typed this sitting.
+		function chars(): NodeListOf<HTMLElement> {
+			return page.getByTestId('typing-surface').element().querySelectorAll<HTMLElement>('.char');
+		}
+		await expect.poll(() => chars().length).toBeGreaterThan(4);
+		for (let i = 0; i < 4; i += 1) {
+			expect(chars()[i].dataset.state).toBe('correct');
+		}
+		expect(chars()[4].className).toMatch(/caret/); // cursor sits right after the prefix
+
+		// Finish the page by typing only the remaining span.
+		recordChunkAttempt.mockResolvedValue({ saved: true });
+		await typeText(content.slice(4));
+
+		await expect.poll(() => recordChunkAttempt.mock.calls.length).toBe(1);
+		const [, attempt] = recordChunkAttempt.mock.calls[0] as [unknown, { measuredChars: number }];
+		// Only the six characters typed THIS sitting are measured — the restored four are
+		// correct-but-unjudged and contribute to neither the numerator nor the denominator.
+		expect(attempt.measuredChars).toBe(6);
+	});
+
+	it('an untouched saved page is cleared once its attempt is recorded, so a later visit does not restore a finished page', async () => {
+		const content = 'ab';
+		const book = makeBook(1);
+		savePageState(
+			getAttemptStorage(PAGE_STATE_KEY),
+			{
+				bookId: book.bookId,
+				chunkId: 'chunk-0',
+				index: 0,
+				prefixLength: 1,
+				savedTextLength: content.length,
+				savedAt: Date.now()
+			},
+			Date.now()
+		);
+
+		render(TypingSession, {
+			book,
+			window: makeWindow([content], 1),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			mode: NORMAL,
+			userId: null
+		});
+
+		await typeText(content.slice(1)); // completes the page
+		await expect.element(page.getByTestId('session-summary')).toBeInTheDocument();
+
+		const raw = localStorage.getItem(PAGE_STATE_KEY);
+		const saved = raw === null ? [] : (JSON.parse(raw) as PageState[]);
+		expect(saved.find((entry) => entry.index === 0)).toBeUndefined();
 	});
 });

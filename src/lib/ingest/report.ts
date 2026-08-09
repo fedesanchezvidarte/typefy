@@ -1,6 +1,7 @@
 import type { DisallowedCharacter } from './characters.js';
 import type { CoverImage } from './cover.js';
-import { DEFAULT_TARGET, type SizeTarget } from '$lib/chunking/chunker.js';
+import { DEFAULT_BUDGET, type PageBudget } from '$lib/chunking/chunker.js';
+import { lineCost } from '$lib/chunking/measure.js';
 
 /**
  * The dry-run report (spec #17 §7).
@@ -36,7 +37,21 @@ export interface ReportInput {
 	chunks: readonly string[];
 	/** Characters outside the allowed set, from `findDisallowed` over the cleaned text. */
 	disallowed: readonly DisallowedCharacter[];
-	target?: SizeTarget;
+	/** Defaults to the shipped page budget — the same one the chunker just applied. */
+	budget?: PageBudget;
+}
+
+/**
+ * A chunk's cost in estimated rendered lines. The report measures pages the way the chunker
+ * does — paragraph by paragraph — because the second budget is invisible in a character
+ * count: a page of thirty one-word lines is short and still overflows the screen.
+ */
+function estimatedLines(chunk: string): number {
+	let total = 0;
+	for (const paragraph of chunk.split('\n')) {
+		total += lineCost(paragraph);
+	}
+	return total;
 }
 
 function median(sorted: readonly number[]): number {
@@ -85,13 +100,19 @@ function coverLines(cover: CoverReportEntry | undefined): string[] {
 
 /** Builds the committed markdown report for one book. */
 export function buildReport(input: ReportInput): string {
-	const target = input.target ?? DEFAULT_TARGET;
+	const budget = input.budget ?? DEFAULT_BUDGET;
 	const lengths = input.chunks.map((chunk) => chunk.length);
 	const sorted = [...lengths].sort((a, b) => a - b);
 	const total = lengths.reduce((sum, length) => sum + length, 0);
-	const outside = lengths.filter((length) => length < target.min || length > target.max).length;
+	const lines = input.chunks.map(estimatedLines);
+	const sortedLines = [...lines].sort((a, b) => a - b);
+	// Over budget, not "outside a target": there is no minimum any more. A short page is a
+	// legitimate outcome (a book ends where it ends); only an overrun is worth a look.
+	const over = input.chunks.filter(
+		(chunk, i) => chunk.length > budget.maxChars || lines[i] > budget.maxLines
+	).length;
 
-	const lines: string[] = [
+	const out: string[] = [
 		`# Ingestion report — ${input.title}`,
 		'',
 		'<!-- GENERATED FILE — do not edit by hand. Regenerate with: npm run ingest -- --slug ' +
@@ -110,26 +131,28 @@ export function buildReport(input: ReportInput): string {
 		`| Shortest | ${sorted[0] ?? 0} |`,
 		`| Median | ${median(sorted)} |`,
 		`| Longest | ${sorted[sorted.length - 1] ?? 0} |`,
-		`| Outside the target (${target.min}-${target.max}) | ${outside} |`,
+		`| Median lines | ${median(sortedLines)} |`,
+		`| Longest (lines) | ${sortedLines[sortedLines.length - 1] ?? 0} |`,
+		`| Over the budget (${budget.maxChars} chars / ${budget.maxLines} lines) | ${over} |`,
 		''
 	];
 
-	// A chunk far outside the target is not automatically wrong — ADR-0005 emits an over-long
-	// single sentence whole rather than amputating it — but it is always worth a look.
-	if (outside > 0) {
-		lines.push(
-			`> ${outside} chunk(s) fall outside ${target.min}-${target.max} characters. A long one is`,
-			'> usually a single sentence emitted whole, which is intended; a short one at the end is a',
-			'> tail that could not be merged. Anything else is worth investigating.',
+	// A page over budget is not automatically wrong — ADR-0005 emits an over-long single
+	// sentence whole rather than amputating it — but it is always worth a look.
+	if (over > 0) {
+		out.push(
+			`> ${over} page(s) run past ${budget.maxChars} characters or ${budget.maxLines} estimated`,
+			'> lines. That is usually a single sentence emitted whole, which is intended; anything',
+			'> else is worth investigating.',
 			''
 		);
 	}
 
-	lines.push('## Disallowed characters', '');
+	out.push('## Disallowed characters', '');
 	if (input.disallowed.length === 0) {
-		lines.push('None — every character is in the typeable set.', '');
+		out.push('None — every character is in the typeable set.', '');
 	} else {
-		lines.push(
+		out.push(
 			'**These must be resolved before this book can be ingested.** Each one would make its',
 			'passage impossible to complete.',
 			'',
@@ -138,17 +161,17 @@ export function buildReport(input: ReportInput): string {
 		);
 		for (const entry of input.disallowed) {
 			const context = entry.context.replaceAll('|', '\\|');
-			lines.push(
+			out.push(
 				`| \`${entry.character}\` | ${entry.codePoint} | ${entry.occurrences} | ${entry.index} | ${context} |`
 			);
 		}
-		lines.push('');
+		out.push('');
 	}
 
-	lines.push('## Boundary chunks', '', 'The ends are where surviving boilerplate shows up.', '');
+	out.push('## Boundary chunks', '', 'The ends are where surviving boilerplate shows up.', '');
 	for (const { label, content } of quotedChunks(input.chunks)) {
-		lines.push(`### ${label}`, '', '```', content, '```', '');
+		out.push(`### ${label}`, '', '```', content, '```', '');
 	}
 
-	return lines.join('\n');
+	return out.join('\n');
 }

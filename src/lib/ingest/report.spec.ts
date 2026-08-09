@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildReport } from './report.js';
 import { findDisallowed } from './characters.js';
+import { MAX_CHARS, MAX_LINES } from '$lib/chunking/measure.js';
 
 const base = {
 	slug: 'pride-and-prejudice',
@@ -35,12 +36,44 @@ describe('buildReport', () => {
 		expect(report).toMatch(/60/);
 	});
 
-	it('counts chunks outside the size target', () => {
-		const report = buildReport({
-			...base,
-			chunks: ['a'.repeat(50), 'b'.repeat(500), 'c'.repeat(900)]
+	/*
+	 * Spec #32: the size target became a DUAL BUDGET. A report still measuring against
+	 * "400-600 characters" would flag every single page of every book as out of target, and
+	 * the regenerated reports — which are the review surface for the re-chunk — would be
+	 * unreadable noise instead of a diff.
+	 */
+	describe('the dual budget', () => {
+		it('counts only the chunks over the budget, not the ones merely under the old target', () => {
+			const report = buildReport({
+				...base,
+				// 500 and 900 characters are ordinary pages now; only the last is over budget.
+				chunks: ['a'.repeat(500), 'b'.repeat(900), 'c'.repeat(MAX_CHARS + 200)]
+			});
+			expect(report).toMatch(/over the budget[^\n]*\|\s*1\s*\|/i);
 		});
-		expect(report).toMatch(/outside the target[^\n]*2/i);
+
+		it('names both bounds, so a reviewer can see which one a page ran past', () => {
+			const report = buildReport(base);
+			expect(report).toContain(String(MAX_CHARS));
+			expect(report).toContain(String(MAX_LINES));
+		});
+
+		it('counts a chunk over the LINE budget even though its characters are within budget', () => {
+			// Dialogue: 30 one-line paragraphs. Well under MAX_CHARS, well over MAX_LINES.
+			const dialogue = Array.from({ length: 30 }, () => 'Word word word two.').join('\n');
+			expect(dialogue.length).toBeLessThan(MAX_CHARS);
+			const report = buildReport({ ...base, chunks: [dialogue] });
+			expect(report).toMatch(/over the budget[^\n]*\|\s*1\s*\|/i);
+		});
+
+		it('reports the median estimated line count, the budget the character count cannot show', () => {
+			const report = buildReport({ ...base, chunks: ['a'.repeat(660)] });
+			expect(report).toMatch(/median lines[^\n]*\|\s*10\s*\|/i);
+		});
+
+		it('says nothing about a budget overrun when every page is within both bounds', () => {
+			expect(buildReport(base)).not.toMatch(/over the budget[^\n]*\|\s*[1-9]/i);
+		});
 	});
 
 	it('quotes the first two and last two chunks in full', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createChunk, applyChunkEvent } from './chunk.js';
+import { createChunk, applyChunkEvent, restoreChunk } from './chunk.js';
 import type { ChunkEngineState, ChunkEvent } from './types.js';
 
 /** Applies a sequence of events, auto-incrementing the injected clock by 100ms per event. */
@@ -256,6 +256,161 @@ describe('applyChunkEvent — timer', () => {
 		]);
 		expect(state.startedAt).toBe(500);
 		expect(state.completedAt).toBe(1700);
+	});
+});
+
+/*
+ * The newline as an ordinary character (spec #32, ADR-0004 amendment).
+ *
+ * The Feature Brief claims `applyChar` / `applyBackspace` need NO change for `\n`, because
+ * they compare characters exactly and know nothing about what a character means. These tests
+ * exist to prove that claim rather than assume it: they were written before anything in this
+ * module was touched, and they are the evidence that the page model's newline needed no
+ * state-machine work at all. If a later "optimisation" ever special-cases whitespace, this is
+ * what fails.
+ */
+describe('applyChunkEvent — the newline is an ordinary character', () => {
+	const page = 'ab\ncd';
+
+	it('sizes a chunk so a newline occupies one position like any other character', () => {
+		const state = createChunk(page);
+		expect(state.display).toHaveLength(5);
+		expect(state.firstAttempts).toHaveLength(5);
+	});
+
+	it('marks the newline correct when Enter delivers a `\\n` at that position', () => {
+		const state = run(createChunk(page), chars('ab\n'));
+		expect(state.display[2]).toBe('correct');
+		expect(state.cursor).toBe(3);
+	});
+
+	it('marks the newline incorrect when any other character is typed there', () => {
+		// The space is the interesting wrong answer: it is what a typist reaches for when the
+		// line break is invisible, and it must NOT be accepted as one.
+		const state = run(createChunk(page), chars('ab '));
+		expect(state.display[2]).toBe('incorrect');
+		expect(state.cursor).toBe(3);
+	});
+
+	it('returns a mistyped newline position to pending on backspace', () => {
+		const state = run(createChunk(page), [...chars('ab '), { type: 'backspace', timestamp: 1400 }]);
+		expect(state.display[2]).toBe('pending');
+		expect(state.cursor).toBe(2);
+	});
+
+	it('returns a CORRECTLY typed newline to pending on backspace, like any other character', () => {
+		const state = run(createChunk(page), [
+			...chars('ab\n'),
+			{ type: 'backspace', timestamp: 1400 }
+		]);
+		expect(state.display[2]).toBe('pending');
+		expect(state.cursor).toBe(2);
+	});
+
+	it('marks a retyped newline corrected, so it counts as a miss in raw accuracy', () => {
+		const state = run(createChunk(page), [
+			...chars('ab '),
+			{ type: 'backspace', timestamp: 1400 },
+			{ type: 'char', char: '\n', timestamp: 1500 }
+		]);
+		expect(state.display[2]).toBe('corrected');
+		expect(state.firstAttempts[2]).toBe('miss');
+	});
+
+	it('completes a page containing a newline, and the newline is one of its char strokes', () => {
+		const state = run(createChunk(page), chars(page));
+		expect(state.completed).toBe(true);
+		// The WPM denominator and `measured_chars` are counted off these strokes, so this is
+		// where "a `\n` counts toward measured_chars" actually comes from.
+		expect(state.log.filter((k) => k.kind === 'char')).toHaveLength(5);
+		expect(state.log.some((k) => k.kind === 'char' && k.char === '\n')).toBe(true);
+	});
+
+	it('does not complete a page whose newline is still incorrect', () => {
+		const state = run(createChunk(page), chars('ab cd'));
+		expect(state.completed).toBe(false);
+		expect(state.cursor).toBe(5);
+	});
+});
+
+describe('restoreChunk', () => {
+	const page = 'first\nsecond';
+
+	it('places the cursor after the restored prefix', () => {
+		expect(restoreChunk(page, 5).cursor).toBe(5);
+	});
+
+	it('renders the restored prefix as correct and the rest as pending', () => {
+		expect(restoreChunk(page, 3).display).toEqual([
+			'correct',
+			'correct',
+			'correct',
+			...Array.from({ length: page.length - 3 }, () => 'pending')
+		]);
+	});
+
+	/*
+	 * The load-bearing choice (spec #32 §8). The prefix is correct but UNJUDGED: it belongs to
+	 * a sitting that is over. Null first-attempt records keep it out of both the accuracy
+	 * numerator and its denominator, and an empty log keeps it out of `measured_chars` and
+	 * `measured_ms` — which is what stops a restore fabricating a WPM for time the user was
+	 * away, and what makes the 100-character best floor exclude trivial tails for free.
+	 */
+	it('leaves every first-attempt record null — the prefix is correct but UNJUDGED', () => {
+		expect(restoreChunk(page, 5).firstAttempts).toEqual(
+			Array.from({ length: page.length }, () => null)
+		);
+	});
+
+	it('produces no keystrokes and no start time, so the restored span is measured by nothing', () => {
+		const state = restoreChunk(page, 5);
+		expect(state.log).toEqual([]);
+		expect(state.startedAt).toBeNull();
+		expect(state.completedAt).toBeNull();
+		expect(state.completed).toBe(false);
+	});
+
+	it('is byte-identical to createChunk for a zero-length prefix', () => {
+		expect(restoreChunk(page, 0)).toEqual(createChunk(page));
+	});
+
+	it('restores across a newline, since a `\\n` is an ordinary prefix character', () => {
+		const state = restoreChunk(page, 6);
+		expect(state.display[5]).toBe('correct');
+		expect(state.cursor).toBe(6);
+	});
+
+	it('counts the prefix in code points, so an accented character is one position', () => {
+		const state = restoreChunk('ñandú vive', 5);
+		expect(state.cursor).toBe(5);
+		expect(state.display.slice(0, 5).every((s) => s === 'correct')).toBe(true);
+		expect(state.display[5]).toBe('pending');
+	});
+
+	it('clamps a prefix past the end of the text rather than producing an unfinishable chunk', () => {
+		// A re-ingest that shortened the content under a stable chunk id, or a hand-edited
+		// storage entry. It must degrade to "the whole page is restored", never to a cursor
+		// pointing past the text where no keystroke can ever land.
+		const state = restoreChunk('abc', 99);
+		expect(state.cursor).toBe(3);
+		expect(state.display).toEqual(['correct', 'correct', 'correct']);
+	});
+
+	it('clamps a negative or fractional prefix to a whole, non-negative position', () => {
+		expect(restoreChunk('abc', -4).cursor).toBe(0);
+		expect(restoreChunk('abc', 1.9).cursor).toBe(1);
+		expect(restoreChunk('abc', Number.NaN).cursor).toBe(0);
+	});
+
+	/*
+	 * A restored chunk is a NORMAL chunk: it does not complete on its own, and the strokes
+	 * that finish it are the only ones anything measures.
+	 */
+	it('completes on the remaining characters alone, which are the whole of the measured span', () => {
+		const state = run(restoreChunk('abcd', 2), chars('cd', 5000));
+		expect(state.completed).toBe(true);
+		expect(state.startedAt).toBe(5000);
+		expect(state.log.filter((k) => k.kind === 'char')).toHaveLength(2);
 	});
 });
 

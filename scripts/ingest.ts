@@ -60,6 +60,7 @@ interface Options {
 	refresh: boolean;
 	publish: boolean;
 	allowShrink: boolean;
+	allowRecut: boolean;
 	yes: boolean;
 }
 
@@ -72,6 +73,8 @@ Usage: npm run ingest -- --target <local|prod> [options]
   --refresh              Re-download the source instead of using the cache.
   --publish              Set published_at, making the book visible. Never implied by ingestion.
   --allow-shrink         Permit a re-chunking that DELETES chunks. Reports the cost first.
+  --allow-recut          Permit a re-chunking that REWRITES existing chunk content under a
+                          stable id. Reports the cost first. Orthogonal to --allow-shrink.
   --yes                  Skip the confirmation prompt (prod writes only).
 `;
 
@@ -100,6 +103,7 @@ function parseArguments(argv: readonly string[]): Options {
 		refresh: flags.has('--refresh'),
 		publish: flags.has('--publish'),
 		allowShrink: flags.has('--allow-shrink'),
+		allowRecut: flags.has('--allow-recut'),
 		yes: flags.has('--yes')
 	};
 }
@@ -345,6 +349,169 @@ async function writeCover(
 	if (error) fail(`${entry.slug}: writing cover_url failed — ${error.message}`);
 }
 
+/** Counts distinct `user_id`s among the `chunk_attempts` rows attached to `chunkIds`. */
+async function countAttemptsAtRisk(
+	client: SupabaseClient,
+	slug: string,
+	chunkIds: readonly string[],
+	action: string
+): Promise<{ count: number; users: number }> {
+	if (chunkIds.length === 0) {
+		return { count: 0, users: 0 };
+	}
+	// A failure here must be fatal, never swallowed. This count IS the safety mechanism, and an
+	// error read as an empty result reports "this is free" about a chunk that may carry a
+	// user's history — the one direction a safety check must never fail in. (It did exactly
+	// that until `service_role` was granted SELECT on chunk_attempts.)
+	const { data, error } = await client
+		.from('chunk_attempts')
+		.select('user_id')
+		.in('chunk_id', chunkIds);
+	if (error) {
+		fail(
+			`${slug}: could not count the attempts at risk from ${action} — ${error.message}\n` +
+				`  Refusing to proceed without knowing what it would affect.`
+		);
+	}
+	const users = new Set((data ?? []).map((row) => row.user_id as string));
+	return { count: data?.length ?? 0, users: users.size };
+}
+
+/**
+ * The shrink guard's cost, read-only (spec #17 §7, unchanged by spec #32 beyond extraction
+ * into its own function so it can be computed and reported ALONGSIDE the recut cost rather
+ * than as its own separate refusal — see `writeBook`).
+ *
+ * Covers indices `>= newLength`: a re-chunking that yields fewer chunks than exist, whose
+ * trailing rows would otherwise be deleted (and their `chunk_attempts` cascaded away) with no
+ * chance to reconsider.
+ */
+async function computeShrinkCost(
+	client: SupabaseClient,
+	bookId: string,
+	slug: string,
+	newLength: number
+): Promise<{ message: string; doomedIds: string[] } | null> {
+	const { count: existingCount } = await client
+		.from('chunks')
+		.select('id', { count: 'exact', head: true })
+		.eq('book_id', bookId);
+
+	if ((existingCount ?? 0) <= newLength) {
+		return null;
+	}
+
+	const doomed = await client
+		.from('chunks')
+		.select('id')
+		.eq('book_id', bookId)
+		.gte('index', newLength);
+	if (doomed.error) {
+		fail(`${slug}: could not list the chunks at risk from shrinking — ${doomed.error.message}`);
+	}
+	const doomedIds = (doomed.data ?? []).map((row) => row.id as string);
+	const { count, users } = await countAttemptsAtRisk(client, slug, doomedIds, 'shrinking');
+
+	return {
+		doomedIds,
+		message:
+			`${slug}: re-chunking yields ${newLength} chunks but ${existingCount} exist.\n` +
+			`  Removing ${doomedIds.length} chunk(s) would cascade away ` +
+			`${count} recorded attempt(s) across ${users} user(s).`
+	};
+}
+
+/** Rows read per page against the recut guard's existing-content check. See its own comment. */
+const RECUT_PAGE_SIZE = 500;
+
+/**
+ * Every `(index, content)` pair currently stored for this book at `index < upperBound`,
+ * PAGINATED with `.range()` (spec #32 §4).
+ *
+ * **Why pagination is not optional.** PostgREST caps a response at 1,000 rows by default, and
+ * books in this catalog run to more than that. An unpaginated `.select()` would silently
+ * return a truncated set, and the recut guard would report "nothing at risk" about content it
+ * never looked at — the one direction a safety check must never fail in, and precisely the
+ * truncation class spec #18 exists to have removed everywhere else in this codebase.
+ *
+ * A partial-read error is FATAL, following the existing precedent at the shrink guard's
+ * attempt count (and, before this rewrite, at `ingest.ts`'s original 427–440) verbatim: an
+ * error here must never be read as "no rows", because that reads as "nothing at risk."
+ */
+async function readExistingContent(
+	client: SupabaseClient,
+	bookId: string,
+	slug: string,
+	upperBound: number
+): Promise<{ id: string; index: number; content: string }[]> {
+	const rows: { id: string; index: number; content: string }[] = [];
+	if (upperBound <= 0) {
+		return rows;
+	}
+
+	let offset = 0;
+	for (;;) {
+		const { data, error } = await client
+			.from('chunks')
+			.select('id, index, content')
+			.eq('book_id', bookId)
+			.lt('index', upperBound)
+			.order('index', { ascending: true })
+			.range(offset, offset + RECUT_PAGE_SIZE - 1);
+
+		if (error) {
+			fail(
+				`${slug}: could not read existing chunk content at offset ${offset} — ${error.message}\n` +
+					`  Refusing to report the recut cost from a partial read.`
+			);
+		}
+
+		const page = (data ?? []) as { id: string; index: number; content: string }[];
+		rows.push(...page);
+		if (page.length < RECUT_PAGE_SIZE) {
+			break;
+		}
+		offset += RECUT_PAGE_SIZE;
+	}
+
+	return rows;
+}
+
+/**
+ * The recut guard's cost, read-only and paginated (spec #32 §4).
+ *
+ * Covers indices `< newChunks.length`: chunks upsert on `(book_id, index)` and never send an
+ * id, so a re-chunking whose content differs at an index that already exists overwrites that
+ * row's content under its STABLE id. `chunk_attempts` keeps pointing at a real row — the
+ * shrink guard's protection does not apply — but the text under it is no longer what was
+ * typed. Silently wrong bests, which is worse than no bests. This is the hole the existing
+ * shrink guard (deletion only) never covered.
+ */
+async function computeRecutCost(
+	client: SupabaseClient,
+	bookId: string,
+	slug: string,
+	newChunks: readonly string[]
+): Promise<{ message: string } | null> {
+	const existing = await readExistingContent(client, bookId, slug, newChunks.length);
+	const rewrittenIds = existing
+		.filter((row) => row.content !== newChunks[row.index])
+		.map((row) => row.id);
+
+	if (rewrittenIds.length === 0) {
+		return null;
+	}
+
+	const { count, users } = await countAttemptsAtRisk(client, slug, rewrittenIds, 're-cutting');
+
+	return {
+		message:
+			`${slug}: re-chunking rewrites the content of ${rewrittenIds.length} chunk(s) that already exist.\n` +
+			`  Those chunks carry ${count} recorded attempt(s) across ${users} user(s), whose bests\n` +
+			`  and completions would survive pointing at text that no longer exists there.`
+	};
+}
+
 /**
  * Writes one book.
  *
@@ -406,50 +573,38 @@ async function writeBook(
 
 	const bookId = book!.id as string;
 
-	// The shrink guard runs BEFORE any write: after it, the evidence of what would be lost is
-	// gone. Deleting a chunk cascades its chunk_attempts and chunk_progress rows away.
-	const { count: existingCount } = await client
-		.from('chunks')
-		.select('id', { count: 'exact', head: true })
-		.eq('book_id', bookId);
+	// Both guards run BEFORE any write, and BOTH costs are computed before either is reported:
+	// after a write, the evidence of what would be lost is gone, and an operator who fixes one
+	// flag and immediately hits the other has been shown the cost twice and the whole cost
+	// never (spec #32 §4). Neither guard implies the other — shrink covers indices
+	// `>= chunks.length` (deletion), recut covers indices `< chunks.length` (overwrite) — so
+	// together they cover the whole index space.
+	const shrinkCost = await computeShrinkCost(client, bookId, entry.slug, chunks.length);
+	const recutCost = await computeRecutCost(client, bookId, entry.slug, chunks);
 
-	if ((existingCount ?? 0) > chunks.length) {
-		const doomed = await client
-			.from('chunks')
-			.select('id')
-			.eq('book_id', bookId)
-			.gte('index', chunks.length);
-		if (doomed.error) {
-			fail(`${entry.slug}: could not list the chunks at risk — ${doomed.error.message}`);
+	const messages: string[] = [];
+	if (shrinkCost) messages.push(shrinkCost.message);
+	if (recutCost) messages.push(recutCost.message);
+
+	if (messages.length > 0) {
+		const refusals: string[] = [];
+		if (shrinkCost && !options.allowShrink) {
+			refusals.push('--allow-shrink');
 		}
-		const doomedIds = (doomed.data ?? []).map((row) => row.id as string);
-
-		// A failure here must be fatal, never swallowed. This count IS the safety mechanism, and
-		// an error read as an empty result reports "deleting this is free" about a chunk that
-		// may carry a user's history — the one direction a safety check must never fail in.
-		// (It did exactly that until `service_role` was granted SELECT on chunk_attempts.)
-		const { data: attempts, error: attemptsError } = await client
-			.from('chunk_attempts')
-			.select('user_id')
-			.in('chunk_id', doomedIds);
-		if (attemptsError) {
+		if (recutCost && !options.allowRecut) {
+			refusals.push('--allow-recut');
+		}
+		if (refusals.length > 0) {
 			fail(
-				`${entry.slug}: could not count the attempts at risk — ${attemptsError.message}\n` +
-					`  Refusing to delete chunks without knowing what it would destroy.`
+				`${messages.join('\n')}\n` +
+					`  Refusing. Re-run with ${refusals.join(' and ')} if this is genuinely intended.`
 			);
 		}
-		const users = new Set((attempts ?? []).map((row) => row.user_id as string));
+		console.warn(`  ${messages.join('\n  ')}\n  Authorised; proceeding.`);
+	}
 
-		const cost =
-			`${entry.slug}: re-chunking yields ${chunks.length} chunks but ${existingCount} exist.\n` +
-			`  Removing ${doomedIds.length} chunk(s) would cascade away ` +
-			`${attempts?.length ?? 0} recorded attempt(s) across ${users.size} user(s).`;
-
-		if (!options.allowShrink) {
-			fail(`${cost}\n  Refusing. Re-run with --allow-shrink if this is genuinely intended.`);
-		}
-		console.warn(`  ${cost}\n  --allow-shrink given; deleting.`);
-		const { error } = await client.from('chunks').delete().in('id', doomedIds);
+	if (shrinkCost) {
+		const { error } = await client.from('chunks').delete().in('id', shrinkCost.doomedIds);
 		if (error) fail(`${entry.slug}: deleting trailing chunks failed — ${error.message}`);
 	}
 

@@ -36,8 +36,8 @@ test.describe('a guest', () => {
 		for (const slug of [BOOK_SLUG, OTHER_BOOK_SLUG]) {
 			await page.goto(`/type/${slug}`);
 			await expect(page.getByTestId('typing-surface')).toBeVisible();
-			await expect(page.getByTestId('passage-meta')).toContainText('Passage 1 of');
-			await expect(page.getByTestId('passage-meta')).toContainText('0%');
+			await expect(page.getByTestId('page-meta')).toContainText('Page 1 of');
+			await expect(page.getByTestId('page-meta')).toContainText('0%');
 		}
 	});
 
@@ -56,11 +56,11 @@ test.describe('a guest', () => {
 		});
 
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId('passage-meta')).toContainText('Passage 1 of 6');
+		await expect(page.getByTestId('page-meta')).toContainText('Page 1 of 6');
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 
 		await page.keyboard.type(CHUNK_0, { delay: 0 });
-		await expect(page.getByTestId('passage-meta')).toContainText('Passage 2 of 6');
+		await expect(page.getByTestId('page-meta')).toContainText('Page 2 of 6');
 
 		// Keep typing past the boundary and let the network settle, so a write dispatched
 		// late at the completion instant would still have been observed by the assertion
@@ -77,7 +77,7 @@ test.describe('a guest', () => {
 		// And the guest's progress is still session-relative and unsaved: a reload starts
 		// over at passage 1.
 		await page.reload();
-		await expect(page.getByTestId('passage-meta')).toContainText('Passage 1 of 6');
+		await expect(page.getByTestId('page-meta')).toContainText('Page 1 of 6');
 	});
 
 	/**
@@ -126,12 +126,12 @@ test.describe('a guest', () => {
 		await context.addCookies([{ name: 'typefy-mode', value: 'zen', url: baseURL! }]);
 		await page.goto(`/type/${BOOK_SLUG}`);
 		await expect(page.getByTestId('zen-toggle')).toHaveAttribute('aria-pressed', 'true');
-		await expect(page.getByTestId('passage-meta')).toContainText('Passage 1 of 6');
-		await expect(page.getByTestId('passage-meta')).not.toContainText('wpm');
+		await expect(page.getByTestId('page-meta')).toContainText('Page 1 of 6');
+		await expect(page.getByTestId('page-meta')).not.toContainText('wpm');
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 
 		await page.keyboard.type(CHUNK_0, { delay: 0 });
-		await expect(page.getByTestId('passage-meta')).toContainText('Passage 2 of 6');
+		await expect(page.getByTestId('page-meta')).toContainText('Page 2 of 6');
 
 		// Type past the boundary and let the network settle, so a write dispatched late at
 		// the completion instant would still be observed rather than raced past.

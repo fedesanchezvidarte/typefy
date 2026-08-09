@@ -260,7 +260,9 @@ describe('/type/[slug] load — guest', () => {
 		const data = await runLoad(event);
 
 		expect(data.window.from).toBe(0);
-		expect(data.window.chunks.map((chunk) => chunk.index)).toEqual([0, 1, 2, 3, 4]);
+		expect(data.window.chunks.map((chunk) => chunk.index)).toEqual(
+			Array.from({ length: Math.min(WINDOW_SIZE, DEFAULT_CHUNK_COUNT) }, (_, i) => i)
+		);
 	});
 
 	it('still honours ?passage=N for a guest', async () => {
@@ -363,9 +365,9 @@ describe('/type/[slug] load — the first window', () => {
 		const data = await runLoad(event);
 
 		expect(data.window.from).toBe(47);
-		expect(data.window.chunks.map((chunk) => chunk.index)).toEqual([
-			47, 48, 49, 50, 51, 52, 53, 54, 55, 56
-		]);
+		expect(data.window.chunks.map((chunk) => chunk.index)).toEqual(
+			Array.from({ length: WINDOW_SIZE }, (_, i) => 47 + i)
+		);
 	});
 
 	it('loads the window containing N for a ?passage=N beyond the first window', async () => {
@@ -402,26 +404,30 @@ describe('/type/[slug] load — completedChunkIds', () => {
 		const { event } = loadEvent({
 			user: USER,
 			chunkCount: 500,
-			// 3 and 7 are in the first window; 42 and 300 are the same user's progress elsewhere.
-			chunkProgress: { data: completedRows([3, 7, 42, 300]), error: null }
+			// 1 and 3 are in the first WINDOW_SIZE-chunk window; 42 and 300 are the same user's
+			// progress elsewhere.
+			chunkProgress: { data: completedRows([1, 3, 42, 300]), error: null }
 		});
 
 		const data = await runLoad(event);
 
-		expect(data.completedChunkIds).toEqual([chunkId(3), chunkId(7)]);
+		expect(data.completedChunkIds).toEqual([chunkId(1), chunkId(3)]);
 	});
 
 	it('is scoped to the window the session actually opened at', async () => {
 		const { event } = loadEvent({
 			user: USER,
 			chunkCount: 500,
-			passage: '101', // startIndex 100 → window 100..109
-			chunkProgress: { data: completedRows([0, 100, 109, 110]), error: null }
+			passage: '101', // startIndex 100 → window 100..(100+WINDOW_SIZE)
+			chunkProgress: {
+				data: completedRows([0, 100, 100 + WINDOW_SIZE - 1, 100 + WINDOW_SIZE]),
+				error: null
+			}
 		});
 
 		const data = await runLoad(event);
 
-		expect(data.completedChunkIds).toEqual([chunkId(100), chunkId(109)]);
+		expect(data.completedChunkIds).toEqual([chunkId(100), chunkId(100 + WINDOW_SIZE - 1)]);
 	});
 
 	it('returns an array, not a Set, and survives a JSON round trip', async () => {

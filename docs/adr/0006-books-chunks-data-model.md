@@ -276,6 +276,44 @@ that is a rendering decision documented in `docs/agents/ui-ux-patterns` and the 
 entry, not a schema one, and is recorded here only so a reader of this ADR does not go looking for
 a broken-link check that was never going to live in Postgres.
 
+## Amendment (2026-08-09, Phase 5b implementation — spec #32)
+
+Spec #32 re-chunks every book to the new dual budget ([ADR-0005](0005-paragraph-chunking.md)'s
+Phase 5b amendment). That exposed a hole the Phase 3a amendment's "re-ingest upserts and never
+deletes" framing left open, and closes it two ways.
+
+### What id-stability actually bought — and what it never did
+
+The Phase 3a amendment above, and the *Ingestion* glossary entry, said "chunk ids stay stable
+across a re-ingest, **so progress survives**." That overstated the guarantee. Upserting on
+`(book_id, "index")` keeps a `chunk_id` **valid** — no foreign key ever breaks, `chunk_attempts`
+and `chunk_progress` never orphan. It says nothing about whether that id's **content** is still
+the content a progress row's figures describe. A re-chunk that changes paragraph groupings changes
+what text lives under `chunk_id = 4177` while every progress row still pointing at it keeps
+reporting a WPM and an accuracy for text the user never typed. Stability kept the reference
+**valid**; it never made the reference **meaningful**. That gap is exactly why a corrected typo
+re-ingest (this ADR's Phase 3b amendment, on why `immutable` was rejected) was always safe — same
+chunking, same boundaries, only the bytes inside one chunk change — while a re-**chunking** is not:
+the boundaries themselves move, and a stable id on either side of a moved boundary is not the same
+unit of progress at all.
+
+### The response: a full wipe now, a guard against next time
+
+Two things, not one, because they answer different questions.
+
+**(a) All progress was wiped**, via a migration
+(`supabase/migrations/20260809001118_wipe_progress_for_page_model.sql`), rather than attempting to
+reconcile stale rows against new chunk boundaries — there is no principled way to map "37% through
+the old chunking" onto the new one. Acceptable specifically because the project is pre-launch with
+two known users; this is not a pattern to repeat once real progress exists.
+
+**(b) Ingestion gained `--allow-recut`.** A re-chunk that would change the stored content under an
+existing `chunk_id` is now **refused by default**, reporting the book and the attempt count at risk
+across however many users — the same shape as `--allow-shrink`'s guard above, applied to overwrite
+rather than deletion. `--allow-recut` overrides it. This is the guard that makes the next re-
+chunking (5c's chapter derivation does not re-chunk, but a future cleaner fix might) fail loudly
+instead of silently invalidating progress the way this one would have without it.
+
 ## Alternatives considered
 
 - **Text in static repo files** — Acceptable for 20 books, but hundreds of MB blow up the repo and the

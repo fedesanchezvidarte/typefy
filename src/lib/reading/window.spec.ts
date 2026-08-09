@@ -4,6 +4,7 @@ import {
 	PREFETCH_THRESHOLD,
 	WINDOW_SIZE,
 	clampWindow,
+	seekWindow,
 	shouldPrefetch,
 	windowEnd
 } from './window';
@@ -15,9 +16,22 @@ import {
  */
 
 describe('constants', () => {
-	it('fixes the window at 10 chunks and the prefetch trigger at 3 remaining', () => {
-		expect(WINDOW_SIZE).toBe(10);
-		expect(PREFETCH_THRESHOLD).toBe(3);
+	/*
+	 * Retuned for the page model (spec #32 §3.5). Pages under the dual budget run the real
+	 * catalog's measured mean (1211 chars/page over the 12 catalog books, ~2.4x the pre-5b
+	 * passage) rather than the pre-5b ~500-character passage, so the pre-5b 10/3 pair would
+	 * deliver ~3x more text per window than intended.
+	 */
+	it('fixes the window at 4 chunks and the prefetch trigger at 1 remaining', () => {
+		expect(WINDOW_SIZE).toBe(4);
+		expect(PREFETCH_THRESHOLD).toBe(1);
+	});
+
+	it('keeps the refire gap strictly positive: a fresh window never re-triggers its own prefetch', () => {
+		// loadedEnd - activeIndex === WINDOW_SIZE the instant a window lands (activeIndex sits
+		// at its first chunk); that gap must stay > PREFETCH_THRESHOLD or the very next tick
+		// fetches a second window before the reader has moved at all.
+		expect(WINDOW_SIZE).toBeGreaterThan(PREFETCH_THRESHOLD);
 	});
 
 	it('caps a requested limit at the window size — the endpoint is not a whole-book download', () => {
@@ -27,21 +41,21 @@ describe('constants', () => {
 
 describe('clampWindow', () => {
 	it('passes a fully in-range window through unchanged', () => {
-		expect(clampWindow(0, 10, 100)).toEqual({ from: 0, limit: 10 });
-		expect(clampWindow(37, 10, 100)).toEqual({ from: 37, limit: 10 });
+		expect(clampWindow(0, 2, 100)).toEqual({ from: 0, limit: 2 });
+		expect(clampWindow(37, 2, 100)).toEqual({ from: 37, limit: 2 });
 	});
 
 	it('clamps a negative from to 0 without touching the limit', () => {
-		expect(clampWindow(-5, 10, 100)).toEqual({ from: 0, limit: 10 });
+		expect(clampWindow(-5, 2, 100)).toEqual({ from: 0, limit: 2 });
 	});
 
 	it('returns the remainder when the window overruns the last chunk', () => {
-		// 95..104 requested of a 100-chunk book: only 95..99 exist.
-		expect(clampWindow(95, 10, 100)).toEqual({ from: 95, limit: 5 });
+		// 98..100 requested (limit 3) of a 100-chunk book: only 98..99 exist.
+		expect(clampWindow(98, 3, 100)).toEqual({ from: 98, limit: 2 });
 	});
 
 	it('returns exactly the remainder when from is the last chunk', () => {
-		expect(clampWindow(99, 10, 100)).toEqual({ from: 99, limit: 1 });
+		expect(clampWindow(99, 3, 100)).toEqual({ from: 99, limit: 1 });
 	});
 
 	it('yields an empty window when from equals chunkCount — a 200, not an error', () => {
@@ -83,10 +97,10 @@ describe('clampWindow', () => {
 	});
 
 	it('falls back to an empty window at 0 for non-finite input — never throws', () => {
-		expect(clampWindow(Number.NaN, 10, 100)).toEqual({ from: 0, limit: 10 });
+		expect(clampWindow(Number.NaN, 2, 100)).toEqual({ from: 0, limit: 2 });
 		expect(clampWindow(0, Number.NaN, 100)).toEqual({ from: 0, limit: 0 });
-		expect(clampWindow(0, 10, Number.NaN)).toEqual({ from: 0, limit: 0 });
-		expect(clampWindow(Number.POSITIVE_INFINITY, 10, 100)).toEqual({ from: 0, limit: 10 });
+		expect(clampWindow(0, 2, Number.NaN)).toEqual({ from: 0, limit: 0 });
+		expect(clampWindow(Number.POSITIVE_INFINITY, 2, 100)).toEqual({ from: 0, limit: 2 });
 	});
 });
 
@@ -101,26 +115,60 @@ describe('windowEnd', () => {
 	});
 });
 
+/*
+ * The A' engine seek (spec #32 §10 D1): the window bounds for a deliberate jump. Unlike a
+ * prefetch, which always starts exactly at `loadedEnd`, a seek anchors a fresh window AT the
+ * target index — the caller is expected to REPLACE its loaded window with this range rather
+ * than merge it in, which is the session-level half of the same feature (`session.spec.ts`'s
+ * "applySessionEvent — seek").
+ */
+describe('seekWindow', () => {
+	it('anchors the window at the seek target', () => {
+		expect(seekWindow(400, 1000)).toEqual({ from: 400, limit: WINDOW_SIZE });
+	});
+
+	it('is exactly clampWindow(index, WINDOW_SIZE, chunkCount) — one clamp, not a second copy', () => {
+		expect(seekWindow(97, 100)).toEqual(clampWindow(97, WINDOW_SIZE, 100));
+		expect(seekWindow(0, 3)).toEqual(clampWindow(0, WINDOW_SIZE, 3));
+	});
+
+	it('never returns a window that runs past the end of the book', () => {
+		const bounds = seekWindow(998, 1000);
+		expect(bounds.from + bounds.limit).toBeLessThanOrEqual(1000);
+	});
+
+	it('yields an empty window for a seek past the end of the book, rather than throwing', () => {
+		expect(seekWindow(5000, 1000)).toEqual({ from: 5000, limit: 0 });
+	});
+});
+
 describe('shouldPrefetch', () => {
 	const chunkCount = 100;
+	const loadedEnd = 10;
 
-	it('is false in the middle of a window, far from its end', () => {
-		expect(shouldPrefetch(0, 10, chunkCount)).toBe(false);
-		expect(shouldPrefetch(6, 10, chunkCount)).toBe(false);
+	// Derived from PREFETCH_THRESHOLD rather than a hardcoded literal, so these cases keep
+	// meaning whatever the constant is retuned to next (spec #32 §3.5 retuned it once already).
+	const atThreshold = loadedEnd - PREFETCH_THRESHOLD;
+
+	it('is false well short of the threshold', () => {
+		expect(shouldPrefetch(0, loadedEnd, chunkCount)).toBe(false);
+		if (atThreshold - 1 >= 0) {
+			expect(shouldPrefetch(atThreshold - 1, loadedEnd, chunkCount)).toBe(false);
+		}
 	});
 
 	it('fires at exactly PREFETCH_THRESHOLD chunks remaining', () => {
-		// loadedEnd 10, activeIndex 7 → 3 remaining (7, 8, 9).
-		expect(shouldPrefetch(7, 10, chunkCount)).toBe(true);
+		expect(shouldPrefetch(atThreshold, loadedEnd, chunkCount)).toBe(true);
 	});
 
 	it('stays true for every index past the threshold', () => {
-		expect(shouldPrefetch(8, 10, chunkCount)).toBe(true);
-		expect(shouldPrefetch(9, 10, chunkCount)).toBe(true);
+		for (let index = atThreshold; index < loadedEnd; index += 1) {
+			expect(shouldPrefetch(index, loadedEnd, chunkCount)).toBe(true);
+		}
 	});
 
 	it('is true when the active index has run past the loaded end (awaiting)', () => {
-		expect(shouldPrefetch(10, 10, chunkCount)).toBe(true);
+		expect(shouldPrefetch(loadedEnd, loadedEnd, chunkCount)).toBe(true);
 	});
 
 	it('is false when everything is already loaded, however few chunks remain', () => {

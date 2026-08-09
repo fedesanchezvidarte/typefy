@@ -59,16 +59,19 @@ library sub-copy are trimmed, and a `/profile` stub route lands. Implementation 
 update are done; **QA sign-off for spec #30 had not yet landed in the issue as of this writing** —
 treat this Phase 5a entry as pending confirmation until that lands.
 
-The rest of Phase 5 is **specified but not implemented**: **5b** (spec #32), **5c** (spec #33) and
-**5d** (spec #34), written together in one design session and approved in that order. They replace the
-**passage** with the **page** — a screenful sized by a dual character/line budget, carrying the
-source's paragraph breaks as newlines the user actually types — then derive **chapter** structure at
-ingestion, then spend both on a **book detail screen** where a reader can see a book and start from
-any chapter. Glossary entries below carry a _(specified, spec #NN — not yet shipped)_ marker until the
-code lands; the unmarked definitions are what the code does **today**. Two consequences are worth
-stating once here: 5b **discards all existing progress** (re-chunking would otherwise leave progress
-rows pointing at text that no longer exists at that `chunk_id`), and the "never say page" rule this
-glossary has carried since Phase 0 is **amended**, not abandoned — see **Page**.
+**5b** (spec #32) is now complete and replaces the **passage** with the **page** — a screenful
+sized by a dual character/line budget, carrying the source's paragraph breaks as newlines the user
+actually types, with a **teleprompter** scroll, a **page navigator** and **in-page restore**
+shipping alongside it. The rest of Phase 5 remains **specified but not implemented**: **5c**
+(spec #33) and **5d** (spec #34), written together with 5b in one design session and approved in
+that order, derive **chapter** structure at ingestion and then spend both on a **book detail
+screen** where a reader can see a book and start from any chapter. Their glossary entries below
+still carry a _(specified, spec #NN — not yet shipped)_ marker; every other definition, page model
+included, is what the code does **today**. Two consequences of 5b are worth stating once here: it
+**discarded all existing progress** on shipping (re-chunking would otherwise have left progress
+rows pointing at text that no longer existed at that `chunk_id` — see the Ingestion entry and
+[ADR-0006](docs/adr/0006-books-chunks-data-model.md)'s Phase 5b amendment), and the "never say
+page" rule this glossary has carried since Phase 0 is **amended**, not abandoned — see **Page**.
 
 Phased roadmap:
 
@@ -99,15 +102,17 @@ Phased roadmap:
 - **Phase 5** — 🚧 Polish, then the page model and the book's structure. **5a** (✅ spec #30 — narrows
   **Font family** to **Reading font**, scoped to book text only, with an IBM Plex → Roboto family swap
   and the optical-matching/no-reflow guarantee dropped for that axis; header pencil panel and account
-  menu; landing headline and library copy trimmed; `/profile` stub route), **5b** (📋 spec #32 — the
-  **page** model: dual-budget chunking, newlines the user types, the **teleprompter**, the **page
-  navigator**, **in-page restore**, an `--allow-recut` ingestion guard and a full progress wipe),
-  **5c** (📋 spec #33 — **chapter** structure derived at ingestion from the HTML edition, aligned back
-  to the cleaned text, stored in a `chapters` table; no UI) and **5d** (📋 spec #34 — the **book detail
-  screen** at `/books/[slug]`, chapter picker and Open Library metadata). The order is load-bearing
-  the way Phases 3 and 4 were, and more strictly: a chapter's start position **is** a chunk index, and
-  5b re-chunks every book, so recording structure before 5b lands would record it against indices that
-  are about to change.
+  menu; landing headline and library copy trimmed; `/profile` stub route), **5b** (✅ spec #32 — the
+  **page** model: dual-budget chunking, newlines the user types, the **teleprompter**
+  ([ADR-0016](docs/adr/0016-teleprompter-scroll.md)), the **page navigator**, **in-page restore**, the
+  `ch`-based measure that keeps the line budget honest across reading fonts
+  ([ADR-0015](docs/adr/0015-ch-measure-chunking-contract.md)), an `--allow-recut` ingestion guard and a
+  full progress wipe), **5c** (📋 spec #33 — **chapter** structure derived at ingestion from the HTML
+  edition, aligned back to the cleaned text, stored in a `chapters` table; no UI) and **5d** (📋
+  spec #34 — the **book detail screen** at `/books/[slug]`, chapter picker and Open Library metadata).
+  The order is load-bearing the way Phases 3 and 4 were, and more strictly: a chapter's start position
+  **is** a chunk index, and 5b re-chunks every book, so recording structure before 5b landed would
+  have recorded it against indices that were about to change.
 
 ## Glossary
 
@@ -118,34 +123,40 @@ Use these terms as defined here; do not drift to synonyms.
   on "book".
 - **Book** — Typeable text from a public-domain source (Project Gutenberg in English, Cervantes Virtual
   or another in Spanish). Has metadata (title, author, language, cover).
-- **Chunk** — Atomic unit of a typeable text and of progress. A text is split into chunks **by paragraphs
-  with a size target** (~400-600 characters, never cutting a sentence). Book progress = completed chunks
-  / total. Presented to users as a **passage**.
+- **Chunk** — Atomic unit of a typeable text and of progress. Book progress = completed chunks / total.
+  Presented to users as a **page**. `chunk` remains the term in code, schema, engine and tests.
 
-  _Phase 5b (spec #32) rewrites the sizing rule, not the concept._ A chunk becomes a **page**: several
-  paragraphs joined by real `\n` characters, sized by a **dual budget** — `MAX_CHARS` (1600) **and**
-  `MAX_LINES` (24) estimated rendered lines, where a paragraph costs
-  `max(1, ceil(length / CHARS_PER_LINE))` with `CHARS_PER_LINE` = 66. Whichever budget binds first
-  closes the chunk; the never-cut-a-sentence rule survives. The budget is an estimate against a fixed
-  nominal measure, never a DOM measurement — chunk boundaries are the progress key and must be
-  identical on every device. `chunk` remains the term in code, schema, engine and tests.
-- **Line budget** _(specified, spec #32 — not yet shipped)_ — The second half of a chunk's dual budget,
-  and the reason a page of short dialogue lines fills the screen without being long in characters.
-  Honest only because the typing surface's measure is pinned in **`ch` units** (`max-width: 66ch`),
-  which keeps characters-per-line constant across the three **reading font** faces where a px measure
-  would not.
-- **Passage** — The user-facing name for a chunk (`pasaje` in the ES UI). `chunk` stays the term in
-  code, schema, engine and tests; the UI never says "chunk" — and never "page", which would be a false
-  claim about the book's real pagination. Paraglide keys use `passage_*`.
-
-  _Superseded by **page** in Phase 5b (spec #32)._ The "never page" rule was written when a chunk was
-  ~500 characters, where calling it a page really was a false claim. It is amended rather than ignored:
-  see **Page**.
-- **Page** _(specified, spec #32 — not yet shipped)_ — The user-facing name for a chunk once the dual
-  budget lands (`página` in the ES UI), replacing **passage**. A page is **a screenful — deliberately
-  not any print edition's page**, and the product never displays a print page count anywhere, so there
-  is never a second, contradicting number for the same book. Paraglide keys become `page_*`; the
-  canonical query parameter becomes `?page=N`, with `?passage=N` still accepted so existing links work.
+  A text is split into chunks by paragraphs: several paragraphs, joined by real `\n` characters,
+  sized by a **dual budget** — `MAX_CHARS` (1600) **and** `MAX_LINES` (24) estimated rendered lines,
+  where a paragraph costs `max(1, ceil(length / CHARS_PER_LINE))` with `CHARS_PER_LINE` = 66.
+  Whichever budget binds first closes the chunk; a chunk never cuts a sentence. The budget is an
+  estimate against a fixed nominal measure, never a DOM measurement — chunk boundaries are the
+  progress key and must be identical on every device
+  ([ADR-0005](docs/adr/0005-paragraph-chunking.md)'s Phase 5b amendment). Before Phase 5b
+  (spec #32) the size target was a single ~400-600 character range and the chunk was presented as
+  a **passage**; see **Passage** and **Page**.
+- **Line budget** — The second half of a chunk's dual budget, and the reason a page of short dialogue
+  lines fills the screen without being long in characters. Honest **not** because characters-per-line
+  is constant across the three **reading font** faces — it isn't — but because the typing surface's
+  measure is pinned in **`ch` units** (`max-width: 66ch`), which bounds the worst case at exactly
+  `CHARS_PER_LINE` (66) in every face. `1ch` is the advance width of the digit `"0"`: in the monospace
+  face this yields exactly 66 characters per line, while the proportional faces (Roboto, Roboto Serif)
+  fit *more* than 66 — never fewer. The asymmetry runs safe: a face fitting more than 66 chars/line
+  renders a 24-line budget in fewer than 24 real lines, which under-fills the teleprompter band but
+  never overflows it; a px-based measure would have risked the dangerous direction (fewer than 66) in
+  the mono face, and `ch` rules that out by construction. See
+  [ADR-0015](docs/adr/0015-ch-measure-chunking-contract.md).
+- **Passage** — The user-facing name for a chunk (`pasaje` in the ES UI) before Phase 5b. `chunk` stays
+  the term in code, schema, engine and tests. Superseded by **page** as of Phase 5b (spec #32): the
+  "never say page" rule this glossary carried since Phase 0 was written when a chunk was
+  ~500 characters, where calling it a page really was a false claim about the book's real pagination.
+  It is amended rather than abandoned now that a chunk is a screenful — see **Page**. `?passage=N`
+  still resolves, for links written before the rename.
+- **Page** — The user-facing name for a chunk since Phase 5b (spec #32; `página` in the ES UI),
+  replacing **passage**. A page is **a screenful — deliberately not any print edition's page**, and
+  the product never displays a print page count anywhere, so there is never a second, contradicting
+  number for the same book. Paraglide keys are `page_*`; the canonical query parameter is `?page=N`,
+  with `?passage=N` still accepted so pre-5b links work.
 - **Chapter** _(specified, spec #33 — not yet shipped)_ — A **navigational overlay** on a book's chunks:
   a title and a start chunk index, stored in a `chapters` table and derived at ingestion from the
   source's **HTML edition** while the typing text continues to come from the plain-text edition.
@@ -252,7 +263,12 @@ Use these terms as defined here; do not drift to synonyms.
   `npm run ingest -- --target local|prod`; adding a book needs no redeploy. Since Phase 3a
   (spec #17) it writes **directly** with the service-role key rather than emitting a migration,
   and it is driven by the **manifest** rather than by arguments. Two rules shape it: a re-ingest
-  **upserts and never deletes** (chunk ids stay stable, so progress survives), and a book is
+  **upserts and never deletes**, so chunk ids stay stable — which keeps a progress row's foreign
+  keys **valid**, but, as Phase 5b (spec #32) found, does not by itself keep that row's figures
+  **meaningful**: a stable id's content can still change under a re-chunk, silently orphaning what
+  a progress row's numbers describe. Re-chunking content under an existing `chunk_id` is refused
+  unless `--allow-recut` is passed
+  ([ADR-0006](docs/adr/0006-books-chunks-data-model.md)'s Phase 5b amendment). A book is
   written **unpublished** — publishing is a separate, deliberate step after its **ingestion
   report** has been read. Phase 1 fixture texts remain chunked by hand.
 - **Manifest** — `scripts/catalog/books.json`, committed: the source of truth for which books the
@@ -401,19 +417,21 @@ Use these terms as defined here; do not drift to synonyms.
   completed book resumes at the first passage (index 0) — there is no "finished" state. Guests always
   resume at the first passage, since nothing is persisted for them to resume from.
 
-  _Phases 5b and 5d (specs #32, #34) lean on this rather than change it._ Because resume is the first
-  **gap** and not the furthest page reached, free **page navigation** and starting from an arbitrary
-  **chapter** need no new resume logic: typing chapter 4 first leaves the computed index inside
-  chapter 1. The override parameter becomes `?page=N`, with `?passage=N` still accepted.
-- **Page navigator** _(specified, spec #32 — not yet shipped)_ — Previous / next arrows plus a
-  "page N of M" jump box in the typing screen's meta line, 1-based. Free movement anywhere in the
-  book, forward to read ahead or back to review what was typed. No keyboard shortcuts, deliberately.
-- **Teleprompter** _(specified, spec #32 — not yet shipped)_ — The typing surface's scroll model once
-  a page is a screenful: the line holding the cursor is held inside a fixed middle band and the text
-  moves under it. Needs DOM measurement, which is **display-only** and never feeds back into chunking.
-  Documented fallback if it feels wrong in practice: natural page scroll with `scrollIntoView`.
-- **In-page restore** _(specified, spec #32 — not yet shipped)_ — A page left half-typed is persisted
-  locally (the **attempt buffer**'s machinery, never the server) and restored on return, which is what
+  _Phase 5b (spec #32, shipped) and 5d (spec #34, pending) lean on this rather than change it._
+  Because resume is the first **gap** and not the furthest page reached, free **page navigation**
+  and starting from an arbitrary **chapter** need no new resume logic: typing chapter 4 first
+  leaves the computed index inside chapter 1. The override parameter is `?page=N`, with
+  `?passage=N` still accepted.
+- **Page navigator** — Previous / next arrows plus a "page N of M" jump box in the typing screen's
+  meta line, 1-based. Free movement anywhere in the book, forward to read ahead or back to review
+  what was typed. No keyboard shortcuts, deliberately. Shipped in Phase 5b (spec #32).
+- **Teleprompter** — The typing surface's scroll model once a page is a screenful: the line holding
+  the cursor is held inside a fixed middle band and the text moves under it. Needs DOM measurement,
+  which is **display-only** and never feeds back into chunking. Shipped in Phase 5b (spec #32) as
+  originally designed — the spec's own documented fallback (natural page scroll with
+  `scrollIntoView`) was never exercised. See [ADR-0016](docs/adr/0016-teleprompter-scroll.md).
+- **In-page restore** — A page left half-typed is persisted locally (the **attempt buffer**'s
+  machinery, never the server) and restored on return, which is what
   makes free navigation safe at ~1600 characters a page. The restored prefix replays as
   already-correct but **unmeasured**: only the **measured span** typed in the current sitting sets
   `measured_chars` and `measured_ms`, so returning to a page never fabricates a WPM for time the user
@@ -473,3 +491,5 @@ Use these terms as defined here; do not drift to synonyms.
 - [ADR-0012](docs/adr/0012-client-trusted-progress-writes.md) — Client-trusted progress writes
 - [ADR-0013](docs/adr/0013-typeable-character-set.md) — Typeable character set and source normalization
 - [ADR-0014](docs/adr/0014-mode-measurement-axis.md) — Mode as the measurement axis
+- [ADR-0015](docs/adr/0015-ch-measure-chunking-contract.md) — The `ch` measure as a chunking contract
+- [ADR-0016](docs/adr/0016-teleprompter-scroll.md) — The teleprompter scroll model

@@ -23,8 +23,8 @@ const BOOK_SLUG = prideAndPrejudiceExcerpt.id;
 const OTHER_BOOK_SLUG = donQuijoteExcerpt.id;
 const CHUNK_0 = prideAndPrejudiceExcerpt.chunks[0].content;
 
-/** The single meta line under the sheet: "Passage N of M · pct% · wpm · accuracy". */
-const META = 'passage-meta';
+/** The single meta line under the sheet: "Page N of M · pct% · wpm · accuracy". */
+const META = 'page-meta';
 
 test.describe('resume', () => {
 	test.skip(
@@ -38,7 +38,7 @@ test.describe('resume', () => {
 
 		await page.goto(`/type/${BOOK_SLUG}`);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
-		await expect(page.getByTestId(META)).toContainText(`Passage 4 of ${book.chunkCount}`);
+		await expect(page.getByTestId(META)).toContainText(`Page 4 of ${book.chunkCount}`);
 	});
 
 	test('with a gap — passages 1 and 3 complete, 2 not — the book opens at passage 2', async ({
@@ -51,7 +51,7 @@ test.describe('resume', () => {
 
 		await page.goto(`/type/${BOOK_SLUG}`);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
-		await expect(page.getByTestId(META)).toContainText(`Passage 2 of ${book.chunkCount}`);
+		await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
 	});
 
 	test('a fully completed book opens at passage 1, showing 100%', async ({ page, authUser }) => {
@@ -65,7 +65,7 @@ test.describe('resume', () => {
 		// and the percentage is what tells the user the book is done.
 		await page.goto(`/type/${BOOK_SLUG}`);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
-		await expect(page.getByTestId(META)).toContainText(`Passage 1 of ${book.chunkCount}`);
+		await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount}`);
 		await expect(page.getByTestId(META)).toContainText('100%');
 	});
 
@@ -74,12 +74,12 @@ test.describe('resume', () => {
 		authUser
 	}) => {
 		const book = await authUser.completePassages(BOOK_SLUG, [0, 1, 2]);
-		const computed = `Passage 4 of ${book.chunkCount}`;
+		const computed = `Page 4 of ${book.chunkCount}`;
 
 		// 1-based, matching what the meta line displays, and it wins even though passage 3
 		// is already complete.
 		await page.goto(`/type/${BOOK_SLUG}?passage=3`);
-		await expect(page.getByTestId(META)).toContainText(`Passage 3 of ${book.chunkCount}`);
+		await expect(page.getByTestId(META)).toContainText(`Page 3 of ${book.chunkCount}`);
 
 		// Zero, out of range, non-numeric, and empty: each falls back to the computed index
 		// and renders the book normally. Never a 400, never a 404 — a stale or hand-edited
@@ -127,7 +127,7 @@ test.describe('display — book-lifetime completion', () => {
 		// The meta line shows the SAME figure, not how far into today's session the user is:
 		// resuming at passage 4 of 6 shows the persisted 50%, never 0%.
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId(META)).toContainText(`Passage 4 of ${book.chunkCount}`);
+		await expect(page.getByTestId(META)).toContainText(`Page 4 of ${book.chunkCount}`);
 		await expect(page.getByTestId(META)).toContainText('50%');
 	});
 });
@@ -149,14 +149,14 @@ test.describe('the write path, end to end', () => {
 		const expectedPercent = Math.round((100 * 1) / book.chunkCount);
 
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId(META)).toContainText(`Passage 1 of ${book.chunkCount}`);
+		await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount}`);
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 
 		await page.keyboard.type(CHUNK_0, { delay: 0 });
 
 		// The session advances immediately, without waiting for the insert, and the
 		// percentage advances optimistically with it.
-		await expect(page.getByTestId(META)).toContainText(`Passage 2 of ${book.chunkCount}`);
+		await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
 		await expect(page.getByTestId(META)).toContainText(`${expectedPercent}%`);
 
 		// The insert is fire-and-forget, so the row is polled for rather than assumed
@@ -210,7 +210,7 @@ test.describe('the write path, end to end', () => {
 		// The loop closes: come back and the book opens where the typing left off, with the
 		// persisted percentage — nothing here depends on the in-memory session any more.
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId(META)).toContainText(`Passage 2 of ${book.chunkCount}`);
+		await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
 		await expect(page.getByTestId(META)).toContainText(`${expectedPercent}%`);
 		await page.goto('/type');
 		// BOOK_SLUG now has progress, so it also renders in continue-reading — scope through

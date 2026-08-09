@@ -52,7 +52,7 @@ export const tortoiseAndHare: TypeableText = {
 			textId: 'tortoise-and-hare',
 			index: 2,
 			content:
-				'The afternoon grew warm and the hare slept far longer than he had meant to. When at last he woke and remembered the race, he ran as he had never run before, and the wind of his going bent the grass on either side of the road. But the road ahead of him was empty. He came over the last rise and saw the tortoise standing quietly at the mark, with the fox beside him and the animals of the wood cheering. Slow and steady, said the fox, wins the race.',
+				'The afternoon grew warm and the hare slept far longer than he had meant to. When at last he woke and remembered the race, he ran as he had never run before, and the wind of his going bent the grass on either side of the road.\nBut the road ahead of him was empty. He came over the last rise and saw the tortoise standing quietly at the mark, with the fox beside him and the animals of the wood cheering.\nSlow and steady, said the fox, wins the race.',
 			charCount: 448
 		}
 	]

@@ -103,7 +103,7 @@
 	<p class="text-xs tracking-[0.16em] text-muted uppercase">{m.summary_kicker()}</p>
 	<!-- h1: when the summary shows, the typing screen's book-line h1 has unmounted. -->
 	<h1 id="session-summary-heading" class="text-[28px] font-semibold tracking-[-0.02em]">
-		{m.summary_heading_passages({ count: summary.chunksCompleted })}
+		{m.summary_heading_pages({ count: summary.chunksCompleted })}
 	</h1>
 	<dl class="mt-7 mb-2 grid grid-cols-2 gap-6">
 		<!--
@@ -134,7 +134,7 @@
 			</div>
 		{/if}
 		<div>
-			<dt class="mb-1 text-[13px] text-muted">{m.summary_passages()}</dt>
+			<dt class="mb-1 text-[13px] text-muted">{m.summary_pages()}</dt>
 			<dd data-testid="summary-chunks" class="text-[34px] font-semibold tabular-nums">
 				{summary.chunksCompleted}
 			</dd>

@@ -31,9 +31,9 @@ const EN_ID = prideAndPrejudiceExcerpt.id;
 const SHORT_ID = tortoiseAndHare.id;
 const MODE_COOKIE = 'typefy-mode';
 
-/** The single meta line under the sheet: "Passage N of M · pct% [· wpm · accuracy]". */
+/** The single meta line under the sheet: "Page N of M · pct% [· wpm · accuracy]". */
 function meta(page: Page) {
-	return page.getByTestId('passage-meta');
+	return page.getByTestId('page-meta');
 }
 
 function zenToggle(page: Page) {
@@ -72,8 +72,8 @@ async function serverHtml(page: Page, path: string): Promise<string> {
 
 /** The rendered text of the meta line inside a raw HTML document. */
 function metaFromHtml(html: string): string {
-	const match = html.match(/data-testid="passage-meta"[^>]*>([\s\S]*?)<\/p>/);
-	expect(match, 'the server HTML contains no passage-meta line').not.toBeNull();
+	const match = html.match(/data-testid="page-meta"[^>]*>([\s\S]*?)<\/p>/);
+	expect(match, 'the server HTML contains no page-meta line').not.toBeNull();
 	// SSR interleaves hydration markers (`<!--[-->`) with the text; strip markup and
 	// entities so the assertion reads what a person would see.
 	return match![1]
@@ -100,7 +100,7 @@ async function recordMetaThroughHydration(page: Page) {
 		const seen: string[] = [];
 		(window as unknown as { __metaTexts: string[] }).__metaTexts = seen;
 		const record = () => {
-			const element = document.querySelector('[data-testid="passage-meta"]');
+			const element = document.querySelector('[data-testid="page-meta"]');
 			if (element) seen.push(element.textContent ?? '');
 		};
 		// `document` always exists at init-script time; `documentElement` does not.
@@ -125,13 +125,13 @@ test.describe('the mode cookie is read server-side', () => {
 
 		// ── first paint: the document the server sent ──────────────────────────────────────
 		const html = await serverHtml(page, `/type/${EN_ID}`);
-		expect(metaFromHtml(html), 'the server-rendered meta line').toBe('Passage 1 of 6 · 0%');
+		expect(metaFromHtml(html), 'the server-rendered meta line').toBe('Page 1 of 6 · 0%');
 		expect(zenToggleTagFromHtml(html)).toContain('aria-pressed="true"');
 
 		// ── hydration: every intermediate state, not just the settled one ──────────────────
 		await recordMetaThroughHydration(page);
 		await openBook(page, EN_ID);
-		await expect(meta(page)).toHaveText('Passage 1 of 6 · 0%');
+		await expect(meta(page)).toHaveText('Page 1 of 6 · 0%');
 
 		const texts = await recordedMetaTexts(page);
 		expect(texts.length, 'the observer recorded nothing at all').toBeGreaterThan(0);
@@ -143,7 +143,7 @@ test.describe('the mode cookie is read server-side', () => {
 		// Typing does not resurrect them: in Zen nothing is derived at all, so crossing a
 		// word boundary — the event that flips the figures to numbers in Normal — is quiet.
 		await type(page, 'It is ');
-		await expect(meta(page)).toHaveText('Passage 1 of 6 · 0%');
+		await expect(meta(page)).toHaveText('Page 1 of 6 · 0%');
 		expect((await recordedMetaTexts(page)).filter((text) => /wpm|accuracy/.test(text))).toEqual([]);
 	});
 
@@ -192,7 +192,7 @@ test.describe('the choice is durable', () => {
 
 		// A reload arrives already in Zen — the server, not the client, decided that.
 		await page.reload();
-		expect(metaFromHtml(await serverHtml(page, `/type/${EN_ID}`))).toBe('Passage 1 of 6 · 0%');
+		expect(metaFromHtml(await serverHtml(page, `/type/${EN_ID}`))).toBe('Page 1 of 6 · 0%');
 		await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 		await expect(meta(page)).not.toContainText('wpm');
 
@@ -205,7 +205,7 @@ test.describe('the choice is durable', () => {
 			await expect(page.getByTestId('typing-surface')).toBeVisible({ timeout: 2000 });
 		}).toPass();
 		await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
-		await expect(meta(page)).toHaveText(`Passage 1 of ${tortoiseAndHare.chunkCount} · 0%`);
+		await expect(meta(page)).toHaveText(`Page 1 of ${tortoiseAndHare.chunkCount} · 0%`);
 
 		// Leaving Zen is equally durable, and equally server-visible.
 		await zenToggle(page).click();
@@ -311,7 +311,7 @@ test.describe('what a typed passage writes', () => {
 			await openBook(page, SHORT_ID);
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 			await type(page, tortoiseAndHare.chunks[0].content);
-			await expect(meta(page)).toContainText(`Passage 2 of ${tortoiseAndHare.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
 
 			const row = await readAttempt(user);
 			expect(row.completed).toBe(true);
@@ -351,7 +351,7 @@ test.describe('what a typed passage writes', () => {
 			await openBook(page, SHORT_ID);
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 			await type(page, tortoiseAndHare.chunks[0].content);
-			await expect(meta(page)).toContainText(`Passage 2 of ${tortoiseAndHare.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
 
 			// Wait for the write to actually land — the library card reads the persisted
 			// rollup, not the session's own optimistic state, so this must be a real row.
@@ -373,7 +373,7 @@ test.describe('what a typed passage writes', () => {
 
 			// The next visit: resume is past the Zen-completed passage, not back at passage 1.
 			await page.goto(`/type/${SHORT_ID}`);
-			await expect(meta(page)).toContainText(`Passage 2 of ${tortoiseAndHare.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
 			await expect(meta(page)).toContainText(`${percent}%`);
 		}
 	);
@@ -390,7 +390,7 @@ test.describe('what a typed passage writes', () => {
 			await openBook(page, SHORT_ID);
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'false');
 			await type(page, tortoiseAndHare.chunks[0].content);
-			await expect(meta(page)).toContainText(`Passage 2 of ${tortoiseAndHare.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
 
 			const row = await readAttempt(user);
 			expect(row.completed).toBe(true);
@@ -421,7 +421,7 @@ test.describe('what a typed passage writes', () => {
 			await zenToggle(page).click();
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 			await type(page, passage.slice(200));
-			await expect(meta(page)).toContainText(`Passage 2 of ${tortoiseAndHare.chunkCount}`);
+			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
 
 			const row = await readAttempt(user);
 			expect(row.completed).toBe(true);
@@ -487,9 +487,7 @@ test.describe('the session summary', () => {
 	/** Types every passage of the short book, optionally switching mode partway. */
 	async function readShortBook(page: Page, toggleBeforePassage: number | null) {
 		for (const [index, chunk] of tortoiseAndHare.chunks.entries()) {
-			await expect(meta(page)).toContainText(
-				`Passage ${index + 1} of ${tortoiseAndHare.chunkCount}`
-			);
+			await expect(meta(page)).toContainText(`Page ${index + 1} of ${tortoiseAndHare.chunkCount}`);
 			if (index === toggleBeforePassage) {
 				await zenToggle(page).click();
 				await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
@@ -522,7 +520,7 @@ test.describe('the session summary', () => {
 		await expect(summary).not.toContainText('Accuracy');
 
 		// Everything §11 says must still be there.
-		await expect(summary).toContainText(`You read ${tortoiseAndHare.chunkCount} passages.`);
+		await expect(summary).toContainText(`You read ${tortoiseAndHare.chunkCount} pages.`);
 		await expect(page.getByTestId('summary-chunks')).toHaveText(String(tortoiseAndHare.chunkCount));
 		await expect(page.getByTestId('summary-time')).toContainText(/\d{2}:\d{2}/);
 		await expect(page.getByTestId('summary-time')).not.toContainText('00:00');
@@ -534,7 +532,7 @@ test.describe('the session summary', () => {
 		// The actions still work, and the restart carries the mode over — it is a
 		// cookie-backed preference, not session state.
 		await page.getByTestId('summary-restart-session').click();
-		await expect(meta(page)).toHaveText(`Passage 1 of ${tortoiseAndHare.chunkCount} · 0%`);
+		await expect(meta(page)).toHaveText(`Page 1 of ${tortoiseAndHare.chunkCount} · 0%`);
 		await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 	});

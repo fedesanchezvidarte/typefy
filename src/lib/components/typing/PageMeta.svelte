@@ -3,15 +3,15 @@
 	import type { MetricsSnapshot } from '$lib/engine/metrics';
 
 	interface Props {
-		/** 1-based active passage number. */
+		/** 1-based active page number. */
 		current: number;
 		total: number;
 		/**
 		 * Whole-book progress percent (spec #12 §4). For a signed-in user this is
-		 * BOOK-LIFETIME completion — passages ever completed ÷ the book's chunk count,
-		 * advanced optimistically in-session — so resuming at passage 7 of 11 shows the
+		 * BOOK-LIFETIME completion — pages ever completed ÷ the book's chunk count,
+		 * advanced optimistically in-session — so resuming at page 7 of 11 shows the
 		 * persisted figure, not 0%. For a guest it stays session-relative: completed
-		 * passages plus the cursor's way through the active one.
+		 * pages plus the cursor's way through the active one.
 		 */
 		pct: number;
 		/** Live values, refreshed at word boundaries only; null until the first boundary. */
@@ -29,14 +29,14 @@
 
 <!-- One quiet line of chrome below the sheet (brief §2). The visible line
      updates every keystroke (pct), so it is NOT a live region; the hidden
-     region announces only passage changes. -->
-<p class="text-sm tracking-[0.01em] text-muted tabular-nums" data-testid="passage-meta">
+     region announces only page changes. -->
+<p class="text-sm tracking-[0.01em] text-muted tabular-nums" data-testid="page-meta">
 	{#if zen}
-		{m.passage_meta_zen({ current, total, pct })}
+		{m.page_meta_zen({ current, total, pct })}
 	{:else}
-		{m.passage_meta({ current, total, pct, wpm, acc })}
+		{m.page_meta({ current, total, pct, wpm, acc })}
 	{/if}
 </p>
-<p class="sr-only" aria-live="polite" data-testid="passage-announcer">
-	{m.passage_meta_zen({ current, total, pct: Math.round((100 * (current - 1)) / total) })}
+<p class="sr-only" aria-live="polite" data-testid="page-announcer">
+	{m.page_meta_zen({ current, total, pct: Math.round((100 * (current - 1)) / total) })}
 </p>

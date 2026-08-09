@@ -27,7 +27,7 @@ const CHUNK_FIRST = prideAndPrejudiceExcerpt.chunks[0].content;
 const CHUNK_LAST = prideAndPrejudiceExcerpt.chunks[5].content;
 const PASSAGE_COUNT = prideAndPrejudiceExcerpt.chunks.length;
 
-const META = 'passage-meta';
+const META = 'page-meta';
 
 /** Every Supabase write of an attempt, live or backfilled, goes through this path. */
 const CHUNK_ATTEMPTS_ROUTE = /\/rest\/v1\/chunk_attempts/;
@@ -120,7 +120,7 @@ test.describe('offline → online: a completed passage is pending, then lands', 
 		// surface that states a pending save — actually renders.
 		await page.goto(`/type/${BOOK_SLUG}?passage=${PASSAGE_COUNT}`);
 		await expect(page.getByTestId(META)).toContainText(
-			`Passage ${PASSAGE_COUNT} of ${book.chunkCount}`
+			`Page ${PASSAGE_COUNT} of ${book.chunkCount}`
 		);
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 
@@ -134,7 +134,7 @@ test.describe('offline → online: a completed passage is pending, then lands', 
 
 		// Pending, not lost: the passage is buffered, and the summary says so in as many words.
 		await expect(page.getByTestId('summary-save-pending')).toHaveText(
-			"One passage will be saved when you're back online."
+			"One page will be saved when you're back online."
 		);
 		await expect(page.getByTestId('summary-save-failures')).toHaveCount(0);
 
@@ -228,13 +228,13 @@ test.describe('a reconnect drain must not disturb a typist mid-passage', () => {
 			page.locator('[data-testid="typing-surface"] .char[data-state="correct"]');
 
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId(META)).toContainText(`Passage 1 of ${book.chunkCount} · 0%`);
+		await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount} · 0%`);
 		await typePassage(page, prefix);
 		await expect(typedCorrect()).toHaveCount(prefix.length);
 
 		// What the announcer says right now. It is the only live region on this screen, so it is
 		// the only thing that could speak over somebody who is typing.
-		const announcer = page.getByTestId('passage-announcer');
+		const announcer = page.getByTestId('page-announcer');
 		const announcedBefore = await announcer.textContent();
 
 		// A backlog appears — guest-authored, for the very passage being typed, so the drain
@@ -276,7 +276,7 @@ test.describe('a reconnect drain must not disturb a typist mid-passage', () => {
 		// Focus never left the hidden input, so the next keystroke still reaches the engine.
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 		// The session was not yanked to the new resume index, and no keystroke was lost.
-		await expect(page.getByTestId(META)).toContainText(`Passage 1 of ${book.chunkCount}`);
+		await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount}`);
 		await expect(typedCorrect()).toHaveCount(prefix.length);
 		// Nothing was announced: the sr-only announcer is a pure function of the passage number
 		// and the book length, neither of which a drain can move. The visible percentage that
@@ -298,16 +298,16 @@ guestTest.describe('guest → sign-in: the completed passages backfill', () => {
 	guestTest(
 		'passages typed as a guest show as completed progress after signing in',
 		async ({ page, mintUser, session }) => {
-			// ~815 real keystrokes across two passages.
+			// ~815 real keystrokes across two pages.
 			guestTest.setTimeout(240_000);
 			const user = await mintUser();
 			const book = await readSeededBook(user.client, BOOK_SLUG);
 
 			// ── As a guest ────────────────────────────────────────────────────────────────
 			await page.goto(`/type/${BOOK_SLUG}`);
-			await expect(page.getByTestId(META)).toContainText(`Passage 1 of ${book.chunkCount}`);
+			await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount}`);
 			await typePassage(page, CHUNK_FIRST);
-			await expect(page.getByTestId(META)).toContainText(`Passage 2 of ${book.chunkCount}`);
+			await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
 			await expect.poll(() => readBuffer(page)).toHaveLength(1);
 
 			// The last passage too, in a second session, so the summary and its sign-in prompt —
@@ -319,7 +319,7 @@ guestTest.describe('guest → sign-in: the completed passages backfill', () => {
 			// The prompt counts THIS session's passage, and it is count-aware because the buffer
 			// is what makes the promise keepable.
 			await expect(page.getByTestId('summary-sign-in-prompt')).toContainText(
-				'Sign in to save the passage you just typed'
+				'Sign in to save the page you just typed'
 			);
 			// Both passages are buffered, guest-authored: attributable to whoever signs in next.
 			const buffered = await readBuffer(page);
@@ -367,7 +367,7 @@ guestTest.describe('guest → sign-in: the completed passages backfill', () => {
 			// The typing screen agrees, and resume has advanced past the passage the guest typed:
 			// passage 1 is complete, so the lowest incomplete index is passage 2.
 			await page.goto(`/type/${BOOK_SLUG}`);
-			await expect(page.getByTestId(META)).toContainText(`Passage 2 of ${book.chunkCount}`);
+			await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
 			await expect(page.getByTestId(META)).toContainText(`${percent}%`);
 		}
 	);
@@ -382,7 +382,7 @@ guestTest.describe('A → B: one browser, two users', () => {
 	guestTest(
 		'a second user never inherits the first user’s buffered entries',
 		async ({ page, mintUser, session }) => {
-			// ~800 real keystrokes across two passages.
+			// ~800 real keystrokes across two pages.
 			guestTest.setTimeout(240_000);
 			const [userA, userB] = [await mintUser(), await mintUser()];
 			const book = await readSeededBook(userA.client, BOOK_SLUG);
@@ -405,7 +405,7 @@ guestTest.describe('A → B: one browser, two users', () => {
 
 			await session.signInAs(userA);
 			await page.goto(`/type/${BOOK_SLUG}?passage=2`);
-			await expect(page.getByTestId(META)).toContainText(`Passage 2 of ${book.chunkCount}`);
+			await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
 			// A's mount drain fired on the guest entry and failed transiently, so that entry is
 			// still standing — nothing was lost by trying.
 			await expect.poll(() => readBuffer(page)).toHaveLength(1);

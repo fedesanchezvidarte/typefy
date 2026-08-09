@@ -19,10 +19,10 @@
 	let { book, onInteract }: Props = $props();
 
 	/*
-	 * The landing hero IS a live typing surface (brief §5): a real passage,
+	 * The landing hero IS a live typing surface (brief §5): a real page,
 	 * already focused, responding on the first keystroke. It runs the same
 	 * engine as the typing screen but shows no metrics and never reaches a
-	 * summary — completing the final passage loops back to the first. A demo
+	 * summary — completing the final page loops back to the first. A demo
 	 * that explains the product by being the product.
 	 *
 	 * `book.chunkCount` is read from the hero book rather than written as `1`:
@@ -58,6 +58,7 @@
 			onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}
 			onBackspace={(timestamp) => dispatch({ type: 'backspace', timestamp })}
 			onRestartChunk={() => dispatch({ type: 'restart-chunk' })}
+			visibleLines={5}
 		/>
 	{/if}
 </div>

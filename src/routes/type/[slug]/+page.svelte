@@ -16,9 +16,12 @@
 	<title>{data.book.title} · {m.app_name()}</title>
 </svelte:head>
 
-<!-- Fresh session per book: keying on the slug remounts the whole flow on navigation.
-     Deliberately keyed on the slug and NOT on `startIndex`, so a `?passage=N` change
-     does not remount and discard an in-flight session.
+<!-- Fresh session per book: keying on the book id remounts the whole flow on navigation.
+     Deliberately keyed on `data.book.id` and NOT on `startIndex`, so neither a
+     `?page=N`/`?passage=N` link nor an in-session page-navigator jump remounts and
+     discards a live session (spec #32 §10 D1, "A' engine seek"): a jump is handled
+     entirely in-engine (`session.ts`'s `seek` event) plus shallow routing from
+     `TypingSession.svelte`, never by widening this key.
 
      `data.window` is the FIRST window only (spec #18). Windows 2..n never come back
      through this load — `TypingSession` fetches them from the chunks endpoint into its

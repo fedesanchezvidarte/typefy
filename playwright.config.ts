@@ -19,6 +19,10 @@ export default defineConfig({
 	use: { baseURL: isCI ? 'http://localhost:4173' : 'http://localhost:5173' },
 	forbidOnly: isCI,
 	retries: isCI ? 2 : 0,
+	// CI needs a report file to upload as an artifact (with `--trace on-first-retry`, the
+	// HTML report is what surfaces a failure's trace at all); local runs keep the default
+	// terminal reporter, no report directory written.
+	reporter: isCI ? 'html' : 'list',
 	/**
 	 * One worker, everywhere. Not a performance concession — a correctness one.
 	 *

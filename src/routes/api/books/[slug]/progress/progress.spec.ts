@@ -156,7 +156,11 @@ describe('GET /api/books/[slug]/progress — a guest', () => {
 		const response = await GET(event);
 
 		expect(response.status).toBe(200);
-		expect(await body(response)).toEqual({ from: 0, limit: 10, completedChunkIds: [] });
+		expect(await body(response)).toEqual({
+			from: 0,
+			limit: MAX_WINDOW_LIMIT,
+			completedChunkIds: []
+		});
 	});
 
 	it('issues no progress query — asserted against the recorded reads', async () => {
@@ -177,13 +181,15 @@ describe('GET /api/books/[slug]/progress — a signed-in user', () => {
 	});
 
 	it('never returns an id outside the window', async () => {
+		// limit=5 exceeds MAX_WINDOW_LIMIT and clamps to it, so the window is 10..13: 9 and 14
+		// are one step outside it on either side, 10 and 13 are its first and last chunk.
 		const { event } = requestEvent({
 			user: USER,
 			query: '?from=10&limit=5',
-			completed: [0, 9, 10, 14, 15, 24]
+			completed: [0, 9, 10, 13, 14, 24]
 		});
 
-		expect((await body(await GET(event))).completedChunkIds).toEqual([chunkId(10), chunkId(14)]);
+		expect((await body(await GET(event))).completedChunkIds).toEqual([chunkId(10), chunkId(13)]);
 	});
 
 	it('returns an empty list when nothing in the window is complete', async () => {
@@ -337,7 +343,11 @@ describe('GET /api/books/[slug]/progress — a failing database', () => {
 		const response = await GET(event);
 
 		expect(response.status).toBe(200);
-		expect(await body(response)).toEqual({ from: 0, limit: 10, completedChunkIds: [] });
+		expect(await body(response)).toEqual({
+			from: 0,
+			limit: MAX_WINDOW_LIMIT,
+			completedChunkIds: []
+		});
 		expect(supabase.tables).not.toContain('chunk_progress');
 	});
 });

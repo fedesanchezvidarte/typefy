@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteSet, SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { Pathname } from '$app/types';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, goto, pushState } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { m } from '$lib/paraglide/messages';
@@ -15,6 +15,7 @@
 		sessionSummary
 	} from '$lib/engine/session';
 	import type { ChunkResult, SessionEvent, SessionState } from '$lib/engine/session';
+	import { restoreChunk } from '$lib/engine/chunk';
 	import type { ChunkEngineState } from '$lib/engine/types';
 	import type { MetricsSnapshot } from '$lib/engine/metrics';
 	import type {
@@ -24,7 +25,7 @@
 		TypeableTextSummary,
 		WindowProgressResponse
 	} from '$lib/types';
-	import { shouldPrefetch, WINDOW_SIZE } from '$lib/reading/window';
+	import { seekWindow, shouldPrefetch, WINDOW_SIZE } from '$lib/reading/window';
 	// Supabase-free by construction, and it must stay that way: it is imported STATICALLY
 	// here, so a Supabase import inside it would land in the guest's entry bundle and break
 	// the zero-bytes guarantee `loadProgressModules()` below exists to keep (spec #24 §12).
@@ -38,7 +39,17 @@
 	import { ATTEMPT_BUFFER_KEY, enqueue, type BufferedChunkAttempt } from '$lib/progress/buffer';
 	import { getAttemptStorage } from '$lib/progress/storage';
 	import { drainOnce } from '$lib/progress/drain-once';
-	import PassageMeta from './PassageMeta.svelte';
+	// Also Supabase-free (spec #32 §8) — in-page restore never becomes a server write, so it
+	// shares the buffer's "statically importable, never touches @supabase/*" guarantee.
+	import {
+		clearPageState,
+		PAGE_STATE_KEY,
+		readPageState,
+		resolvedPrefixLength,
+		savePageState
+	} from '$lib/progress/page-state';
+	import PageMeta from './PageMeta.svelte';
+	import PageNavigator from './PageNavigator.svelte';
 	import SessionSummaryView from './SessionSummary.svelte';
 	import TypingSurface from './TypingSurface.svelte';
 
@@ -109,9 +120,39 @@
 	// yank a session that is already underway. `mode` is seeded the same way and for the same
 	// reason — the reducer is where the axis lives from here on (spec #24 §11).
 	let session = $state.raw<SessionState>(
-		untrack(() =>
-			createSession(loadedChunks(initialWindow.chunks, initialWindow.chunkCount), startIndex, mode)
-		)
+		untrack(() => {
+			const opened = createSession(
+				loadedChunks(initialWindow.chunks, initialWindow.chunkCount),
+				startIndex,
+				mode
+			);
+			// In-page restore (spec #32 §8), mount-time only: a page left half-typed on a
+			// PREVIOUS visit is remembered locally and restored here. It deliberately does
+			// NOT apply to an in-session `seek` (see `navigateToIndex`) — the spec's promise
+			// is "leaving a page half-typed and returning restores it," which for a live
+			// session is exactly the opening chunk, not every chunk ever visited.
+			const openingChunk = initialWindow.chunks.find((chunk) => chunk.index === startIndex);
+			if (!openingChunk || !opened.activeChunk) {
+				return opened;
+			}
+			const saved = readPageState(
+				getAttemptStorage(PAGE_STATE_KEY),
+				{
+					bookId: book.bookId,
+					chunkId: openingChunk.id,
+					index: startIndex,
+					textLength: openingChunk.content.length
+				},
+				Date.now()
+			);
+			if (!saved) {
+				return opened;
+			}
+			return {
+				...opened,
+				activeChunk: restoreChunk(openingChunk.content, saved.prefixLength)
+			};
+		})
 	);
 	let liveMetrics = $state.raw<MetricsSnapshot | null>(null);
 	let surface = $state<{ focusInput: () => void } | null>(null);
@@ -363,11 +404,7 @@
 	 * session is not waiting — the region itself still renders (see its comment in the markup).
 	 */
 	const windowStatus = $derived(
-		session.status !== 'awaiting'
-			? ''
-			: windowStalled
-				? m.passage_window_end()
-				: m.passage_loading()
+		session.status !== 'awaiting' ? '' : windowStalled ? m.page_window_end() : m.page_loading()
 	);
 
 	type ProgressModules = [
@@ -544,6 +581,44 @@
 		void drainOnce(signedInUserId);
 	}
 
+	// ── In-page restore: the write side (spec #32 §8) ──────────────────────────────────
+	//
+	// A page's typed-but-unresolved prefix is persisted locally so a return trip restores
+	// it (the READ side lives in `session`'s initialiser above). Written debounced during
+	// typing, flushed immediately on `visibilitychange -> hidden` and `beforeNavigate`
+	// (NOT `beforeunload`, unreliable on mobile — the case this exists for), and cleared
+	// on completion, since the `chunk_attempts` row supersedes it.
+
+	let pageStateSaveTimer: ReturnType<typeof setTimeout> | undefined;
+
+	/** The current page's remembered shape, or `null` if there is nothing worth saving. */
+	function currentPageStateEntry() {
+		const chunk = session.text.chunks.get(session.activeIndex);
+		if (!chunk || !session.activeChunk) return null;
+		return {
+			bookId: book.bookId,
+			chunkId: chunk.id,
+			index: session.activeIndex,
+			prefixLength: resolvedPrefixLength(session.activeChunk.display),
+			savedTextLength: chunk.content.length,
+			savedAt: Date.now()
+		};
+	}
+
+	/** Immediate write. `savePageState` itself clears the slot when `prefixLength` is 0. */
+	function persistPageStateNow() {
+		if (session.status !== 'active') return;
+		const entry = currentPageStateEntry();
+		if (!entry) return;
+		savePageState(getAttemptStorage(PAGE_STATE_KEY), entry, Date.now());
+	}
+
+	/** The debounced path, ~2s after the last keystroke (brief §8). */
+	function schedulePageStateSave() {
+		if (pageStateSaveTimer) clearTimeout(pageStateSaveTimer);
+		pageStateSaveTimer = setTimeout(persistPageStateNow, 2000);
+	}
+
 	/**
 	 * The completion instant, in the order brief §3.8 fixes: identify what completed →
 	 * advance the optimistic set → gate guests → save.
@@ -567,6 +642,15 @@
 			return;
 		}
 		completed.add(chunk.id); // optimistic and unconditional — the Set dedupes
+
+		// The page-state row for the page that just finished is now stale: the attempt row
+		// supersedes it. Cancel any pending debounced write first, or a write scheduled a
+		// moment before completion could land after the clear and resurrect it.
+		if (pageStateSaveTimer) {
+			clearTimeout(pageStateSaveTimer);
+			pageStateSaveTimer = undefined;
+		}
+		clearPageState(getAttemptStorage(PAGE_STATE_KEY), { bookId: book.bookId, index }, Date.now());
 
 		// The attempt's first keystroke. `previous` is the state before the completing stroke,
 		// so its active chunk still carries the whole traversal. The fallback covers the one
@@ -643,6 +727,13 @@
 			heldView = { index: next.activeIndex, chunk: next.activeChunk };
 		}
 
+		// In-page restore's write side (spec #32 §8): every real keystroke reschedules the
+		// debounced save. A completion cancels it again in `handleCompletion`, so a save that
+		// was already in flight cannot resurrect a page that just finished.
+		if (event.type === 'char' || event.type === 'backspace') {
+			schedulePageStateSave();
+		}
+
 		if (next.activeIndex !== previous.activeIndex || next.status === 'finished') {
 			handleCompletion(previous, next);
 			// A completed passage is also the retry point for a window fetch that failed
@@ -695,6 +786,115 @@
 		surface?.focusInput();
 	}
 
+	// ── Page navigator: the A' engine seek (spec #32 §10 D1) ───────────────────────────
+	//
+	// A jump never remounts `TypingSession` (see `+page.svelte`'s comment) — it is handled
+	// entirely in-engine, via `session.ts`'s `seek` event, and the URL is updated with
+	// SvelteKit's SHALLOW routing (`pushState`) so it reflects the new page without a load
+	// re-run. That covers the in-window case for free: `applySessionEvent` already has the
+	// target chunk loaded, so the jump is instant.
+	//
+	// When the target is OUTSIDE the loaded window, `applySeek` still moves the session
+	// there — `status` becomes `awaiting` and `seekPending` is set — but there is no text to
+	// render yet. `runSeekWindowFetch` is the real fetch/network half: it asks the chunks
+	// endpoint for a FRESH window anchored at the target (`seekWindow`, not `loadedEnd` —
+	// a jump is not a prefetch), and `window-loaded` REPLACES the loaded map rather than
+	// merging onto it (`session.ts`'s `seekPending` branch), so a long session that seeks
+	// around a book does not accumulate every window it ever visited.
+
+	/** Absolute-index navigation (0-based), shared by "previous", "next" and the jump box. */
+	function navigateToIndex(target: number) {
+		const total = session.text.chunkCount;
+		if (total <= 0) return;
+		const clamped = Math.min(Math.max(target, 0), total - 1);
+		if (clamped === session.activeIndex) return;
+
+		// Flush whatever is typed on the page being LEFT — a debounced save still in flight
+		// would otherwise race the seek and could write against the wrong index.
+		persistPageStateNow();
+		if (pageStateSaveTimer) {
+			clearTimeout(pageStateSaveTimer);
+			pageStateSaveTimer = undefined;
+		}
+
+		dispatch({ type: 'seek', index: clamped, timestamp: Date.now() });
+		updateUrlForIndex(clamped);
+
+		if (session.status === 'awaiting' && session.seekPending) {
+			void runSeekWindowFetch(clamped);
+		}
+		surface?.focusInput(); // a navigator click must not strand a keyboard-only user
+	}
+
+	/**
+	 * `?page=` becomes canonical the instant a jump happens (spec #32 §6): a stale
+	 * `?passage=` in the address bar is replaced rather than left alongside it, so the URL
+	 * a user might copy from here on always reads the current term.
+	 *
+	 * Built from `book.id` (the book's SLUG — see `TypeableTextSummary`, confusingly named
+	 * `id`), not from `page.url.pathname`: this route's own pathname is already known from
+	 * the prop the component was mounted with, so there is no reason to trust the ambient
+	 * `page.url` for it — and `resolve()` throws on anything that isn't an absolute pathname,
+	 * which `page.url.pathname` is not guaranteed to be outside a real, fully-hydrated
+	 * navigation (a component-test harness in particular).
+	 *
+	 * The whole pathname+query string is built INSIDE the `resolve()` call, as one argument,
+	 * matching `pickAnother`'s `resolve(localizeHref(...) as Pathname)` below — not built up
+	 * outside it and concatenated on, which `svelte/no-navigation-without-resolve` does not
+	 * trace through, and would flag as an unvalidated `pushState()` target.
+	 */
+	function updateUrlForIndex(index: number) {
+		const params = new SvelteURLSearchParams(page.url.search);
+		params.delete('passage');
+		params.set('page', String(index + 1));
+		pushState(resolve(`${localizeHref(`/type/${book.id}`)}?${params}` as Pathname), {});
+	}
+
+	/**
+	 * The seek's own window fetch — anchored at the TARGET (`seekWindow`), never at
+	 * `loadedEnd` like `runWindowFetch`'s prefetch. Not routed through `prefetchWindow`'s
+	 * single-flight promise: a user-triggered jump is rare enough that racing an ordinary
+	 * prefetch is an acceptable trade against the complexity of a second single-flight
+	 * lane, and `window-loaded`'s `seekPending` handling in `session.ts` is what keeps the
+	 * REPLACE (rather than merge) correct regardless of arrival order.
+	 */
+	async function runSeekWindowFetch(index: number): Promise<void> {
+		const bounds = seekWindow(index, session.text.chunkCount);
+		if (bounds.limit <= 0) {
+			windowStalled = true;
+			return;
+		}
+		try {
+			const response = await fetch(
+				`/api/books/${encodeURIComponent(book.id)}/chunks?from=${bounds.from}&limit=${bounds.limit}`
+			);
+			if (!response.ok) {
+				windowStalled = true;
+				return;
+			}
+			const body = (await response.json()) as ChunkWindowResponse;
+			dispatch({
+				type: 'window-loaded',
+				chunks: body.chunks,
+				chunkCount: body.chunkCount,
+				timestamp: Date.now()
+			});
+			windowStalled = body.chunks.length === 0 && body.from < body.chunkCount;
+			if (userId !== null && body.chunks.length > 0) {
+				void mergeWindowProgress(body.from, body.chunks.length);
+			}
+		} catch {
+			windowStalled = true;
+		}
+	}
+
+	// Flush on the two reliable "the user might be leaving" signals (brief §8) — NOT
+	// `beforeunload`, unreliable on mobile, which is exactly the case in-page restore
+	// exists for. Registered at component init, SvelteKit's own lifecycle-function shape.
+	beforeNavigate(() => {
+		persistPageStateNow();
+	});
+
 	/**
 	 * The mode switch (spec #24 §11). Three things, in this order.
 	 *
@@ -728,6 +928,14 @@
 	here either way.
 -->
 <svelte:window ononline={retryWindow} />
+<!-- The third in-page-restore flush trigger (spec #32 §8): a tab switch or a phone's
+     screen lock fires `visibilitychange -> hidden` without any navigation happening at
+     all, which `beforeNavigate` cannot see. -->
+<svelte:document
+	onvisibilitychange={() => {
+		if (document.visibilityState === 'hidden') persistPageStateNow();
+	}}
+/>
 
 <main class="mx-auto flex w-full max-w-[860px] flex-col items-center gap-5 px-6 pt-10 pb-24">
 	<!--
@@ -803,24 +1011,29 @@
 				lands the user types on without touching anything.
 			-->
 			<div
-				data-testid="passage-awaiting"
+				data-testid="page-awaiting"
 				data-state={windowStalled ? 'stalled' : 'loading'}
 				class="flex w-full max-w-[720px] flex-col gap-1.5 rounded-lg border border-border px-4 py-3 text-center"
 			>
 				<p class="text-sm text-fg">{windowStatus}</p>
 				{#if windowStalled}
-					<p class="text-[13px] text-muted" data-testid="passage-awaiting-hint">
-						{m.passage_window_end_hint()}
+					<p class="text-[13px] text-muted" data-testid="page-awaiting-hint">
+						{m.page_window_end_hint()}
 					</p>
 				{/if}
 			</div>
 		{/if}
-		<PassageMeta
+		<PageMeta
 			current={session.activeIndex + 1}
 			total={session.text.chunkCount}
 			{pct}
 			live={liveMetrics}
 			{zen}
+		/>
+		<PageNavigator
+			current={session.activeIndex + 1}
+			total={session.text.chunkCount}
+			onNavigate={navigateToIndex}
 		/>
 		<div class="mt-1 flex flex-wrap justify-center gap-2">
 			<button
@@ -838,7 +1051,7 @@
 				class={buttonClasses}
 				onclick={restartChunk}
 			>
-				{m.passage_restart()}
+				{m.page_restart()}
 			</button>
 			<button type="button" data-testid="pick-another" class={buttonClasses} onclick={pickAnother}>
 				{m.typing_pick_another()}

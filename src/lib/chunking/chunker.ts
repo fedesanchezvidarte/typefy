@@ -1,28 +1,41 @@
+import { MAX_CHARS, MAX_LINES, lineCost } from './measure.js';
+
 /**
- * Paragraph chunking with a size target (ADR-0005, spec #17 §5).
+ * Paragraph chunking under a dual budget (ADR-0005 as amended by spec #32).
  *
- * A chunk is the atomic unit of typeable text and of progress. Splitting is by **paragraph,
- * grouped up to a size target, never cutting a sentence** — a chunk that ends mid-sentence
- * ruins the reading half of "writing and reading at the same time", which is the product.
+ * A chunk is the atomic unit of typeable text and of progress, and since 5b it is a **page**:
+ * several paragraphs joined by a real `\n`, sized to a screenful. Splitting is by **paragraph,
+ * grouped up to a budget, never cutting a sentence** — a chunk that ends mid-sentence ruins
+ * the reading half of "writing and reading at the same time", which is the product.
  *
- * Pure by construction (`lib-patterns` tier 1): no IO, no clock, deterministic.
+ * **The budget is two numbers, not one.** Characters alone would stack forty lines of dialogue
+ * onto one screen; lines alone would let dense prose run past the character backstop. A chunk
+ * closes on whichever binds first (`measure.ts`).
+ *
+ * Pure by construction (`lib-patterns` tier 1): no IO, no clock, no DOM, deterministic. That
+ * is a contract rather than a nicety — chunk boundaries are the progress key, so they must be
+ * byte-identical on every device, in every font, at every viewport width. The line budget is
+ * therefore an ESTIMATE against a fixed nominal measure and never a measurement; the
+ * teleprompter's DOM measurement produces pixels and can never reach back here. Both claims
+ * are asserted by test in `chunker.spec.ts`, not left to convention.
  *
  * Input is cleaned text — paragraphs separated by a blank line, as `ingest/clean.ts` emits.
- * Output chunks contain **no newline**: every chunk in the database today is a single flow,
- * and the typing surface has never rendered a line break inside a passage.
+ * Output chunks carry a single `\n` between paragraphs, never at either end and never doubled.
  */
-
-/** Size target in characters. Soft on both ends — see `chunkParagraphs`. */
-export interface SizeTarget {
-	min: number;
-	max: number;
-}
 
 /**
- * ADR-0005's ~400-600 characters. Both bounds are soft: the hand-chunked Phase 1 fixtures
- * run from 377 to 683, and that is the intended rhythm rather than a violation of it.
+ * The two bounds a page is held within. Supersedes the pre-5b `SizeTarget` (`{min, max}`
+ * characters): there is no minimum any more, because the line budget already stops a page
+ * being trivially short and a hard minimum is what produced the old stub-absorption special
+ * cases.
  */
-export const DEFAULT_TARGET: SizeTarget = { min: 400, max: 600 };
+export interface PageBudget {
+	maxChars: number;
+	maxLines: number;
+}
+
+/** The shipped budget: `measure.ts`'s constants, which the typing surface answers to. */
+export const DEFAULT_BUDGET: PageBudget = { maxChars: MAX_CHARS, maxLines: MAX_LINES };
 
 /**
  * Abbreviations whose trailing period is not a sentence end. Lower-cased for comparison.
@@ -143,63 +156,119 @@ function count(text: string, character: string): number {
 }
 
 /**
- * Cleaned text → chunks.
+ * A chunk's cost in estimated rendered lines: the sum over its paragraphs.
  *
- * Greedy: units (sentences, in paragraph order) accumulate into the current chunk while it
- * stays under `max`; a unit that would overrun starts a new one. Two deliberate asymmetries:
- *
- * - **A single unit longer than `max` is emitted whole.** An over-long chunk is bad; an
- *   amputated sentence is worse (ADR-0005).
- * - **A trailing remainder below `min` merges back into the previous chunk** rather than
- *   becoming a stub. Finishing a book on a nine-character passage reads as a bug.
+ * Splitting on `\n` recovers exactly the paragraphs that were appended, because a chunk holds
+ * single newlines and nothing else — which is why the budget can be evaluated against a
+ * candidate STRING rather than against bookkeeping kept alongside it. One representation, so
+ * the accounting cannot drift from the text it describes.
  */
-export function chunkParagraphs(text: string, target: SizeTarget = DEFAULT_TARGET): string[] {
-	const units = text
-		.split(/\n\s*\n/)
+function chunkLines(text: string): number {
+	if (text === '') return 0;
+	let total = 0;
+	for (const paragraph of text.split('\n')) {
+		total += lineCost(paragraph);
+	}
+	return total;
+}
+
+/**
+ * Cleaned text → pages.
+ *
+ * **Split-then-group per paragraph**, which is the restructure spec #32 asks for: the pre-5b
+ * pipeline flat-mapped every paragraph into sentences before grouping, which destroyed
+ * paragraph identity and made a paragraph-preserving join impossible to express at all.
+ *
+ * The loop is greedy and has exactly three cases per source paragraph:
+ *
+ * 1. **It fits on a page of its own** — append it to the open page if both budgets still hold,
+ *    otherwise close and open a new page with it. Paragraphs join with a single `\n`.
+ * 2. **It is over budget and has more than one sentence** — its sentences fill the CURRENT
+ *    page and spill onto the next, joined by the space that separated them. Filling the
+ *    current page rather than starting a fresh one is what retires the old stub-absorption
+ *    special case: a chapter heading followed by a 2,700-character paragraph now opens the
+ *    page that paragraph fills, instead of being pushed out alone.
+ * 3. **It is one sentence longer than the budget** — emitted whole. An over-long page is bad;
+ *    an amputated sentence is worse (ADR-0005).
+ *
+ * A sentence that spills onto the next page opens it WITHOUT a `\n`, so a paragraph split
+ * across two pages never gains a paragraph break the author did not write.
+ *
+ * **No trailing-stub merge, deliberately** (the pre-5b rule is dropped rather than ported).
+ * Under a dual budget it would be dead code: a page closes only because characters or lines
+ * bound it, so merging a one-line tail into the previous page necessarily overruns whichever
+ * one did. A short final page is the honest outcome when the text simply ends there.
+ *
+ * Character budgets are measured in UTF-16 units, matching `chunks.char_count`; the line
+ * budget is measured in code points, matching what the surface renders.
+ */
+export function chunkParagraphs(text: string, budget: PageBudget = DEFAULT_BUDGET): string[] {
+	// Any run of newlines is a paragraph boundary. `cleanSource` emits exactly `\n\n` and no
+	// paragraph-internal newline, so this is equivalent on real input — and on hand-written
+	// input it is what makes "a chunk never contains a newline it did not put there" structural.
+	const paragraphs = text
+		.split(/\n+/)
 		.map((paragraph) => paragraph.trim())
-		.filter((paragraph) => paragraph !== '')
-		.flatMap(splitSentences);
+		.filter((paragraph) => paragraph !== '');
 
 	const chunks: string[] = [];
 	let current = '';
 
-	for (const unit of units) {
-		if (current === '') {
-			current = unit;
-			continue;
-		}
-		if (current.length + 1 + unit.length <= target.max) {
-			current = `${current} ${unit}`;
-			continue;
-		}
-		// The unit does not fit. Normally `current` is emitted and the unit starts the next
-		// chunk — but when `current` is a stub and the unit is oversized anyway, that produces
-		// a stub passage *followed by* an over-long one, which is worse on both counts. Real
-		// case: Don Quijote's chapter headings, where a 7-character "Capítulo" was pushed out
-		// alone because the sentence after it runs to 2,700 characters. Absorb the stub.
-		if (current.length < target.min && unit.length > target.max) {
-			current = `${current} ${unit}`;
-			continue;
-		}
-		chunks.push(current);
-		current = unit;
-	}
-	if (current !== '') {
-		chunks.push(current);
-	}
+	const fits = (candidate: string): boolean =>
+		candidate.length <= budget.maxChars && chunkLines(candidate) <= budget.maxLines;
 
-	// A short tail is better attached than left standing alone — but only when the merge
-	// still fits. An unbounded merge turns a 575-character chunk plus a 287-character tail
-	// into one 862-character passage, which overruns the target far worse than the stub it
-	// was avoiding. A tail that cannot fit stays a short final passage: mildly untidy, and
-	// the honest outcome when the text simply ends there.
-	if (chunks.length > 1) {
-		const last = chunks[chunks.length - 1];
-		const previous = chunks[chunks.length - 2];
-		if (last.length < target.min && previous.length + 1 + last.length <= target.max) {
-			chunks.splice(chunks.length - 2, 2, `${previous} ${last}`);
+	const close = (): void => {
+		if (current !== '') {
+			chunks.push(current);
+			current = '';
 		}
+	};
+
+	/** Starts a new paragraph on the open page, or on a fresh one when it will not fit. */
+	const pushParagraph = (piece: string): void => {
+		if (current === '') {
+			// Even an over-budget piece goes in: this is where a single monstrous sentence is
+			// emitted whole rather than amputated.
+			current = piece;
+			return;
+		}
+		const candidate = `${current}\n${piece}`;
+		if (fits(candidate)) {
+			current = candidate;
+			return;
+		}
+		close();
+		current = piece;
+	};
+
+	/** Continues the open paragraph with its next sentence, spilling onto a new page if full. */
+	const pushSentence = (sentence: string): void => {
+		const candidate = `${current} ${sentence}`;
+		if (fits(candidate)) {
+			current = candidate;
+			return;
+		}
+		close();
+		// No `\n`: the next page opens mid-paragraph, which is what it really is.
+		current = sentence;
+	};
+
+	for (const paragraph of paragraphs) {
+		if (paragraph.length <= budget.maxChars && lineCost(paragraph) <= budget.maxLines) {
+			pushParagraph(paragraph);
+			continue;
+		}
+		const sentences = splitSentences(paragraph);
+		if (sentences.length <= 1) {
+			pushParagraph(paragraph);
+			continue;
+		}
+		sentences.forEach((sentence, i) => {
+			if (i === 0) pushParagraph(sentence);
+			else pushSentence(sentence);
+		});
 	}
+	close();
 
 	return chunks;
 }

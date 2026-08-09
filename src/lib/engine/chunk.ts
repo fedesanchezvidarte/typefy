@@ -7,6 +7,12 @@ import type { CharacterState, ChunkEngineState, ChunkEvent, Keystroke } from './
  * inside events (never read from a clock here). The keystroke log is the single source
  * of truth — "was this position ever incorrect" is derived from it, and metrics are
  * computed from it by a separate module this one never imports.
+ *
+ * The page model (spec #32) needed **no change to the state machine**, which is worth
+ * recording rather than leaving as an absence: `\n` is judged by the same exact comparison as
+ * every other character, so it takes a `CharacterState`, counts as a char stroke, and
+ * backspaces to `pending` for free. `chunk.spec.ts`'s "the newline is an ordinary character"
+ * block is the proof, and it is what a future whitespace special case would break.
  */
 
 /** Code-point-safe split so precomposed characters (á, ñ, ¿…) occupy one position each. */
@@ -21,6 +27,47 @@ export function createChunk(text: string): ChunkEngineState {
 		cursor: 0,
 		display: Array.from({ length }, (): CharacterState => 'pending'),
 		firstAttempts: Array.from({ length }, () => null),
+		log: [],
+		startedAt: null,
+		completedAt: null,
+		completed: false
+	};
+}
+
+/**
+ * The second constructor (spec #32 §8): a chunk reopened with its first `prefixLength`
+ * characters already typed, for in-page restore.
+ *
+ * The prefix is **correct but UNJUDGED**, and that is the whole design rather than a detail:
+ *
+ * - `display[0..N)` is `correct`, so the page looks the way the user left it.
+ * - `firstAttempts` is **all null**, so the prefix contributes to neither the accuracy
+ *   numerator nor its denominator. It was judged in a sitting that is over, and re-asserting
+ *   that judgement here would let a page be re-scored every time it was resumed.
+ * - the log is empty and `startedAt` is null, so no keystroke and no millisecond of the time
+ *   the user was away can reach `measured_chars` or `measured_ms` (ADR-0014). **Restoring
+ *   never fabricates a WPM.** The 100-character best floor then excludes a trivial tail
+ *   automatically, because the tail is all there is to measure.
+ *
+ * Note what this means for the completion rule: `corrected`/`correct` both satisfy it, so a
+ * restored page completes on its remaining characters alone, exactly as if the prefix had
+ * been typed cleanly a moment ago.
+ *
+ * `prefixLength` is clamped into `0..length`. The callers are a hand-editable storage entry
+ * and a chunk whose content may have changed under a stable id, and neither has anything
+ * better to do with an exception than lose the page — while a cursor past the end would be an
+ * unfinishable chunk that ignores every keystroke.
+ */
+export function restoreChunk(text: string, prefixLength: number): ChunkEngineState {
+	const characters = toCharacters(text);
+	const prefix = Number.isFinite(prefixLength)
+		? Math.min(Math.max(Math.floor(prefixLength), 0), characters.length)
+		: 0;
+	return {
+		text,
+		cursor: prefix,
+		display: characters.map((_, i): CharacterState => (i < prefix ? 'correct' : 'pending')),
+		firstAttempts: characters.map(() => null),
 		log: [],
 		startedAt: null,
 		completedAt: null,

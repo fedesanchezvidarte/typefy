@@ -30,14 +30,16 @@ import { MODE_COOKIE, parseMode } from '$lib/mode/mode';
  * cache split applies only to the windows that follow.
  *
  * Spec #12's progress contract is unchanged in meaning, only in scope:
- * - `startIndex` — the first incomplete passage, or the `?passage=N` override when N is a
- *   valid 1-based index. An invalid override falls back silently (never a 400/404): a stale
- *   hand-edited link must still open the book. Both rules live in `resolveStartIndex`, not
- *   here. The computed fallback now comes from SQL (`first_incomplete_chunk_index`) rather
- *   than from scanning a chunk array this load no longer has.
+ * - `startIndex` — the first incomplete page, or the `?page=N` override when N is a valid
+ *   1-based index (spec #32: `?page=` is canonical; `?passage=N` is still accepted for
+ *   back-compat, `page` winning when both are present). An invalid override falls back
+ *   silently (never a 400/404): a stale hand-edited link must still open the book. Both
+ *   rules live in `resolveStartIndex`, not here. The computed fallback now comes from SQL
+ *   (`first_incomplete_chunk_index`) rather than from scanning a chunk array this load no
+ *   longer has.
  * - `completedChunkIds` — serialised as an array because a `Set` does not survive load
- *   serialisation; the client rebuilds it. **Scoped to the window**, since ids for passages
- *   the session cannot reach yet are of no use to it and grow without bound on a long book.
+ *   serialisation; the client rebuilds it. **Scoped to the window**, since ids for pages the
+ *   session cannot reach yet are of no use to it and grow without bound on a long book.
  * - `chunksCompleted` — the numerator of the meta line's percentage, book-lifetime.
  *
  * A guest issues **no progress query at all** and calls no RPC; the `if (!user)` early
@@ -77,18 +79,23 @@ export const load = (async ({ params, locals, url, cookies }): Promise<TypingPag
 		error(404, 'Book not found');
 	}
 
-	const passage = url.searchParams.get('passage');
+	// `?page=N` is canonical (spec #32); `?passage=N` is accepted for back-compat, so an
+	// existing link keeps working. `page` wins when both happen to be present — back-compat
+	// by ACCEPTANCE, not by redirect, matching the "a stale hand-edited link must still open
+	// the book" posture `resolveStartIndex` already has for a single param.
+	const pageParam = url.searchParams.get('page') ?? url.searchParams.get('passage');
 	// No cookie means no explicit choice, so `normal` applies — the theme contract, verbatim.
-	// An unrecognised value falls back the same way and silently, in the `?passage=N` spirit:
-	// a stale hand-edited cookie must still open the book. Identical for guests and signed-in
+	// An unrecognised value falls back the same way and silently, in the `?page=N` spirit: a
+	// stale hand-edited cookie must still open the book. Identical for guests and signed-in
 	// users; mode has no profile column and no precedence rule (§10).
 	const mode = parseMode(cookies.get(MODE_COOKIE)) ?? 'normal';
 	const { user } = await locals.safeGetSession();
 
 	if (!user) {
-		// A guest has no resume position, so the computed fallback is 0 and `?passage=N` is
-		// the only thing that can move the opening index. One chunk read, nothing else.
-		const startIndex = resolveStartIndex(passage, book.chunkCount, 0);
+		// A guest has no resume position, so the computed fallback is 0 and `?page=N` (or
+		// `?passage=N`) is the only thing that can move the opening index. One chunk read,
+		// nothing else.
+		const startIndex = resolveStartIndex(pageParam, book.chunkCount, 0);
 		return {
 			book,
 			window: await readWindow(locals.supabase, book, startIndex),
@@ -107,7 +114,7 @@ export const load = (async ({ params, locals, url, cookies }): Promise<TypingPag
 		getBookCompletionCount(locals.supabase, user.id, book.bookId)
 	]);
 
-	const startIndex = resolveStartIndex(passage, book.chunkCount, computedStartIndex);
+	const startIndex = resolveStartIndex(pageParam, book.chunkCount, computedStartIndex);
 
 	// Independent again: the window's content and the book's completed set. The intersection
 	// happens here rather than in the query because `chunk_progress` is keyed by chunk uuid,
