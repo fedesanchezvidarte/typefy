@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { SvelteSet } from 'svelte/reactivity';
+	import { SvelteSet, SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { Pathname } from '$app/types';
 	import { beforeNavigate, goto, pushState } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -830,16 +830,24 @@
 	 * `?page=` becomes canonical the instant a jump happens (spec #32 §6): a stale
 	 * `?passage=` in the address bar is replaced rather than left alongside it, so the URL
 	 * a user might copy from here on always reads the current term.
+	 *
+	 * Built from `book.id` (the book's SLUG — see `TypeableTextSummary`, confusingly named
+	 * `id`), not from `page.url.pathname`: this route's own pathname is already known from
+	 * the prop the component was mounted with, so there is no reason to trust the ambient
+	 * `page.url` for it — and `resolve()` throws on anything that isn't an absolute pathname,
+	 * which `page.url.pathname` is not guaranteed to be outside a real, fully-hydrated
+	 * navigation (a component-test harness in particular).
+	 *
+	 * The whole pathname+query string is built INSIDE the `resolve()` call, as one argument,
+	 * matching `pickAnother`'s `resolve(localizeHref(...) as Pathname)` below — not built up
+	 * outside it and concatenated on, which `svelte/no-navigation-without-resolve` does not
+	 * trace through, and would flag as an unvalidated `pushState()` target.
 	 */
 	function updateUrlForIndex(index: number) {
-		const url = new URL(page.url);
-		url.searchParams.delete('passage');
-		url.searchParams.set('page', String(index + 1));
-		// `resolve()` rather than the bare pathname+search: the pathname is already the
-		// current (localized) route, so this is `resolve()`'s "pathname" form, not its
-		// "route id + params" one — the same shape `pickAnother`'s `resolve(localizeHref(...)
-		// as Pathname)` already uses below.
-		pushState(resolve(`${url.pathname}${url.search}` as Pathname), {});
+		const params = new SvelteURLSearchParams(page.url.search);
+		params.delete('passage');
+		params.set('page', String(index + 1));
+		pushState(resolve(`${localizeHref(`/type/${book.id}`)}?${params}` as Pathname), {});
 	}
 
 	/**
