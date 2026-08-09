@@ -14,10 +14,15 @@
 	let { frozen }: Props = $props();
 
 	/*
-	 * Fixed cycle order (spec #30): book → page → passage → word, looping forever.
-	 * Four flat keys per locale rather than a structured message — see the Feature
-	 * Brief §7, each word needs independent per-locale text and the cycle order
-	 * never changes at runtime.
+	 * Fixed cycle order: book → page → word, looping forever. Three flat keys per
+	 * locale rather than a structured message — see the Feature Brief §7, each word
+	 * needs independent per-locale text and the cycle order never changes at runtime.
+	 *
+	 * Spec #32 dropped the fourth word, "passage": once "page" became this product's own
+	 * term for a chunk (superseding "passage" in the UI), keeping a separate "passage" tail
+	 * word would have cycled the headline through two words that mean the same thing here.
+	 * "book" and "word" still name genuinely different scales of text, so the cycle is
+	 * shortened rather than the collision papered over with a synonym.
 	 */
 	// Paraglide messages return a branded `LocalizedString`; the animation slices these
 	// strings character by character, which yields plain `string`s that no longer carry the
@@ -25,7 +30,6 @@
 	const words = $derived([
 		`${m.landing_headline_tail_book()}`,
 		`${m.landing_headline_tail_page()}`,
-		`${m.landing_headline_tail_passage()}`,
 		`${m.landing_headline_tail_word()}`
 	]);
 
@@ -116,18 +120,49 @@
 	<span class="sr-only">{m.landing_headline()} {m.landing_headline_tail_book()}</span>
 	<span aria-hidden="true">
 		{m.landing_headline()}
-		<span class="tail text-accent" style:min-width="{Math.max(...words.map((w) => w.length))}ch">
-			{displayText}<span class="caret" class:caret-visible={caretVisible} aria-hidden="true"></span>
+		<span class="tail text-accent">
+			<!-- Hidden copies of every tail word, stacked in the same grid cell: the cell is
+			     exactly as wide as the widest word actually renders, in the real face and at the
+			     real size. -->
+			{#each words as word (word)}
+				<span class="tail-sizer">{word}</span>
+			{/each}
+			<span class="tail-text"
+				>{displayText}<span class="caret" class:caret-visible={caretVisible} aria-hidden="true"
+				></span></span
+			>
 		</span>
 	</span>
 </h1>
 
 <style>
-	/* Reserves width for the longest tail word so only the tail's trailing edge moves — the
-	   headline never reflows differently per word at desktop width (spec #30). */
+	/*
+	 * Reserves width for the widest tail word so the headline never reflows per word (spec
+	 * #30). The reservation used to be a `min-width` in `ch` with the text left-aligned in it,
+	 * which over-reserved (a `ch` is the "0" advance, wider than these lowercase words average)
+	 * AND parked the whole slack on the right — so a short word like "word" left the line
+	 * visibly off-centre. Now the slot is measured from the words themselves and the current
+	 * word is centred in it: what slack remains splits evenly, so the line reads as centred
+	 * whatever word is showing.
+	 */
 	.tail {
-		display: inline-block;
-		text-align: left;
+		display: inline-grid;
+	}
+
+	/* Every child shares one cell: the sizers set the width, the live text sits on top. */
+	.tail > * {
+		grid-area: 1 / 1;
+	}
+
+	.tail-sizer {
+		visibility: hidden;
+		/* Room for the caret, which the sizers don't carry. */
+		padding-right: 3px;
+	}
+
+	.tail-text {
+		justify-self: center;
+		white-space: nowrap;
 	}
 
 	.caret {

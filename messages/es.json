@@ -26,9 +26,8 @@
 	"landing_headline": "Escribe",
 	"landing_headline_tail_book": "un libro",
 	"landing_headline_tail_page": "una página",
-	"landing_headline_tail_passage": "un pasaje",
 	"landing_headline_tail_word": "una palabra",
-	"landing_hint": "Escribe arriba · Retroceso corrige · Esc reinicia el pasaje",
+	"landing_hint": "Escribe arriba · Retroceso corrige · Esc reinicia la página",
 	"landing_library_cta": "Explora la biblioteca →",
 	"library_heading": "Biblioteca",
 	"library_cover_alt": "Portada de {title}",
@@ -46,33 +45,38 @@
 	"library_empty_heading": "Ningún libro coincide con “{query}”",
 	"library_empty_body": "Prueba con otro título o autor, o borra la búsqueda para ver toda la estantería.",
 	"library_empty_reset": "Borrar búsqueda",
-	"passage_count": "{count} pasajes",
-	"passage_meta": "Pasaje {current} de {total} · {pct}% · {wpm} ppm · {acc}% de precisión",
-	"passage_meta_zen": "Pasaje {current} de {total} · {pct}%",
-	"passage_restart": "Reiniciar pasaje (Esc)",
-	"passage_loading": "Cargando el siguiente pasaje…",
-	"passage_window_end": "Hasta aquí llega lo que este dispositivo tiene cargado del libro.",
-	"passage_window_end_hint": "Los siguientes pasajes se cargarán solos en cuanto vuelvas a tener conexión. No se pierde nada de lo que has escrito.",
+	"page_count": "{count} páginas",
+	"page_meta": "Página {current} de {total} · {pct}% · {wpm} ppm · {acc}% de precisión",
+	"page_meta_zen": "Página {current} de {total} · {pct}%",
+	"page_restart": "Reiniciar página (Esc)",
+	"page_loading": "Cargando la siguiente página…",
+	"page_window_end": "Hasta aquí llega lo que este dispositivo tiene cargado del libro.",
+	"page_window_end_hint": "Las siguientes páginas se cargarán solas en cuanto vuelvas a tener conexión. No se pierde nada de lo que has escrito.",
+	"page_nav_group_label": "Navegación de páginas",
+	"page_nav_previous": "Página anterior",
+	"page_nav_next": "Página siguiente",
+	"page_nav_jump_label": "Ir a la página",
+	"page_nav_of": "de {total}",
 	"typing_pick_another": "Elegir otro",
 	"typing_input_label": "Entrada de escritura",
 	"typing_restart_session": "Reiniciar sesión",
 	"zen_enter": "Modo zen",
 	"zen_exit": "Salir del zen",
 	"summary_kicker": "Sesión",
-	"summary_heading_passages": [
+	"summary_heading_pages": [
 		{
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "Leíste un pasaje.",
-				"countPlural=*": "Leíste {count} pasajes."
+				"countPlural=one": "Leíste una página.",
+				"countPlural=*": "Leíste {count} páginas."
 			}
 		}
 	],
 	"summary_average_speed": "Velocidad media",
 	"summary_accuracy": "Precisión",
 	"unit_wpm": "ppm",
-	"summary_passages": "Pasajes",
+	"summary_pages": "Páginas",
 	"summary_time": "Tiempo",
 	"summary_zen_note": "Modo zen: esta sesión no se midió.",
 	"summary_type_again": "Escríbelo otra vez",
@@ -82,8 +86,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "Un pasaje se guardará cuando vuelvas a tener conexión.",
-				"countPlural=*": "{count} pasajes se guardarán cuando vuelvas a tener conexión."
+				"countPlural=one": "Una página se guardará cuando vuelvas a tener conexión.",
+				"countPlural=*": "{count} páginas se guardarán cuando vuelvas a tener conexión."
 			}
 		}
 	],
@@ -92,8 +96,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "No se pudo guardar un pasaje.",
-				"countPlural=*": "No se pudieron guardar {count} pasajes."
+				"countPlural=one": "No se pudo guardar una página.",
+				"countPlural=*": "No se pudieron guardar {count} páginas."
 			}
 		}
 	],
@@ -103,8 +107,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "Inicia sesión para guardar el pasaje que acabas de escribir",
-				"countPlural=*": "Inicia sesión para guardar los {count} pasajes que acabas de escribir"
+				"countPlural=one": "Inicia sesión para guardar la página que acabas de escribir",
+				"countPlural=*": "Inicia sesión para guardar las {count} páginas que acabas de escribir"
 			}
 		}
 	],

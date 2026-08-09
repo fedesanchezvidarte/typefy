@@ -49,7 +49,7 @@ describe('SessionSummary.svelte — save-failure notice (spec #12 §6)', () => {
 
 		await expect
 			.element(page.getByTestId('summary-save-failures'))
-			.toHaveTextContent("2 passages couldn't be saved.");
+			.toHaveTextContent("2 pages couldn't be saved.");
 	});
 
 	it('states the failure count in Spanish', async () => {
@@ -59,7 +59,7 @@ describe('SessionSummary.svelte — save-failure notice (spec #12 §6)', () => {
 
 		await expect
 			.element(page.getByTestId('summary-save-failures'))
-			.toHaveTextContent('No se pudieron guardar 2 pasajes.');
+			.toHaveTextContent('No se pudieron guardar 2 páginas.');
 	});
 
 	it('renders no notice at all when nothing failed to save', async () => {
@@ -98,13 +98,13 @@ describe('SessionSummary.svelte — the singular arm of every count message (spe
 
 		await expect
 			.element(page.getByTestId('session-summary'))
-			.toHaveTextContent('You read one passage.');
+			.toHaveTextContent('You read one page.');
 		await expect
 			.element(page.getByTestId('summary-save-failures'))
-			.toHaveTextContent("One passage couldn't be saved.");
+			.toHaveTextContent("One page couldn't be saved.");
 		await expect
 			.element(page.getByTestId('summary-sign-in-prompt'))
-			.toHaveTextContent('Sign in to save the passage you just typed');
+			.toHaveTextContent('Sign in to save the page you just typed');
 	});
 
 	it('reads the heading, the lost-save notice and the guest prompt in the singular in Spanish', async () => {
@@ -114,13 +114,13 @@ describe('SessionSummary.svelte — the singular arm of every count message (spe
 
 		await expect
 			.element(page.getByTestId('session-summary'))
-			.toHaveTextContent('Leíste un pasaje.');
+			.toHaveTextContent('Leíste una página.');
 		await expect
 			.element(page.getByTestId('summary-save-failures'))
-			.toHaveTextContent('No se pudo guardar un pasaje.');
+			.toHaveTextContent('No se pudo guardar una página.');
 		await expect
 			.element(page.getByTestId('summary-sign-in-prompt'))
-			.toHaveTextContent('Inicia sesión para guardar el pasaje que acabas de escribir');
+			.toHaveTextContent('Inicia sesión para guardar la página que acabas de escribir');
 	});
 
 	it('states a single pending save in the singular in English', async () => {
@@ -130,7 +130,7 @@ describe('SessionSummary.svelte — the singular arm of every count message (spe
 
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent("One passage will be saved when you're back online.");
+			.toHaveTextContent("One page will be saved when you're back online.");
 		// The one failure was the pending one, so nothing is claimed as lost.
 		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
 	});
@@ -142,7 +142,7 @@ describe('SessionSummary.svelte — the singular arm of every count message (spe
 
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent('Un pasaje se guardará cuando vuelvas a tener conexión.');
+			.toHaveTextContent('Una página se guardará cuando vuelvas a tener conexión.');
 		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
 	});
 });
@@ -162,10 +162,10 @@ describe('SessionSummary.svelte — the pending/lost split', () => {
 
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent("One passage will be saved when you're back online.");
+			.toHaveTextContent("One page will be saved when you're back online.");
 		await expect
 			.element(page.getByTestId('summary-save-failures'))
-			.toHaveTextContent("3 passages couldn't be saved.");
+			.toHaveTextContent("3 pages couldn't be saved.");
 	});
 
 	it('states both counts separately in Spanish', async () => {
@@ -175,10 +175,10 @@ describe('SessionSummary.svelte — the pending/lost split', () => {
 
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent('Un pasaje se guardará cuando vuelvas a tener conexión.');
+			.toHaveTextContent('Una página se guardará cuando vuelvas a tener conexión.');
 		await expect
 			.element(page.getByTestId('summary-save-failures'))
-			.toHaveTextContent('No se pudieron guardar 3 pasajes.');
+			.toHaveTextContent('No se pudieron guardar 3 páginas.');
 	});
 
 	it('reports nothing as lost when every failure was buffered', async () => {
@@ -327,7 +327,7 @@ describe('SessionSummary.svelte — the guest sign-in prompt count', () => {
 
 		await expect
 			.element(page.getByTestId('summary-sign-in-prompt'))
-			.toHaveTextContent('Sign in to save the 3 passages you just typed');
+			.toHaveTextContent('Sign in to save the 3 pages you just typed');
 	});
 
 	it('names exactly the cap at the cap', async () => {
@@ -340,7 +340,7 @@ describe('SessionSummary.svelte — the guest sign-in prompt count', () => {
 
 		await expect
 			.element(page.getByTestId('summary-sign-in-prompt'))
-			.toHaveTextContent(`Sign in to save the ${ATTEMPT_BUFFER_CAP} passages you just typed`);
+			.toHaveTextContent(`Sign in to save the ${ATTEMPT_BUFFER_CAP} pages you just typed`);
 	});
 
 	it('clamps to the cap past it, so the promise never exceeds what the buffer kept', async () => {
@@ -356,7 +356,7 @@ describe('SessionSummary.svelte — the guest sign-in prompt count', () => {
 		const prompt = page.getByTestId('summary-sign-in-prompt');
 		await expect
 			.element(prompt)
-			.toHaveTextContent(`Sign in to save the ${ATTEMPT_BUFFER_CAP} passages you just typed`);
+			.toHaveTextContent(`Sign in to save the ${ATTEMPT_BUFFER_CAP} pages you just typed`);
 		expect(prompt.element().textContent).not.toContain(String(ATTEMPT_BUFFER_CAP + 7));
 	});
 

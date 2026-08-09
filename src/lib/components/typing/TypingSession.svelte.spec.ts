@@ -43,7 +43,19 @@ vi.mock('$lib/progress/client', () => ({ recordChunkAttempt, backfillChunkAttemp
 // and a spy is the only way to assert a call that must not happen. The component imports
 // neither directly for the drain; `invalidateAll` is here because the module is mocked
 // wholesale and `+layout.svelte`'s triggers are what may use it.
-vi.mock('$app/navigation', () => ({ goto, invalidateAll }));
+//
+// `beforeNavigate` and `pushState` are stubbed too (spec #32 §10 D1): the module is mocked
+// wholesale, so any real export the component calls at init (`beforeNavigate`, registered
+// unconditionally) or on a page-navigator jump (`pushState`) must exist here or the whole
+// component throws on mount. Neither is asserted on by name in this file — that is Phase 7's
+// navigator coverage — this is only what keeps the pre-existing spec #12/#15/#18/#24
+// coverage in this file loading a real component.
+vi.mock('$app/navigation', () => ({
+	goto,
+	invalidateAll,
+	beforeNavigate: vi.fn(),
+	pushState: vi.fn()
+}));
 
 /** Reads the attempt buffer straight out of the real `localStorage` these tests run against. */
 function bufferEntries(): BufferedChunkAttempt[] {
@@ -175,7 +187,7 @@ async function typeText(text: string) {
 }
 
 function metaText(): string {
-	return page.getByTestId('passage-meta').element().textContent ?? '';
+	return page.getByTestId('page-meta').element().textContent ?? '';
 }
 
 /**
@@ -224,9 +236,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 7 of 11 · 55%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 7 of 11 · 55%');
 	});
 
 	it('advances the displayed figure when a not-previously-completed passage is completed, with no reload', async () => {
@@ -238,15 +248,11 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 4 · 25%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 4 · 25%');
 
 		await typeText('c d'); // completes chunk-1, which had no prior completion
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 3 of 4 · 50%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 3 of 4 · 50%');
 	});
 
 	it('does not advance the displayed figure when an already-completed passage is re-completed, and never exceeds 100%', async () => {
@@ -260,19 +266,13 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 1 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 3 · 100%');
 
 		await typeText('a b');
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 100%');
 
 		await typeText('c d');
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 3 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 3 of 3 · 100%');
 	});
 
 	it('clamps the figure at 100% when the persisted count exceeds the book chunk count', async () => {
@@ -286,15 +286,11 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 1 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 3 · 100%');
 
 		await typeText('a b');
 
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 3 · 100%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 100%');
 	});
 
 	it('degrades a guest to the session-relative figure and attempts no write at all', async () => {
@@ -306,14 +302,12 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: null
 		});
 
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 1 of 4 · 0%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 4 · 0%');
 
 		await typeText('a b');
 
 		// Session-relative: one passage behind the cursor out of four.
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 4 · 25%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 4 · 25%');
 
 		await settleSaves();
 		expect(recordChunkAttempt).not.toHaveBeenCalled();
@@ -339,7 +333,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		});
 
 		await typeText('a b');
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 2 of 2');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 2');
 
 		// The first insert has resolved as a failure by now — and still nothing is shown
 		// while typing: no notice, no summary, no interruption of the passage.
@@ -353,7 +347,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 
 		await expect
 			.element(page.getByTestId('summary-save-failures'))
-			.toHaveTextContent("2 passages couldn't be saved.");
+			.toHaveTextContent("2 pages couldn't be saved.");
 		// One attempt per completion — two completions, two calls, no retry.
 		await settleSaves();
 		expect(recordChunkAttempt).toHaveBeenCalledTimes(2);
@@ -398,21 +392,17 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		await typeText('a b');
 
 		// Optimistically advanced to 1/3 — and NOT rewound once the failure lands.
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 3 · 33%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 33%');
 		await expect.poll(() => recordChunkAttempt.mock.calls.length).toBe(1);
 		await settleSaves();
-		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 3 · 33%');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 33%');
 
 		await typeText('c d');
 		await typeText('e f');
 
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent("3 passages will be saved when you're back online.");
+			.toHaveTextContent("3 pages will be saved when you're back online.");
 		// Nothing is reported as lost: every failure here was transient and therefore buffered.
 		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
 		// No re-authentication flow: nothing navigated, and no sign-in prompt was raised
@@ -695,7 +685,7 @@ describe('TypingSession.svelte — a write path that cannot be loaded (spec #15 
 		// waiting on the network, not a passage thrown away.
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent("One passage will be saved when you're back online.");
+			.toHaveTextContent("One page will be saved when you're back online.");
 		expect(page.getByTestId('summary-save-failures').query()).toBeNull();
 	});
 });
@@ -791,7 +781,7 @@ describe('TypingSession.svelte — focus and announcement at the completion boun
 
 		await expect
 			.element(page.getByTestId('summary-save-pending'))
-			.toHaveTextContent("One passage will be saved when you're back online.");
+			.toHaveTextContent("One page will be saved when you're back online.");
 		// Inserted into the established region, and focus was not disturbed to say so.
 		expect(summary.element().querySelector('[role="status"]')).toBe(region);
 		expect(document.activeElement).toBe(summary.element());
@@ -808,13 +798,13 @@ describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', (
 			userId: 'user-1'
 		});
 
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('— wpm');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('— wpm');
 
 		await typeText('a '); // first word boundary of the session
 		await expect.poll(metaText).toMatch(/· \d+ wpm ·/);
 
 		await typeText('b'); // completes passage 1; metrics must NOT reset to '—'
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 2 of 3');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3');
 		expect(metaText()).toMatch(/· \d+ wpm ·/);
 
 		await typeText('c '); // first word boundary of the SECOND passage
@@ -859,7 +849,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		// A freshly landed window loaded and none typed: this is the refire check `window.ts`
 		// documents — the gap must stay ABOVE the threshold, or nothing here would ever be
 		// testable as "not before".
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 1 of 8');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 8');
 		expect(chunkRequests()).toEqual([]);
 
 		for (let i = 0; i < typedBeforeFire - 1; i += 1) {
@@ -894,12 +884,12 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		// The last loaded passage is still live and accepting keystrokes against a request
 		// that has not come back.
 		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent(`Passage ${loadedCount} of 8`);
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page ${loadedCount} of 8`);
 		await expect
 			.element(page.getByTestId('typing-surface'))
 			.toHaveTextContent(all[loadedCount - 1]);
-		expect(page.getByTestId('passage-awaiting').query()).toBeNull();
+		expect(page.getByTestId('page-awaiting').query()).toBeNull();
 	});
 
 	it('is single-flight: overlapping triggers join one request', async () => {
@@ -960,8 +950,8 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		const completed = typedBeforeFire + 2;
 		const percent = Math.round((100 * completed) / 8);
 		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent(`Passage ${typedBeforeFire + 1} of 8 · ${percent}%`);
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page ${typedBeforeFire + 1} of 8 · ${percent}%`);
 		expect(progressRequests()).toEqual([
 			`/api/books/test-book/progress?from=${loadedCount}&limit=${loadedCount}`
 		]);
@@ -1009,8 +999,8 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		}
 		// Past the window boundary, into chunks only the endpoint could have supplied.
 		await expect
-			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent(`Passage ${loadedCount + 1} of 8`);
+			.element(page.getByTestId('page-meta'))
+			.toHaveTextContent(`Page ${loadedCount + 1} of 8`);
 
 		expect(invalidateAll).not.toHaveBeenCalled();
 	});
@@ -1028,7 +1018,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 
 		await typeText('a b');
 		await typeText('c d');
-		expect(page.getByTestId('passage-awaiting').query()).toBeNull();
+		expect(page.getByTestId('page-awaiting').query()).toBeNull();
 		await typeText('e f');
 
 		await expect.element(page.getByTestId('session-summary')).toBeInTheDocument();
@@ -1045,7 +1035,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 	}
 
 	function awaitingPanel() {
-		return page.getByTestId('passage-awaiting');
+		return page.getByTestId('page-awaiting');
 	}
 
 	function statusRegion(): Element | null {
@@ -1077,8 +1067,8 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 		await typeText('a b'); // the only loaded passage — the session runs out of text
 
 		await expect.element(awaitingPanel()).toHaveAttribute('data-state', 'loading');
-		await expect.element(awaitingPanel()).toHaveTextContent('Loading the next passage');
-		expect(statusText()).toBe('Loading the next passage…');
+		await expect.element(awaitingPanel()).toHaveTextContent('Loading the next page');
+		expect(statusText()).toBe('Loading the next page…');
 		// Not the finished-book summary: the session has more book to go.
 		expect(page.getByTestId('session-summary').query()).toBeNull();
 		// Focus was neither moved nor trapped: the hidden input is still mounted and still has
@@ -1125,7 +1115,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 			.element(awaitingPanel())
 			.toHaveTextContent('as far as this book is loaded on this device');
 		await expect
-			.element(page.getByTestId('passage-awaiting-hint'))
+			.element(page.getByTestId('page-awaiting-hint'))
 			.toHaveTextContent('as soon as you');
 		// Announced through the region that was already there — the same node, not a new one.
 		expect(statusRegion()).toBe(region);
@@ -1159,7 +1149,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent('c d');
 		expect(awaitingPanel().query()).toBeNull();
 		expect(statusText()).toBe('');
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 2 of 8');
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 8');
 	});
 
 	it('retries on the next completion after a failure, and keeps every completed passage buffered', async () => {

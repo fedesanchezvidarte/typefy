@@ -26,9 +26,8 @@
 	"landing_headline": "Type through a",
 	"landing_headline_tail_book": "book",
 	"landing_headline_tail_page": "page",
-	"landing_headline_tail_passage": "passage",
 	"landing_headline_tail_word": "word",
-	"landing_hint": "Start typing above · Backspace to fix · Esc restarts the passage",
+	"landing_hint": "Start typing above · Backspace to fix · Esc restarts the page",
 	"landing_library_cta": "Browse the library →",
 	"library_heading": "Library",
 	"library_cover_alt": "Cover of {title}",
@@ -46,33 +45,38 @@
 	"library_empty_heading": "No books match “{query}”",
 	"library_empty_body": "Try a different title or author, or clear the search to see the whole shelf.",
 	"library_empty_reset": "Clear search",
-	"passage_count": "{count} passages",
-	"passage_meta": "Passage {current} of {total} · {pct}% · {wpm} wpm · {acc}% accuracy",
-	"passage_meta_zen": "Passage {current} of {total} · {pct}%",
-	"passage_restart": "Restart passage (Esc)",
-	"passage_loading": "Loading the next passage…",
-	"passage_window_end": "That's as far as this book is loaded on this device.",
-	"passage_window_end_hint": "The next passages will load by themselves as soon as you're back online. Nothing you've typed is lost.",
+	"page_count": "{count} pages",
+	"page_meta": "Page {current} of {total} · {pct}% · {wpm} wpm · {acc}% accuracy",
+	"page_meta_zen": "Page {current} of {total} · {pct}%",
+	"page_restart": "Restart page (Esc)",
+	"page_loading": "Loading the next page…",
+	"page_window_end": "That's as far as this book is loaded on this device.",
+	"page_window_end_hint": "The next pages will load by themselves as soon as you're back online. Nothing you've typed is lost.",
+	"page_nav_group_label": "Page navigation",
+	"page_nav_previous": "Previous page",
+	"page_nav_next": "Next page",
+	"page_nav_jump_label": "Go to page",
+	"page_nav_of": "of {total}",
 	"typing_pick_another": "Pick another",
 	"typing_input_label": "Typing input",
 	"typing_restart_session": "Restart session",
 	"zen_enter": "Zen mode",
 	"zen_exit": "Exit Zen",
 	"summary_kicker": "Session",
-	"summary_heading_passages": [
+	"summary_heading_pages": [
 		{
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "You read one passage.",
-				"countPlural=*": "You read {count} passages."
+				"countPlural=one": "You read one page.",
+				"countPlural=*": "You read {count} pages."
 			}
 		}
 	],
 	"summary_average_speed": "Average speed",
 	"summary_accuracy": "Accuracy",
 	"unit_wpm": "wpm",
-	"summary_passages": "Passages",
+	"summary_pages": "Pages",
 	"summary_time": "Time",
 	"summary_zen_note": "Zen mode: this session wasn't measured.",
 	"summary_type_again": "Type it again",
@@ -82,8 +86,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "One passage will be saved when you're back online.",
-				"countPlural=*": "{count} passages will be saved when you're back online."
+				"countPlural=one": "One page will be saved when you're back online.",
+				"countPlural=*": "{count} pages will be saved when you're back online."
 			}
 		}
 	],
@@ -92,8 +96,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "One passage couldn't be saved.",
-				"countPlural=*": "{count} passages couldn't be saved."
+				"countPlural=one": "One page couldn't be saved.",
+				"countPlural=*": "{count} pages couldn't be saved."
 			}
 		}
 	],
@@ -103,8 +107,8 @@
 			"declarations": ["input count", "local countPlural = count: plural"],
 			"selectors": ["countPlural"],
 			"match": {
-				"countPlural=one": "Sign in to save the passage you just typed",
-				"countPlural=*": "Sign in to save the {count} passages you just typed"
+				"countPlural=one": "Sign in to save the page you just typed",
+				"countPlural=*": "Sign in to save the {count} pages you just typed"
 			}
 		}
 	],
