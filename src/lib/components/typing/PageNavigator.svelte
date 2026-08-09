@@ -70,7 +70,7 @@
 	<button
 		type="button"
 		data-testid="page-nav-previous"
-		class="rounded-md border border-border px-2 py-1 transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted"
+		class="rounded-md border border-border px-2 py-1 transition-colors hover:border-accent hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted"
 		aria-label={m.page_nav_previous()}
 		disabled={atStart}
 		onclick={goPrevious}
@@ -93,7 +93,7 @@
 	<button
 		type="button"
 		data-testid="page-nav-next"
-		class="rounded-md border border-border px-2 py-1 transition-colors hover:border-accent hover:text-fg disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted"
+		class="rounded-md border border-border px-2 py-1 transition-colors hover:border-accent hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted"
 		aria-label={m.page_nav_next()}
 		disabled={atEnd}
 		onclick={goNext}

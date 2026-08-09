@@ -1,3 +1,5 @@
+import AxeBuilder from '@axe-core/playwright';
+import type { Page } from '@playwright/test';
 import { expect, guestTest as test } from './fixtures/auth';
 import {
 	isLocalStack,
@@ -10,6 +12,8 @@ import {
 import { arrangeProbeBook, retireProbeBook, type ProbeBook } from './support/probe-books';
 import { WINDOW_SIZE } from '../src/lib/reading/window';
 import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
+import { PALETTE_IDS } from '../src/lib/theme/palettes';
+import { PALETTE_COOKIE } from '../src/lib/theme/theme';
 
 /**
  * Spec #32's user-facing promises that are genuinely new browser behaviour, not already
@@ -341,6 +345,209 @@ test.describe('the page model (spec #32)', () => {
 				rollup!.best_accuracy_raw,
 				'a restored completion under the floor must set no best_accuracy_raw'
 			).toBeNull();
+		});
+	});
+
+	/**
+	 * Phase 8. Everything new in spec #32 that a static component test cannot see: the `↵`
+	 * glyph's real, composited contrast (its `opacity` reduces the token's already-audited
+	 * strength — `theme.spec.ts`'s WCAG AA suite only proves the TOKEN clears 4.5:1 at full
+	 * strength, not the glyph drawn at 0.4/0.7 of it), the navigator's keyboard reachability
+	 * and accessible names, and a keyboard-only walk that includes both the navigator and a
+	 * newline. Same "critical/serious only, no rule carve-outs" posture as `mode.e2e.ts` and
+	 * `windowed-reading.e2e.ts`.
+	 */
+	test.describe('accessibility (phase 8)', () => {
+		const A11Y_SLUG = 'page-model-a11y-probe';
+		/** `line one` is 8 chars, so index 8 is the `\n` — short enough it can never wrap. */
+		const A11Y_CONTENT = ['line one\nline two', 'second page'];
+
+		let a11yBook: ProbeBook;
+
+		test.beforeAll(async () => {
+			a11yBook = await arrangeProbeBook(service, {
+				slug: A11Y_SLUG,
+				title: 'Page model a11y probe',
+				author: 'probe',
+				language: 'en',
+				contents: A11Y_CONTENT
+			});
+		});
+
+		test.afterAll(async () => {
+			await retireProbeBook(service, A11Y_SLUG);
+		});
+
+		async function seriousViolations(page: Page) {
+			const results = await new AxeBuilder({ page }).analyze();
+			return results.violations
+				.filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')
+				.map((violation) => `${violation.impact}: ${violation.id} — ${violation.help}`);
+		}
+
+		function chars(page: Page) {
+			return page.locator('[data-testid="typing-surface"] .char');
+		}
+
+		/**
+		 * The glyph is revealed by CSS only when the position holds the caret (`opacity: 0.4`,
+		 * `--dim`) or is `incorrect` (`opacity: 0.7`, `--error`) — both states are exercised, in
+		 * every palette this app ships (ADR-0011's two-axis system: two light, two dark), not
+		 * just the default. `theme.spec.ts` already proves `--dim`/`--error` clear 4.5:1 at full
+		 * strength; a partial-opacity glyph composites toward the surface behind it and could in
+		 * principle fall under that bar even though its source token does not — this is the one
+		 * place that composited value is actually measured, by a real browser, rather than
+		 * assumed from the token audit.
+		 */
+		test('the newline glyph clears axe contrast checks held by the caret and marked incorrect, in every palette', async ({
+			page,
+			context,
+			baseURL
+		}) => {
+			test.setTimeout(120_000);
+			for (const paletteId of PALETTE_IDS) {
+				await context.addCookies([{ name: PALETTE_COOKIE, value: paletteId, url: baseURL! }]);
+				await page.goto(`/type/${a11yBook.slug}`);
+				// In-page restore (spec #32 §8, `page-state.ts`) persists a half-typed page in
+				// `localStorage` keyed by book+index, independent of palette. This test
+				// deliberately leaves the page `incorrect` at the end of every iteration, and
+				// reuses this same `page` (same origin, same storage) across all four palettes —
+				// without clearing it, iteration 2+ would restore iteration 1's already-incorrect
+				// state instead of a fresh pending caret. Each iteration starts from a clean slate.
+				await page.evaluate(() => localStorage.clear());
+				await page.reload();
+				await expect(page.getByTestId('typing-surface')).toBeVisible();
+				await expect(page.getByTestId('typing-input')).toBeFocused();
+				await expect(page.locator('html')).toHaveAttribute('data-palette', paletteId);
+
+				// Caret-held: cursor sits ON the `\n` position (index 8) with nothing typed there yet.
+				await page.keyboard.type('line one', { delay: 0 });
+				await expect(chars(page).nth(8)).toHaveClass(/caret/);
+				expect(
+					await seriousViolations(page),
+					`axe: newline glyph, caret-held, ${paletteId}`
+				).toEqual([]);
+
+				// Incorrect: a space at the newline position is refused (chunk.spec.ts's own case),
+				// same page reused rather than reloaded — one axe pass per state is enough here.
+				await page.keyboard.press('Space');
+				await expect(chars(page).nth(8)).toHaveAttribute('data-state', 'incorrect');
+				expect(
+					await seriousViolations(page),
+					`axe: newline glyph, incorrect, ${paletteId}`
+				).toEqual([]);
+			}
+		});
+
+		/**
+		 * Reachability, accessible names beyond the icon glyphs, and Enter/Space activation —
+		 * spec #32's explicit scope cut (no keyboard shortcuts beyond standard tab/enter) means
+		 * these three are the WHOLE affordance, so each has to actually work.
+		 */
+		test('the page navigator is keyboard-reachable, accessibly named, and Enter/Space-operable', async ({
+			page
+		}) => {
+			await page.goto(`/type/${book.slug}`);
+			await expect(page.getByTestId('typing-surface')).toBeVisible();
+			await expect(page.getByTestId('typing-input')).toBeFocused();
+
+			await expect(page.getByTestId('page-nav-previous')).toHaveAccessibleName('Previous page');
+			await expect(page.getByTestId('page-nav-next')).toHaveAccessibleName('Next page');
+			await expect(page.getByTestId('page-nav-jump')).toHaveAccessibleName('Go to page');
+			// Disabled at the start edge — never a focus stop, and never announced as actionable.
+			await expect(page.getByTestId('page-nav-previous')).toBeDisabled();
+
+			// Previous is disabled on page 1, so the first Tab from the input lands on the jump
+			// box, a native input skipping disabled controls exactly as it would skip any other.
+			await page.keyboard.press('Tab');
+			await expect(page.getByTestId('page-nav-jump')).toBeFocused();
+			await page.keyboard.press('Tab');
+			await expect(page.getByTestId('page-nav-next')).toBeFocused();
+
+			// Enter activates the focused button — no click, no pointer, ever. `navigateToIndex`
+			// (`TypingSession.svelte`) calls `surface?.focusInput()` at the end of EVERY
+			// navigation, click or keyboard, so its own comment reads "a navigator click must not
+			// strand a keyboard-only user" — focus never stays on the button that triggered it,
+			// it lands back on the typing input, which is the actual thing to prove here.
+			await page.keyboard.press('Enter');
+			await expect(page.getByTestId('page-meta')).toContainText(`Page 2 of ${book.chunkCount}`);
+			await expect(page.getByTestId('typing-input')).toBeFocused();
+
+			// Now that page 1 is behind it, previous is enabled and is the first stop from the
+			// input again — Tab reaches it directly, and Space activates it exactly as Enter did
+			// the next button.
+			await page.keyboard.press('Tab');
+			await expect(page.getByTestId('page-nav-previous')).toBeFocused();
+			await page.keyboard.press(' ');
+			await expect(page.getByTestId('page-meta')).toContainText(`Page 1 of ${book.chunkCount}`);
+			// Same "never stranded" guarantee on the way back.
+			await expect(page.getByTestId('typing-input')).toBeFocused();
+		});
+
+		/**
+		 * An out-of-range jump is silently ignored (`PageNavigator.svelte`'s own comment: "the
+		 * same posture `resolveStartIndex` already applies to `?page=`"). Silence is a deliberate
+		 * design decision, not an oversight — the field's own value reverting to the current page
+		 * IS the feedback, readable by a screen reader that re-enters or re-reads the field, the
+		 * same information a sighted user gets (no toast either). This test pins that the revert
+		 * actually happens (nothing about it can regress silently) and that it degrades to
+		 * nothing worse than "no navigation" — never a crash, never a stuck value, never a jump to
+		 * the wrong page.
+		 */
+		test('an out-of-range jump reverts the field rather than failing silently in place', async ({
+			page
+		}) => {
+			await page.goto(`/type/${book.slug}`);
+			await expect(page.getByTestId('typing-surface')).toBeVisible();
+
+			const jump = page.getByTestId('page-nav-jump');
+			await jump.fill(String(book.chunkCount + 50));
+			await jump.press('Enter');
+
+			// No navigation happened, and the field is readable again as "the current page" —
+			// not left holding the rejected value.
+			await expect(page.getByTestId('page-meta')).toContainText(`Page 1 of ${book.chunkCount}`);
+			await expect(jump).toHaveValue('1');
+			expect(await seriousViolations(page), 'axe: after a rejected jump').toEqual([]);
+		});
+
+		/**
+		 * Extends `windowed-reading.e2e.ts`'s "the whole flow is keyboard-only" pattern (that
+		 * file's own describe, same name) to the two things spec #32 actually added: the
+		 * navigator, and a page containing a newline. No pointer is used anywhere in this test.
+		 */
+		test('the whole page-model flow is keyboard-only, including the navigator and a newline', async ({
+			page
+		}) => {
+			await page.goto(`/type/${a11yBook.slug}`);
+			await expect(page.getByTestId('typing-surface')).toBeVisible();
+			await expect(page.getByTestId('typing-input')).toBeFocused();
+
+			// Type across the real Enter path (spec #32 §7's desktop branch), correct the whole
+			// way including a deliberate mistake-and-correction at the newline itself.
+			await page.keyboard.type('line one', { delay: 0 });
+			await page.keyboard.press('Space'); // wrong: marks the newline incorrect
+			await expect(chars(page).nth(8)).toHaveAttribute('data-state', 'incorrect');
+			await page.keyboard.press('Backspace');
+			await expect(chars(page).nth(8)).toHaveAttribute('data-state', 'pending');
+			await page.keyboard.press('Enter'); // right: the real newline keystroke
+			await expect(chars(page).nth(8)).toHaveAttribute('data-state', 'corrected');
+			await page.keyboard.type('line two', { delay: 0 });
+			await expect(page.getByTestId('page-meta')).toContainText(`Page 2 of ${a11yBook.chunkCount}`);
+			await expect(page.getByTestId('typing-input')).toBeFocused();
+
+			// Tab out to the navigator and back, purely by keyboard, and confirm focus never gets
+			// stuck anywhere along the way (the same "escapes to a real control" assertion
+			// `windowed-reading.e2e.ts`'s awaiting test makes for its own focus boundary).
+			// `navigateToIndex` (`TypingSession.svelte`) calls `surface?.focusInput()` at the end
+			// of every navigation — click or keyboard — so focus never lingers on the button that
+			// triggered it; it lands back on the typing input, which is the actual boundary this
+			// test is proving.
+			await page.keyboard.press('Tab'); // previous, now enabled (page 2 of 2), is the first stop
+			await expect(page.getByTestId('page-nav-previous')).toBeFocused();
+			await page.keyboard.press('Enter');
+			await expect(page.getByTestId('page-meta')).toContainText(`Page 1 of ${a11yBook.chunkCount}`);
+			await expect(page.getByTestId('typing-input')).toBeFocused();
 		});
 	});
 });
