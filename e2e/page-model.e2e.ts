@@ -407,15 +407,24 @@ test.describe('the page model (spec #32)', () => {
 			test.setTimeout(120_000);
 			for (const paletteId of PALETTE_IDS) {
 				await context.addCookies([{ name: PALETTE_COOKIE, value: paletteId, url: baseURL! }]);
-				await page.goto(`/type/${a11yBook.slug}`);
 				// In-page restore (spec #32 §8, `page-state.ts`) persists a half-typed page in
-				// `localStorage` keyed by book+index, independent of palette. This test
-				// deliberately leaves the page `incorrect` at the end of every iteration, and
-				// reuses this same `page` (same origin, same storage) across all four palettes —
-				// without clearing it, iteration 2+ would restore iteration 1's already-incorrect
-				// state instead of a fresh pending caret. Each iteration starts from a clean slate.
+				// `localStorage` keyed by book+index, independent of palette, and flushes
+				// IMMEDIATELY on `visibilitychange -> hidden` (`TypingSession.svelte`) — not just
+				// on the debounce. This test deliberately leaves the page `incorrect` at the end
+				// of every iteration, and reuses this same `page` across all four palettes, so a
+				// naive `goto` + `clear()` + `reload()` here is not enough: the `goto` restores
+				// the previous iteration's leftover state into a live session (moving the CURSOR
+				// to the newline position, not just pre-filling it as `correct`), and the
+				// `reload()` that follows the clear then re-flushes THAT still-live session's
+				// state back into the storage the clear just emptied — restoring it right back.
+				// Landing on a same-origin bystander page with no typing session mounted at all,
+				// between the previous iteration and this one, breaks the cycle: there is
+				// nothing live left to re-flush by the time storage is cleared, so the next load
+				// is genuinely fresh. `about:blank` cannot be used for the clear itself — it is a
+				// different (opaque) origin, and `localStorage` there throws a `SecurityError`.
+				await page.goto('/type');
 				await page.evaluate(() => localStorage.clear());
-				await page.reload();
+				await page.goto(`/type/${a11yBook.slug}`);
 				await expect(page.getByTestId('typing-surface')).toBeVisible();
 				await expect(page.getByTestId('typing-input')).toBeFocused();
 				await expect(page.locator('html')).toHaveAttribute('data-palette', paletteId);
