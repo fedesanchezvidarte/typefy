@@ -143,6 +143,36 @@ implicitly covers `measured_chars` too, and whoever trips it must read it that w
   rollup guard and the summary's predicate together. Spec #24 deliberately shipped no such mode, so
   that path is untested. The rule is "presentation goes elsewhere", not "this axis is closed".
 
+## Amendment (2026-08-09, Phase 5b implementation — spec #32)
+
+### A second reason a Normal-mode row can under-measure
+
+Before this phase, `mode = 'normal'` with `measured_chars < char_count` on a **completed** attempt
+could only mean one thing: the row was actually mixed and this ADR's whole-clean-traversal rule
+would have written `mode = 'zen'`, not `'normal'`, for it — so in practice a wholly-Normal
+completed row always had `measured_chars === char_count`. `measured_chars` under-counting `mode =
+'normal'` was, until now, a Zen tell.
+
+**In-page restore breaks that.** A page left half-typed persists locally (the **attempt buffer**'s
+machinery, never the server) and, on return, its typed prefix restores as already-correct but
+**unmeasured** — it reuses the measured-span machinery this ADR defines, but the span it excludes
+has nothing to do with Zen. Only the portion typed in the **current sitting** sets `measured_chars`
+and `measured_ms`; the restored prefix counts toward `char_count` and completion but not toward
+either measured column. So a traversal typed **entirely in Normal mode**, with no Zen stretch at
+all, can now legitimately show `measured_chars < char_count` on a completed row — the restored
+prefix is a second, independent reason for the same shape this ADR previously attributed to Zen
+alone.
+
+**Consequence for a future reader of `measured_chars`:** `mode = 'normal'` no longer implies "this
+row measured its whole traversal." The two reasons are distinguishable in principle (Zen writes
+`mode = 'zen'`; a restored-prefix under-measurement keeps `mode = 'normal'`) but both now need
+`measured_chars` read against `char_count` rather than inferred from `mode` alone.
+
+**The 100-character best floor (above) is what protects a personal best here too**, unchanged and
+without needing a restore-specific carve-out: a page reopened with only a few characters left to
+type in the current sitting produces a short measured span, and the same floor that stops a Zen-
+adjacent sprint from banking a best stops a trivial post-restore tail from doing the same.
+
 ## Alternatives considered
 
 - **Keep Zen a presentation toggle and gate only the display.** Cheapest, and what existed. Rejected
