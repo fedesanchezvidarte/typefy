@@ -117,6 +117,31 @@ export interface SessionState {
 	 * `unmeasuredMs === 0`, which an instantaneous toggle would defeat.
 	 */
 	readonly everUnmeasured: boolean;
+	/**
+	 * The A' engine seek (spec #32 §10 D1). Start of the OPEN post-seek gap — the stretch
+	 * between a deliberate jump and the next real keystroke, which must be excluded from
+	 * cumulative WPM for the same reason `awaitingSince`/`unmeasuredSince` are: it is real
+	 * elapsed time that is not typing. Null whenever no such gap is open.
+	 *
+	 * Disjoint with `awaitingSince` and `unmeasuredSince` BY CONSTRUCTION, exactly as those two
+	 * are disjoint with each other: at most one of the three ever owns the clock. A seek into
+	 * an already-loaded chunk opens this immediately; a seek into an unloaded one defers
+	 * opening it until the window actually lands (`seekPending`), so the network wait is
+	 * discounted once, by `awaitingMs`, not twice.
+	 */
+	readonly seekSince: number | null;
+	/** Closed post-seek gaps, SESSION scope. Discounted from every cumulative metric. */
+	readonly seekMs: number;
+	/**
+	 * True while the session is `awaiting` BECAUSE of a seek rather than because it ran out of
+	 * loaded chunks by typing forward. Read by `applyWindowLoaded` for two decisions at once:
+	 * REPLACE the loaded window instead of merging it (a seek's arriving window is not an
+	 * extension of what came before — the reader may have jumped hundreds of chunks away, and
+	 * accumulating every window ever visited would grow without bound over a long session), and
+	 * open `seekSince` only now rather than at the seek instant, so the wait itself is not
+	 * double-discounted.
+	 */
+	readonly seekPending: boolean;
 }
 
 export type SessionEvent =
@@ -124,7 +149,13 @@ export type SessionEvent =
 	| { type: 'restart-chunk' }
 	| { type: 'restart-session' }
 	| { type: 'set-mode'; mode: Mode; timestamp: number }
-	| { type: 'window-loaded'; chunks: readonly Chunk[]; chunkCount: number; timestamp: number };
+	| { type: 'window-loaded'; chunks: readonly Chunk[]; chunkCount: number; timestamp: number }
+	/**
+	 * A page navigator jump (spec #32 §10 D1) — "next", "previous" or the page-N jump box, all
+	 * one event. `index` is the ABSOLUTE index to move to; a same-index seek is a documented
+	 * no-op (identity), matching `set-mode` re-asserting the current mode.
+	 */
+	| { type: 'seek'; index: number; timestamp: number };
 
 /**
  * Builds the engine's view of a typeable text from a window of chunks. `chunkCount` is
@@ -181,7 +212,10 @@ export function createSession(
 		unmeasuredMs: 0,
 		chunkUnmeasuredMs: 0,
 		chunkFullyMeasured: mode === 'normal',
-		everUnmeasured: mode === 'zen'
+		everUnmeasured: mode === 'zen',
+		seekSince: null,
+		seekMs: 0,
+		seekPending: false
 	};
 }
 
@@ -219,10 +253,11 @@ function openSpan(since: number | null, endTime: number | undefined): number {
 export function runningMetrics(state: SessionState, endTime?: number): MetricsSnapshot {
 	const openWait = openSpan(state.awaitingSince, endTime);
 	const openZen = openSpan(state.unmeasuredSince, endTime);
+	const openSeek = openSpan(state.seekSince, endTime);
 	return computeMetrics(
 		runningLog(state),
 		endTime,
-		state.awaitingMs + openWait + state.unmeasuredMs + openZen
+		state.awaitingMs + openWait + state.unmeasuredMs + openZen + state.seekMs + openSeek
 	);
 }
 
@@ -240,15 +275,29 @@ function mergeChunks(
 }
 
 /**
- * A window arrived. Always merges and always adopts the response's authoritative
- * `chunkCount` — that is how a client holding a stale bound reconciles after a re-ingest
- * grew or shrank the book mid-session.
+ * REPLACES the loaded map with an arriving window rather than merging onto it — the other
+ * half of the seek's "replace, not merge" rule (spec #32 §10 D1). A seek's arriving window is
+ * not an extension of what came before: the reader may have jumped hundreds of pages away, and
+ * `LoadedChunks`'s documented "chunks accumulate for the life of a session" would otherwise
+ * grow without bound over a session that seeks around a long book.
+ */
+function replaceChunks(chunks: readonly Chunk[], chunkCount: number): LoadedChunks {
+	return { chunkCount, chunks: new Map(chunks.map((chunk) => [chunk.index, chunk])) };
+}
+
+/**
+ * A window arrived. Merges and adopts the response's authoritative `chunkCount` for the
+ * ordinary case — that is how a client holding a stale bound reconciles after a re-ingest
+ * grew or shrank the book mid-session. `seekPending` switches this to REPLACE instead: see
+ * `replaceChunks`.
  */
 function applyWindowLoaded(
 	state: SessionState,
 	event: Extract<SessionEvent, { type: 'window-loaded' }>
 ): SessionState {
-	const text = mergeChunks(state.text, event.chunks, event.chunkCount);
+	const text = state.seekPending
+		? replaceChunks(event.chunks, event.chunkCount)
+		: mergeChunks(state.text, event.chunks, event.chunkCount);
 	if (state.status !== 'awaiting') {
 		// The normal, prefetched case: merge and return. Zero cost — this is the whole
 		// point of prefetching before the boundary is reached.
@@ -267,11 +316,16 @@ function applyWindowLoaded(
 			status: 'active',
 			awaitingSince: null,
 			awaitingMs: state.awaitingMs + closedWait,
-			// The wait is over, so `awaitingSince` releases the clock and the Zen span REOPENS
-			// if the user is still in Zen. This is the second half of the disjointness rule:
-			// the span was closed on entering `awaiting` precisely so the wait would not be
-			// discounted twice, and it must resume the moment typing becomes possible again.
-			unmeasuredSince: state.mode === 'zen' ? event.timestamp : state.unmeasuredSince
+			// The wait is over, so `awaitingSince` releases the clock. Exactly one of the Zen
+			// span and the seek span reopens — never both, preserving the three-way disjointness
+			// the seek span extends into this rule. A seek-triggered wait resuming into Zen
+			// still opens the SEEK span first (seekPending wins): the reader has not started
+			// typing yet, so nothing has re-entered Zen's "currently active traversal" sense
+			// until the seek span itself closes on the next keystroke.
+			unmeasuredSince:
+				!state.seekPending && state.mode === 'zen' ? event.timestamp : state.unmeasuredSince,
+			seekSince: state.seekPending ? event.timestamp : state.seekSince,
+			seekPending: false
 		};
 	}
 
@@ -283,13 +337,81 @@ function applyWindowLoaded(
 			text,
 			status: 'finished',
 			awaitingSince: null,
-			awaitingMs: state.awaitingMs + closedWait
+			awaitingMs: state.awaitingMs + closedWait,
+			seekPending: false
 		};
 	}
 
 	// The window arrived but did not contain the awaited index: the wait is still open, so
 	// `awaitingSince` is left alone rather than restarted.
 	return { ...state, text };
+}
+
+/**
+ * The A' engine seek (spec #32 §10 D1): a page navigator jump. Two things happen at once,
+ * both load-bearing:
+ *
+ * 1. **The measured span closes**, right here, at the seek instant — not when typing resumes.
+ *    Folding the reading/navigating time between two disconnected stretches of typing into one
+ *    WPM figure would be dishonest, the same reasoning `awaitingMs`/`unmeasuredMs` already rest
+ *    on for their own kinds of dead time. If the destination is already loaded, the gap opens
+ *    immediately (`seekSince`); if not, opening is deferred to the window's arrival so the
+ *    network wait is charged once, to `awaitingMs`, not twice (see `applyWindowLoaded`).
+ * 2. **The session stays alive.** `results` and `completedLog` are untouched — a seek is not a
+ *    restart. The abandoned page's honestly-typed keystrokes move into `completedLog` exactly
+ *    as a normal advance moves them, but it earns no `ChunkResult`: it was left incomplete, not
+ *    finished, and nothing may fabricate a result for characters that were never resolved.
+ *
+ * A same-index seek is the identity, matching `set-mode` re-asserting the current mode: it must
+ * not fabricate a span boundary for a "jump" that goes nowhere.
+ */
+function applySeek(
+	state: SessionState,
+	event: Extract<SessionEvent, { type: 'seek' }>
+): SessionState {
+	if (event.index === state.activeIndex) {
+		return state;
+	}
+
+	const now = event.timestamp;
+
+	// Close whatever was open for the OLD index. At most one of the three can be open, by the
+	// same disjointness this function's own opening decisions below preserve.
+	const closedWait =
+		state.status === 'awaiting' && state.awaitingSince !== null
+			? Math.max(now - state.awaitingSince, 0)
+			: 0;
+	const closedZen =
+		state.status === 'active' && state.unmeasuredSince !== null
+			? Math.max(now - state.unmeasuredSince, 0)
+			: 0;
+
+	const completedLog = state.activeChunk
+		? [...state.completedLog, ...state.activeChunk.log]
+		: state.completedLog;
+
+	const chunk = state.text.chunks.get(event.index);
+
+	return {
+		...state,
+		activeIndex: event.index,
+		activeChunk: chunk ? createChunk(chunk.content) : null,
+		status: chunk ? 'active' : 'awaiting',
+		completedLog,
+		// A fresh traversal begins, clean iff the user is in Normal — the same rule
+		// restart-chunk and every ordinary advance already apply.
+		chunkUnmeasuredMs: 0,
+		chunkFullyMeasured: state.mode === 'normal',
+		awaitingSince: chunk ? null : now,
+		awaitingMs: state.awaitingMs + closedWait,
+		unmeasuredMs: state.unmeasuredMs + closedZen,
+		// Zen never reopens here even if the destination is already active and the mode is
+		// still Zen: the seek span takes the clock first (mirroring "awaitingSince already owns
+		// the clock" below), and reopens Zen itself once IT closes, on the next keystroke.
+		unmeasuredSince: null,
+		seekSince: chunk ? now : null,
+		seekPending: chunk === undefined
+	};
 }
 
 /**
@@ -339,6 +461,9 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 	if (event.type === 'set-mode') {
 		return applySetMode(state, event);
 	}
+	if (event.type === 'seek') {
+		return applySeek(state, event);
+	}
 	if (event.type === 'restart-session') {
 		// Back to the OPENING index, not to 0: with windows, index 0 is usually not loaded
 		// on a resumed session, so restarting a session opened at passage 900 there would
@@ -385,14 +510,25 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 	// instant for it — the `awaitingSince` precedent, applied to the Zen marker too.
 	const now = 'timestamp' in event ? event.timestamp : null;
 
+	// The post-seek gap closes on the FIRST real keystroke after a seek, whether or not that
+	// stroke completes the chunk — this is the "reopens at the next real keystroke" half of the
+	// seek's measured-span rule. Guaranteed open only while `unmeasuredSince` is null (the
+	// three-way disjointness `applySeek` establishes), so the ordinary Zen-opening rule right
+	// below needs no special case: it already reopens Zen here if the mode is still `zen`,
+	// because `state.unmeasuredSince` is null exactly when a seek span was the one open.
+	const seekWasOpen = state.seekSince !== null && now !== null;
+	const seekSince = seekWasOpen ? null : state.seekSince;
+	const seekMs = state.seekMs + (seekWasOpen ? Math.max(now! - state.seekSince!, 0) : 0);
+
 	// A Zen span that could not be stamped when the mode was set — no clock was available in
 	// `createSession`, or the session was `awaiting` — opens at the first stroke that carries
 	// one. Without this, a session OPENED in Zen would accrue no discount at all and a wholly
-	// Zen traversal would report `measuredMs === elapsedMs` instead of 0.
+	// Zen traversal would report `measuredMs === elapsedMs` instead of 0. The same line reopens
+	// a Zen span the seek gap was holding the clock in front of, for the reason above.
 	const unmeasuredSince = state.unmeasuredSince === null && !measured ? now : state.unmeasuredSince;
 
 	if (!activeChunk.completed) {
-		return { ...state, activeChunk, unmeasuredSince };
+		return { ...state, activeChunk, unmeasuredSince, seekSince, seekMs };
 	}
 
 	// Completion instant: freeze this chunk's result and auto-advance.
@@ -424,7 +560,12 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 		unmeasuredSince: unmeasuredSince === null ? null : now,
 		// A new traversal begins: clean again iff the user is in Normal.
 		chunkUnmeasuredMs: 0,
-		chunkFullyMeasured: state.mode === 'normal'
+		chunkFullyMeasured: state.mode === 'normal',
+		// The seek gap, if this completing keystroke was also the one that closed it — computed
+		// above, alongside `unmeasuredSince`, and simply carried through the boundary reset
+		// since it is session-scope already and nothing about completion touches it further.
+		seekSince,
+		seekMs
 	};
 
 	const nextIndex = state.activeIndex + 1;

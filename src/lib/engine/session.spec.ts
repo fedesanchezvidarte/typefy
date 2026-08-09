@@ -778,6 +778,209 @@ const CLEAN_FOUR: readonly SessionEvent[] = [
 	{ type: 'char', char: 'd', timestamp: 3000 }
 ];
 
+/*
+ * The A' engine seek (spec #32 §10 D1, option A). A page navigator jumps the reader anywhere
+ * in the book — page 12 to page 400 is a real case, not an edge case — and two things must be
+ * true when it does: the window that arrives REPLACES what was loaded rather than accumulating
+ * onto it forever (a book of thousands of pages cannot hold every window a reader ever visited),
+ * and the jump CLOSES the current measured span rather than folding the dead navigation time
+ * into the next stretch of typing's WPM. The session itself survives — `results` and
+ * `completedLog` are untouched, exactly the "keeps the session alive" ruling.
+ */
+describe('applySessionEvent — seek (spec #32)', () => {
+	it('is a no-op when seeking to the index the session is already at', () => {
+		const state = run(createSession(makeText({ 0: 'abcd' }, 5)), [
+			{ type: 'char', char: 'a', timestamp: 0 }
+		]);
+		const seeked = applySessionEvent(state, { type: 'seek', index: 0, timestamp: 9000 });
+		expect(seeked).toBe(state);
+	});
+
+	describe('seeking to an already-loaded chunk', () => {
+		function seek(): SessionState {
+			const state = run(createSession(makeText({ 0: 'abcd', 3: 'wxyz' }, 5)), [
+				{ type: 'char', char: 'a', timestamp: 0 },
+				{ type: 'char', char: 'b', timestamp: 1000 }
+			]);
+			return applySessionEvent(state, { type: 'seek', index: 3, timestamp: 5000 });
+		}
+
+		it('moves to the target index with a fresh, untyped chunk', () => {
+			const state = seek();
+			expect(state.activeIndex).toBe(3);
+			expect(state.status).toBe('active');
+			expect(state.activeChunk).toEqual(createChunk('wxyz'));
+		});
+
+		it('keeps the honestly-typed keystrokes of the abandoned page in the running log', () => {
+			const state = seek();
+			expect(state.completedLog).toEqual([
+				{
+					kind: 'char',
+					char: 'a',
+					expected: 'a',
+					position: 0,
+					judgment: 'hit',
+					firstAttempt: true,
+					timestamp: 0,
+					measured: true
+				},
+				{
+					kind: 'char',
+					char: 'b',
+					expected: 'b',
+					position: 1,
+					judgment: 'hit',
+					firstAttempt: true,
+					timestamp: 1000,
+					measured: true
+				}
+			]);
+		});
+
+		it('records NO result for the abandoned page — it was left incomplete, not finished', () => {
+			expect(seek().results.has(0)).toBe(false);
+		});
+
+		it('keeps every already-completed result — the session stays alive, not restarted', () => {
+			const state = run(createSession(makeText({ 0: 'ab', 1: 'cd', 4: 'zz' }, 5)), [
+				{ type: 'char', char: 'a', timestamp: 0 },
+				{ type: 'char', char: 'b', timestamp: 1000 } // completes chunk 0, advances to 1
+			]);
+			expect(state.results.has(0)).toBe(true);
+			const seeked = applySessionEvent(state, { type: 'seek', index: 4, timestamp: 5000 });
+			expect(seeked.results.get(0)).toEqual(state.results.get(0));
+			expect(seeked.activeIndex).toBe(4);
+		});
+	});
+
+	describe('seeking to a chunk that has not been loaded yet', () => {
+		function seek(): SessionState {
+			const state = run(createSession(makeText({ 0: 'abcd' }, 500)), [
+				{ type: 'char', char: 'a', timestamp: 0 }
+			]);
+			return applySessionEvent(state, { type: 'seek', index: 400, timestamp: 5000 });
+		}
+
+		it('enters awaiting rather than throwing or ignoring the jump', () => {
+			const state = seek();
+			expect(state.status).toBe('awaiting');
+			expect(state.activeIndex).toBe(400);
+			expect(state.activeChunk).toBeNull();
+			expect(state.awaitingSince).toBe(5000);
+		});
+
+		it('REPLACES the loaded window on arrival — chunk 0 is gone, not retained', () => {
+			const state = applySessionEvent(seek(), {
+				type: 'window-loaded',
+				chunks: [chunkAt(400, 'far away')],
+				chunkCount: 500,
+				timestamp: 5200
+			});
+			expect(state.status).toBe('active');
+			expect(state.text.chunks.has(0)).toBe(false);
+			expect(state.text.chunks.get(400)?.content).toBe('far away');
+			expect(state.text.chunks.size).toBe(1);
+		});
+
+		/*
+		 * Regression guard: an ORDINARY awaiting — running out of loaded chunks by typing
+		 * forward, never a seek — must keep MERGING exactly as before. Replacing is a seek-only
+		 * behaviour, or windowed reading would forget everything already typed through.
+		 */
+		it('still MERGES for an ordinary (non-seek) awaiting — ruling out an accidental global replace', () => {
+			const windowOne = makeText({ 0: 'abcd' }, 2);
+			const awaiting = run(createSession(windowOne), CHUNK_ONE_EVENTS);
+			expect(awaiting.status).toBe('awaiting');
+			const state = applySessionEvent(awaiting, {
+				type: 'window-loaded',
+				chunks: [chunkAt(1, 'ef')],
+				chunkCount: 2,
+				timestamp: 96_000
+			});
+			expect(state.text.chunks.get(0)?.content).toBe('abcd');
+			expect(state.text.chunks.get(1)?.content).toBe('ef');
+		});
+	});
+
+	describe('the measured span closes at the seek and reopens at the next real keystroke', () => {
+		it('excludes the gap between a seek and the next keystroke from cumulative elapsed time', () => {
+			// A single chunk, still open (never completed), so the only dead time in this span
+			// is the seek gap itself — nothing from an intervening `awaiting` to account for.
+			const state = run(createSession(makeText({ 0: 'ab', 7: 'cd' }, 10)), [
+				{ type: 'char', char: 'a', timestamp: 0 }
+			]);
+			const seeked = applySessionEvent(state, { type: 'seek', index: 7, timestamp: 5000 });
+			expect(seeked.status).toBe('active');
+
+			const typed = applySessionEvent(seeked, { type: 'char', char: 'c', timestamp: 20_000 });
+			expect(typed.seekSince).toBeNull();
+			expect(typed.seekMs).toBe(20_000 - 5000);
+			// Span 0 -> 20_000 (20_000ms) minus the seek gap (15_000ms) leaves the 5_000ms the
+			// user was actually idle-but-active on chunk 0 before seeking — NOT discounted,
+			// matching the existing precedent that idle time on an active page is real elapsed
+			// session time (CHUNK_TWO_EVENTS's "starts after a long idle gap" case, unchanged).
+			expect(runningMetrics(typed, 20_000).elapsedMs).toBe(5000);
+		});
+
+		it('opens seekSince at the seek instant, before any keystroke resumes it', () => {
+			const state = run(createSession(makeText({ 0: 'ab', 1: 'cd' }, 2)), [
+				{ type: 'char', char: 'a', timestamp: 0 }
+			]);
+			const seeked = applySessionEvent(state, { type: 'seek', index: 1, timestamp: 5000 });
+			expect(seeked.seekSince).toBe(5000);
+			expect(seeked.seekMs).toBe(0);
+		});
+
+		it('opens seekSince only once the awaited window actually lands, not at the seek instant', () => {
+			// The network wait is already discounted by awaitingMs; double-opening seekSince at
+			// the seek instant would discount the SAME milliseconds twice.
+			const state = run(createSession(makeText({ 0: 'abcd' }, 500)), [
+				{ type: 'char', char: 'a', timestamp: 0 }
+			]);
+			const seeked = applySessionEvent(state, { type: 'seek', index: 400, timestamp: 5000 });
+			expect(seeked.seekSince).toBeNull();
+
+			const landed = applySessionEvent(seeked, {
+				type: 'window-loaded',
+				chunks: [chunkAt(400, 'far away')],
+				chunkCount: 500,
+				timestamp: 9000
+			});
+			expect(landed.awaitingMs).toBe(4000);
+			expect(landed.seekSince).toBe(9000);
+			expect(landed.seekMs).toBe(0);
+
+			const typed = applySessionEvent(landed, { type: 'char', char: 'f', timestamp: 11_000 });
+			expect(typed.seekMs).toBe(2000); // 11_000 - 9000, not double-counting the network wait
+			expect(typed.awaitingMs).toBe(4000);
+		});
+
+		it('never double-discounts: the network wait and the seek gap are two DISTINCT stretches', () => {
+			const state = run(createSession(makeText({ 0: 'abcd' }, 500)), [
+				{ type: 'char', char: 'a', timestamp: 0 }
+			]);
+			// 0 -> 5000: idle but active on chunk 0 (not discounted, see the test above).
+			const seeked = applySessionEvent(state, { type: 'seek', index: 400, timestamp: 5000 });
+			// 5000 -> 9000: the network wait for the seek's window (awaitingMs, discounted once).
+			const landed = applySessionEvent(seeked, {
+				type: 'window-loaded',
+				chunks: [chunkAt(400, 'far away')],
+				chunkCount: 500,
+				timestamp: 9000
+			});
+			// 9000 -> 11_000: the post-arrival, pre-keystroke gap (seekMs, discounted once).
+			const typed = applySessionEvent(landed, { type: 'char', char: 'f', timestamp: 11_000 });
+
+			expect(typed.awaitingMs).toBe(4000);
+			expect(typed.seekMs).toBe(2000);
+			// A double discount would subtract some millisecond of the 5000 -> 9000 wait twice,
+			// driving elapsedMs below the honest remainder (the 5000ms idle-but-active stretch).
+			expect(runningMetrics(typed, 11_000).elapsedMs).toBe(5000);
+		});
+	});
+});
+
 describe('set-mode — the reducer rule', () => {
 	it('returns the IDENTICAL state when the mode is unchanged', () => {
 		// Idempotent: a UI that re-asserts its cookie value must never fabricate a

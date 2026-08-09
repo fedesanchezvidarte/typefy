@@ -4,6 +4,7 @@ import { render } from 'vitest-browser-svelte';
 import { tick } from 'svelte';
 import type { Chunk, ChunkWindow, TypeableTextSummary } from '$lib/types';
 import { ATTEMPT_BUFFER_KEY, type BufferedChunkAttempt } from '$lib/progress/buffer';
+import { PREFETCH_THRESHOLD, WINDOW_SIZE } from '$lib/reading/window';
 import TypingSession from './TypingSession.svelte';
 
 /**
@@ -829,33 +830,47 @@ describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', (
  * Supabase client call, which is itself part of what these tests hold in place (§9).
  */
 describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
-	/** Eight passages, of which the session is handed the first four. */
+	/** Eight passages, of which the session is handed the first WINDOW_SIZE (spec #32 retune). */
 	const all = passages(8);
+	const loadedCount = WINDOW_SIZE;
+	/** How many passages must complete before PREFETCH_THRESHOLD remain loaded. */
+	const typedBeforeFire = loadedCount - PREFETCH_THRESHOLD;
 
-	/** The chunks endpoint's answer for the second window: passages 4..7. */
+	/** The chunks endpoint's answer for the second window: passages loadedCount..7. */
 	function secondWindow(): Response {
-		return jsonResponse({ from: 4, chunks: makeChunks(all.slice(4), 4), chunkCount: 8 });
+		return jsonResponse({
+			from: loadedCount,
+			chunks: makeChunks(all.slice(loadedCount), loadedCount),
+			chunkCount: 8
+		});
 	}
 
-	it('fires at three passages remaining, and not before', async () => {
+	it('fires when PREFETCH_THRESHOLD passages remain loaded, and not before', async () => {
 		fetchMock.mockImplementation(async () => secondWindow());
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		// Four passages loaded and none typed: one more than the threshold, so nothing is asked
-		// for. This is the half of the criterion that a bare "it eventually fetches" would miss.
+		// A freshly landed window loaded and none typed: this is the refire check `window.ts`
+		// documents — the gap must stay ABOVE the threshold, or nothing here would ever be
+		// testable as "not before".
 		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 1 of 8');
 		expect(chunkRequests()).toEqual([]);
 
-		await typeText('a b'); // passage 1 done → 1, 2, 3 remain loaded → the threshold
+		for (let i = 0; i < typedBeforeFire - 1; i += 1) {
+			await typeText(all[i]);
+			expect(chunkRequests()).toEqual([]); // still short of the threshold
+		}
+		await typeText(all[typedBeforeFire - 1]); // crosses the threshold
 
-		await expect.poll(chunkRequests).toEqual(['/api/books/test-book/chunks?from=4&limit=10']);
+		await expect
+			.poll(chunkRequests)
+			.toEqual([`/api/books/test-book/chunks?from=${loadedCount}&limit=${WINDOW_SIZE}`]);
 	});
 
 	it('does not block input while the window is in flight', async () => {
@@ -864,23 +879,26 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		await typeText('a b'); // opens the prefetch
+		for (let i = 0; i < typedBeforeFire; i += 1) {
+			await typeText(all[i]); // the last of these crosses the threshold
+		}
 		await expect.poll(() => chunkRequests().length).toBe(1);
 
-		await typeText('c d');
-		await typeText('e f');
-
-		// Three passages typed against a request that has not come back, and the fourth is
-		// live and accepting keystrokes.
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 4 of 8');
-		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent('g h');
+		// The last loaded passage is still live and accepting keystrokes against a request
+		// that has not come back.
+		await expect
+			.element(page.getByTestId('passage-meta'))
+			.toHaveTextContent(`Passage ${loadedCount} of 8`);
+		await expect
+			.element(page.getByTestId('typing-surface'))
+			.toHaveTextContent(all[loadedCount - 1]);
 		expect(page.getByTestId('passage-awaiting').query()).toBeNull();
 	});
 
@@ -888,17 +906,19 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		await typeText('a b'); // trigger 1: the threshold effect
+		for (let i = 0; i < typedBeforeFire; i += 1) {
+			await typeText(all[i]); // trigger 1: the last of these crosses the threshold
+		}
 		await expect.poll(() => chunkRequests().length).toBe(1);
 
-		await typeText('c d'); // trigger 2: a completion, with the threshold still true
+		await typeText(all[typedBeforeFire]); // trigger 2: completes the last loaded chunk → awaiting
 		window.dispatchEvent(new Event('online')); // trigger 3: connectivity
 		window.dispatchEvent(new Event('online')); // and again, for good measure
 		await tick();
@@ -913,29 +933,38 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 			if (String(input).includes('/chunks?')) {
 				return secondWindow();
 			}
-			// The server does not know about `chunk-0` yet — it was completed a moment ago and
-			// its insert is still in flight. Replacing the set with this answer would drop it.
-			return jsonResponse({ from: 4, limit: 4, completedChunkIds: ['chunk-5', 'chunk-6'] });
+			// The server does not yet know about the passages just completed — their inserts
+			// are still in flight. Replacing the set with this answer would drop them.
+			return jsonResponse({
+				from: loadedCount,
+				limit: loadedCount,
+				completedChunkIds: ['chunk-5', 'chunk-6']
+			});
 		});
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: 'user-1'
 		});
 
-		await typeText('a b');
+		for (let i = 0; i < typedBeforeFire; i += 1) {
+			await typeText(all[i]);
+		}
 
-		// Three of eight: the two arriving ids ADDED to the one this session advanced
-		// optimistically at the completion instant. A replacement would read 25% — one passage
-		// silently dropped — which is the reading this test exists to fail on.
+		// typedBeforeFire completed this session + the two arriving ids, of eight total. A
+		// replacement would read the two arriving ids alone — fewer completed than this
+		// session alone has already done — which is the reading this test exists to fail on.
+		const completed = typedBeforeFire + 2;
+		const percent = Math.round((100 * completed) / 8);
 		await expect
 			.element(page.getByTestId('passage-meta'))
-			.toHaveTextContent('Passage 2 of 8 · 38%');
-		expect(page.getByTestId('passage-meta').element().textContent).not.toContain('· 25%');
-		expect(progressRequests()).toEqual(['/api/books/test-book/progress?from=4&limit=4']);
+			.toHaveTextContent(`Passage ${typedBeforeFire + 1} of 8 · ${percent}%`);
+		expect(progressRequests()).toEqual([
+			`/api/books/test-book/progress?from=${loadedCount}&limit=${loadedCount}`
+		]);
 		await settleSaves();
 	});
 
@@ -943,14 +972,16 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		fetchMock.mockImplementation(async () => secondWindow());
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		await typeText('a b');
+		for (let i = 0; i < typedBeforeFire; i += 1) {
+			await typeText(all[i]);
+		}
 		await expect.poll(() => chunkRequests().length).toBe(1);
 		await tick();
 
@@ -966,19 +997,20 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		fetchMock.mockImplementation(async () => secondWindow());
 
 		render(TypingSession, {
-			...windowed(all.slice(0, 4), 8),
+			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
 			completedChunkIds: [],
 			userId: null
 		});
 
-		await typeText('a b');
-		await typeText('c d');
-		await typeText('e f');
-		await typeText('g h');
+		for (let i = 0; i < loadedCount; i += 1) {
+			await typeText(all[i]);
+		}
 		// Past the window boundary, into chunks only the endpoint could have supplied.
-		await expect.element(page.getByTestId('passage-meta')).toHaveTextContent('Passage 5 of 8');
+		await expect
+			.element(page.getByTestId('passage-meta'))
+			.toHaveTextContent(`Passage ${loadedCount + 1} of 8`);
 
 		expect(invalidateAll).not.toHaveBeenCalled();
 	});
