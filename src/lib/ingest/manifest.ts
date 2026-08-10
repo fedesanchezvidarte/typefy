@@ -16,6 +16,29 @@ import type { Language } from '$lib/types';
  * Pure by construction (`lib-patterns` tier 1).
  */
 
+/**
+ * Chapter derivation config for one book (spec #33 §4). Either `chaptersHtmlUrl` is set
+ * (headings are extracted from the HTML edition) or `chapters.titles` is (the fallback for a
+ * source with no structural headings at all) — never both, since which one wins would be
+ * ambiguous.
+ */
+export interface ChaptersConfig {
+	/** Tag or tag.class, e.g. `h2`, `h3`, `h2.nobreak`. Default `h2` when `chaptersHtmlUrl` is set. */
+	selector?: string;
+	/**
+	 * Extracted (pre-fold) heading titles to drop before alignment — front/back matter with no
+	 * distinguishing `id`, applied by `ingest.ts` between extraction and alignment.
+	 */
+	excludeTitles?: string[];
+	/** Hand-declared titles, in reading order — the fallback path for a book with no HTML edition. */
+	titles?: string[];
+	/**
+	 * True when the first heading's own paragraph is structurally excluded from the cleaned text
+	 * by `cleaning.startAtMarker`. Default `false`.
+	 */
+	firstHeadingImplicit?: boolean;
+}
+
 /** One book, as the manifest declares it. */
 export interface BookManifestEntry {
 	slug: string;
@@ -31,6 +54,9 @@ export interface BookManifestEntry {
 	cover?: string;
 	coverLicense?: string;
 	coverSource?: string;
+	/** Chapter structure at ingestion (spec #33). Absent on both means "no chapters" — legal. */
+	chaptersHtmlUrl?: string;
+	chapters?: ChaptersConfig;
 }
 
 /**
@@ -46,6 +72,9 @@ const LANGUAGES: readonly string[] = ['en', 'es'];
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 const REQUIRED = ['slug', 'title', 'author', 'language', 'sourceUrl', 'license'] as const;
+
+/** `tag` or `tag.class` — matches `extractHeadings`' own selector syntax. */
+const CHAPTERS_SELECTOR = /^[a-z][a-z0-9]*(\.[a-zA-Z0-9_-]+)?$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -127,6 +156,48 @@ export function parseManifest(raw: string): ManifestResult {
 			}
 		}
 
+		if (typeof entry.chaptersHtmlUrl === 'string' && !isHttpUrl(entry.chaptersHtmlUrl)) {
+			problems.push(`${label}: \`chaptersHtmlUrl\` must be an http(s) URL.`);
+		}
+
+		const chapters = isRecord(entry.chapters) ? entry.chapters : undefined;
+		if (chapters) {
+			if (typeof chapters.selector === 'string' && !CHAPTERS_SELECTOR.test(chapters.selector)) {
+				problems.push(
+					`${label}: \`chapters.selector\` is malformed (expected e.g. "h2", "h3.foo").`
+				);
+			}
+			if (chapters.titles !== undefined) {
+				const validTitles =
+					Array.isArray(chapters.titles) &&
+					chapters.titles.length > 0 &&
+					chapters.titles.every((t) => typeof t === 'string' && t !== '');
+				if (!validTitles) {
+					problems.push(
+						`${label}: \`chapters.titles\`, when present, must be a non-empty array of non-empty strings.`
+					);
+				}
+			}
+		}
+
+		const hasHtmlUrl = typeof entry.chaptersHtmlUrl === 'string';
+		const hasTitles = chapters?.titles !== undefined;
+		if (hasHtmlUrl && hasTitles) {
+			problems.push(
+				`${label}: chapters config may declare chaptersHtmlUrl or chapters.titles, not both — ambiguous which wins.`
+			);
+		}
+		if (
+			chapters &&
+			(chapters.excludeTitles !== undefined ||
+				chapters.selector !== undefined ||
+				chapters.firstHeadingImplicit !== undefined) &&
+			!hasHtmlUrl &&
+			!hasTitles
+		) {
+			problems.push(`${label}: chapters config requires chaptersHtmlUrl or chapters.titles.`);
+		}
+
 		if (entry.featured === true && typeof entry.language === 'string') {
 			const featured = featuredByLanguage.get(entry.language) ?? [];
 			featured.push(label);
@@ -144,7 +215,11 @@ export function parseManifest(raw: string): ManifestResult {
 			...(isRecord(entry.cleaning) ? { cleaning: entry.cleaning as CleaningOverrides } : {}),
 			...(typeof entry.cover === 'string' ? { cover: entry.cover } : {}),
 			...(typeof entry.coverLicense === 'string' ? { coverLicense: entry.coverLicense } : {}),
-			...(typeof entry.coverSource === 'string' ? { coverSource: entry.coverSource } : {})
+			...(typeof entry.coverSource === 'string' ? { coverSource: entry.coverSource } : {}),
+			...(typeof entry.chaptersHtmlUrl === 'string'
+				? { chaptersHtmlUrl: entry.chaptersHtmlUrl }
+				: {}),
+			...(chapters ? { chapters: chapters as ChaptersConfig } : {})
 		});
 	}
 

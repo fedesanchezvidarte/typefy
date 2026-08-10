@@ -134,3 +134,117 @@ describe('parseManifest — rejecting', () => {
 		expect(problems.length).toBeGreaterThan(1);
 	});
 });
+
+describe('parseManifest — chapters config (spec #33)', () => {
+	it('accepts an entry with neither chaptersHtmlUrl nor chapters — a book may have no chapters', () => {
+		const result = parseManifest(manifest(valid));
+		expect(result.ok).toBe(true);
+	});
+
+	it('accepts chaptersHtmlUrl with a valid selector', () => {
+		const result = parseManifest(
+			manifest({
+				...valid,
+				chaptersHtmlUrl: 'https://www.gutenberg.org/cache/epub/1342/pg1342-images.html',
+				chapters: { selector: 'h2', firstHeadingImplicit: true }
+			})
+		);
+		expect(result.ok).toBe(true);
+	});
+
+	it('accepts a tag.class selector', () => {
+		const result = parseManifest(
+			manifest({
+				...valid,
+				chaptersHtmlUrl: 'https://example.org/book.html',
+				chapters: { selector: 'h2.nobreak' }
+			})
+		);
+		expect(result.ok).toBe(true);
+	});
+
+	it('accepts chapters.titles as the fallback path, with no chaptersHtmlUrl', () => {
+		const result = parseManifest(
+			manifest({ ...valid, chapters: { titles: ['Chapter I', 'Chapter II'] } })
+		);
+		expect(result.ok).toBe(true);
+	});
+
+	it('rejects a chaptersHtmlUrl that is not http(s)', () => {
+		const problems = problemsOf(
+			manifest({ ...valid, chaptersHtmlUrl: 'file:///etc/passwd', chapters: { selector: 'h2' } })
+		).join(' ');
+		expect(problems).toMatch(/chaptersHtmlUrl/i);
+	});
+
+	it('rejects a malformed selector', () => {
+		const problems = problemsOf(
+			manifest({
+				...valid,
+				chaptersHtmlUrl: 'https://example.org/book.html',
+				chapters: { selector: 'H2!' }
+			})
+		).join(' ');
+		expect(problems).toMatch(/selector/i);
+	});
+
+	it('rejects chapters.titles being an empty array', () => {
+		const problems = problemsOf(manifest({ ...valid, chapters: { titles: [] } })).join(' ');
+		expect(problems).toMatch(/titles/i);
+	});
+
+	it('rejects chapters.titles containing an empty string', () => {
+		const problems = problemsOf(
+			manifest({ ...valid, chapters: { titles: ['Chapter I', ''] } })
+		).join(' ');
+		expect(problems).toMatch(/titles/i);
+	});
+
+	it('rejects both chaptersHtmlUrl and chapters.titles present at once, as ambiguous', () => {
+		const problems = problemsOf(
+			manifest({
+				...valid,
+				chaptersHtmlUrl: 'https://example.org/book.html',
+				chapters: { titles: ['Chapter I'] }
+			})
+		).join(' ');
+		expect(problems).toMatch(/chaptersHtmlUrl|titles/i);
+		expect(problems).toMatch(/not both|ambiguous/i);
+	});
+
+	it('rejects chapters.selector present without chaptersHtmlUrl or chapters.titles', () => {
+		const problems = problemsOf(manifest({ ...valid, chapters: { selector: 'h2' } })).join(' ');
+		expect(problems).toMatch(/chaptersHtmlUrl|titles/i);
+	});
+
+	it('rejects chapters.excludeTitles present without chaptersHtmlUrl or chapters.titles', () => {
+		const problems = problemsOf(
+			manifest({ ...valid, chapters: { excludeTitles: ['PRÓLOGO'] } })
+		).join(' ');
+		expect(problems).toMatch(/chaptersHtmlUrl|titles/i);
+	});
+
+	it('rejects chapters.firstHeadingImplicit present without chaptersHtmlUrl or chapters.titles', () => {
+		const problems = problemsOf(
+			manifest({ ...valid, chapters: { firstHeadingImplicit: true } })
+		).join(' ');
+		expect(problems).toMatch(/chaptersHtmlUrl|titles/i);
+	});
+
+	it('carries chapters config through untouched when valid', () => {
+		const result = parseManifest(
+			manifest({
+				...valid,
+				chaptersHtmlUrl: 'https://example.org/book.html',
+				chapters: { selector: 'h3', excludeTitles: ['TASA'], firstHeadingImplicit: true }
+			})
+		);
+		if (!result.ok) throw new Error('expected acceptance');
+		expect(result.books[0].chaptersHtmlUrl).toBe('https://example.org/book.html');
+		expect(result.books[0].chapters).toEqual({
+			selector: 'h3',
+			excludeTitles: ['TASA'],
+			firstHeadingImplicit: true
+		});
+	});
+});

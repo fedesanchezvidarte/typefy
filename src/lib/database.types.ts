@@ -102,6 +102,41 @@ export type Database = {
 				};
 				Relationships: [];
 			};
+			chapters: {
+				Row: {
+					book_id: string;
+					created_at: string;
+					id: string;
+					index: number;
+					start_chunk_index: number;
+					title: string;
+				};
+				Insert: {
+					book_id: string;
+					created_at?: string;
+					id?: string;
+					index: number;
+					start_chunk_index: number;
+					title: string;
+				};
+				Update: {
+					book_id?: string;
+					created_at?: string;
+					id?: string;
+					index?: number;
+					start_chunk_index?: number;
+					title?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: 'chapters_book_id_fkey';
+						columns: ['book_id'];
+						isOneToOne: false;
+						referencedRelation: 'books';
+						referencedColumns: ['id'];
+					}
+				];
+			};
 			chunk_attempts: {
 				Row: {
 					accuracy_raw: number | null;

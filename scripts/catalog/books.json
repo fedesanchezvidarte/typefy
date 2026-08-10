@@ -12,7 +12,9 @@
 			"featured": true,
 			"cleaning": {
 				"startAtMarker": "It is a truth universally acknowledged"
-			}
+			},
+			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/1342/pg1342-images.html",
+			"chapters": { "firstHeadingImplicit": true }
 		},
 		{
 			"slug": "frankenstein",
@@ -96,7 +98,24 @@
 			},
 			"cover": "scripts/catalog/covers/don-quijote.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:El_ingenioso_hidalgo_don_Quijote_de_la_Mancha.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:El_ingenioso_hidalgo_don_Quijote_de_la_Mancha.jpg",
+			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/2000/pg2000-images.html",
+			"chapters": {
+				"selector": "h3",
+				"excludeTitles": [
+					"TASA",
+					"TESTIMONIO DE LAS ERRATAS",
+					"EL REY",
+					"AL DUQUE DE BÉJAR,",
+					"PRÓLOGO",
+					"AL LIBRO DE DON QUIJOTE DE LA MANCHA",
+					"FEE DE ERRATAS",
+					"APROBACIONES",
+					"PRÓLOGO AL LECTOR",
+					"DEDICATORIA, AL CONDE DE LEMOS"
+				],
+				"firstHeadingImplicit": true
+			}
 		},
 		{
 			"slug": "niebla",
@@ -112,7 +131,13 @@
 			},
 			"cover": "scripts/catalog/covers/niebla.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:1914,_Niebla_(nivola),_editoral_Renacimiento,_Miguel_de_Unamuno.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:1914,_Niebla_(nivola),_editoral_Renacimiento,_Miguel_de_Unamuno.jpg",
+			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/49836/pg49836-images.html",
+			"chapters": {
+				"selector": "h2.nobreak",
+				"excludeTitles": ["PRÓLOGO", "POST-PRÓLOGO", "ÍNDICE"],
+				"firstHeadingImplicit": true
+			}
 		},
 		{
 			"slug": "trafalgar",
@@ -149,6 +174,34 @@
 			"featured": false,
 			"cleaning": {
 				"startAtMarker": "Yo, señora, soy de Segovia"
+			},
+			"chapters": {
+				"titles": [
+					"Libro Primero: Capítulo I: En que cuenta quién es el Buscón.",
+					"Libro Primero: Capítulo II: De cómo fue a la escuela y lo que en ella le sucedió.",
+					"Libro Primero: Capítulo III: De cómo fue a un pupilaje por criado de don Diego Coronel.",
+					"Libro Primero: Capítulo IV: De la convalecencia y ida a estudiar a Alcalá de Henares.",
+					"Libro Primero: Capítulo V: De la entrada de Alcalá, patente y burlas que le hicieron por nuevo.",
+					"Libro Primero: Capítulo VI: De las crueldades de la ama, y travesuras que hizo.",
+					"Libro Primero: Capítulo VII: De la ida de don Diego, y nuevas de la muerte de su padre y madre, y la resolución que tomó en sus cosas para adelante.",
+					"Libro Segundo: Capítulo I: Del camino de Alcalá para Segovia, y de lo que le sucedió en él hasta Rejas, donde durmió aquella noche.",
+					"Libro Segundo: Capítulo II: De lo que le sucedió hasta llegar a Madrid, con un poeta.",
+					"Libro Segundo: Capítulo III: De lo que hizo en Madrid, y lo que le sucedió hasta llegar a Cercedilla, donde durmió.",
+					"Libro Segundo: Capítulo IV: Del hospedaje de su tío, y visitas; la cobranza de su hacienda y vuelta a la corte.",
+					"Libro Segundo: Capítulo V: De su huida, y los sucesos en ella hasta la Corte.",
+					"Libro Segundo: Capítulo VI: En que prosigue el camino y lo prometido de su vida y costumbres.",
+					"Libro Tercero: Capítulo I: De lo que le sucedió en la Corte luego que llegó hasta que amaneció.",
+					"Libro Tercero: Capítulo II: En que prosigue la materia comenzada y cuenta algunos raros sucesos.",
+					"Libro Tercero: Capítulo III: En que prosigue la misma materia, hasta dar con todos en la cárcel.",
+					"Libro Tercero: Capítulo IV: En que trata los sucesos de la cárcel, hasta salir la vieja azotada, los compañeros a la vergüenza y él en fiado.",
+					"Libro Tercero: Capítulo V: De cómo tomó posada, y la desgracia que le sucedió en ella.",
+					"Libro Tercero: Capítulo VI: Prosigue el cuento, con otros varios sucesos.",
+					"Libro Tercero: Capítulo VII: En que se prosigue lo mismo, con otros sucesos y desgracias que le sucedieron.",
+					"Libro Tercero: Capítulo VIII: De su cura y otros sucesos peregrinos.",
+					"Libro Tercero: Capítulo IX: En que se hace representante, poeta y galán de monjas.",
+					"Libro Tercero: Capítulo X: De lo que le sucedió en Sevilla hasta embarcarse a Indias."
+				],
+				"firstHeadingImplicit": true
 			}
 		},
 		{

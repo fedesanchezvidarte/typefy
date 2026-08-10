@@ -98,6 +98,25 @@ test.describe('publication gating', () => {
 			{ onConflict: 'book_id,index' }
 		);
 		expect(chunk.error, `arranging the probe chunk failed: ${chunk.error?.message}`).toBeNull();
+
+		// A chapter of the same unpublished book (spec #33): the chapters RLS policy gates on
+		// the identical books.published_at join as chunks, so it needs the same probe.
+		//
+		// Deleted then inserted, not upserted: `service_role` deliberately holds no UPDATE grant
+		// on chapters (ingestion always deletes + reinserts a book's chapters, per the migration),
+		// and an upsert's `ON CONFLICT DO UPDATE` plan requires that privilege even on a run that
+		// never hits the conflict path. This mirrors ingestion's actual write pattern.
+		await service.from('chapters').delete().eq('book_id', probeBookId);
+		const chapter = await service.from('chapters').insert({
+			book_id: probeBookId,
+			index: 0,
+			title: 'Probe chapter',
+			start_chunk_index: 0
+		});
+		expect(
+			chapter.error,
+			`arranging the probe chapter failed: ${chapter.error?.message}`
+		).toBeNull();
 	});
 
 	test.afterAll(async () => {
@@ -135,6 +154,29 @@ test.describe('publication gating', () => {
 				.single();
 			expect(book.error, `published book read failed: ${book.error?.message}`).toBeNull();
 			expect(book.data!.chunks.length).toBe(book.data!.chunk_count);
+		});
+
+		/*
+		 * The chapters analogue of the load-bearing chunks check above: chapters (spec #33) is
+		 * gated on the identical books.published_at join, and that gate is only proven by a test
+		 * that queries chapters directly by book_id rather than through a published book.
+		 */
+		test(`${role} cannot read an unpublished book's chapters by book_id`, async () => {
+			const client = roles().find(([name]) => name === role)![1];
+			const chapters = await client.from('chapters').select('id, title').eq('book_id', probeBookId);
+			expect(chapters.error, `chapters read failed: ${chapters.error?.message}`).toBeNull();
+			expect(chapters.data).toEqual([]);
+		});
+
+		test(`${role} cannot create a chapter`, async () => {
+			const client = roles().find(([name]) => name === role)![1];
+			const insert = await client.from('chapters').insert({
+				book_id: probeBookId,
+				index: 1,
+				title: 'nope',
+				start_chunk_index: 0
+			});
+			expect(insert.error, 'inserting a chapter must be refused').not.toBeNull();
 		});
 
 		test(`${role} cannot create a book`, async () => {
@@ -212,11 +254,12 @@ test.describe('publication gating', () => {
 		for (const [name, client] of roles()) {
 			const book = await client
 				.from('books')
-				.select('slug, chunks(id)')
+				.select('slug, chunks(id), chapters(id)')
 				.eq('slug', PROBE_SLUG)
 				.single();
 			expect(book.error, `${name} could not read the published probe`).toBeNull();
 			expect(book.data!.chunks.length, `${name} saw no chunks`).toBe(1);
+			expect(book.data!.chapters.length, `${name} saw no chapters`).toBe(1);
 		}
 	});
 });

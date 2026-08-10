@@ -62,12 +62,12 @@ treat this Phase 5a entry as pending confirmation until that lands.
 **5b** (spec #32) is now complete and replaces the **passage** with the **page** — a screenful
 sized by a dual character/line budget, carrying the source's paragraph breaks as newlines the user
 actually types, with a **teleprompter** scroll, a **page navigator** and **in-page restore**
-shipping alongside it. The rest of Phase 5 remains **specified but not implemented**: **5c**
-(spec #33) and **5d** (spec #34), written together with 5b in one design session and approved in
-that order, derive **chapter** structure at ingestion and then spend both on a **book detail
-screen** where a reader can see a book and start from any chapter. Their glossary entries below
-still carry a _(specified, spec #NN — not yet shipped)_ marker; every other definition, page model
-included, is what the code does **today**. Two consequences of 5b are worth stating once here: it
+shipping alongside it. **5c** (spec #33), written together with 5b and 5d in one design session and
+approved in that order, is now also complete: **chapter** structure is derived at ingestion and
+stored, with no UI yet. **5d** (spec #34) remains **specified but not implemented**: it spends 5c's
+structure on a **book detail screen** where a reader can see a book and start from any chapter. The
+**Chapter** glossary entry below is what the code does **today**; every other definition, page model
+included, is likewise current. Two consequences of 5b are worth stating once here: it
 **discarded all existing progress** on shipping (re-chunking would otherwise have left progress
 rows pointing at text that no longer existed at that `chunk_id` — see the Ingestion entry and
 [ADR-0006](docs/adr/0006-books-chunks-data-model.md)'s Phase 5b amendment), and the "never say
@@ -107,9 +107,13 @@ Phased roadmap:
   ([ADR-0016](docs/adr/0016-teleprompter-scroll.md)), the **page navigator**, **in-page restore**, the
   `ch`-based measure that keeps the line budget honest across reading fonts
   ([ADR-0015](docs/adr/0015-ch-measure-chunking-contract.md)), an `--allow-recut` ingestion guard and a
-  full progress wipe), **5c** (📋 spec #33 — **chapter** structure derived at ingestion from the HTML
-  edition, aligned back to the cleaned text, stored in a `chapters` table; no UI) and **5d** (📋
-  spec #34 — the **book detail screen** at `/books/[slug]`, chapter picker and Open Library metadata).
+  full progress wipe), **5c** (✅ spec #33 — **chapter** structure derived at ingestion from the HTML
+  edition, aligned back to the cleaned text, stored in a `chapters` table; no UI — a pure heading
+  extractor (`src/lib/ingest/headings.ts`) and aligner (`src/lib/ingest/chapters.ts`), wired into
+  `scripts/ingest.ts`, reconciled against all 12 catalog books
+  ([ADR-0017](docs/adr/0017-chapter-structure-from-html.md)) and **5d** (📋 spec #34 — the
+  **book detail screen** at `/books/[slug]`, chapter picker and Open Library metadata, the layer
+  that actually surfaces 5c's structure to a reader).
   The order is load-bearing the way Phases 3 and 4 were, and more strictly: a chapter's start position
   **is** a chunk index, and 5b re-chunks every book, so recording structure before 5b landed would
   have recorded it against indices that were about to change.
@@ -157,13 +161,21 @@ Use these terms as defined here; do not drift to synonyms.
   the product never displays a print page count anywhere, so there is never a second, contradicting
   number for the same book. Paraglide keys are `page_*`; the canonical query parameter is `?page=N`,
   with `?passage=N` still accepted so pre-5b links work.
-- **Chapter** _(specified, spec #33 — not yet shipped)_ — A **navigational overlay** on a book's chunks:
-  a title and a start chunk index, stored in a `chapters` table and derived at ingestion from the
-  source's **HTML edition** while the typing text continues to come from the plain-text edition.
-  Chapters never constrain chunk boundaries — **a page may span a chapter boundary** — and a page
-  belongs to the chapter its **first character** falls in, so chapter page-ranges are contiguous and
-  progress stays a count rather than a weighted sum. A book with no derivable structure legally has no
-  chapters.
+- **Chapter** — A **navigational overlay** on a book's chunks: a title and a start chunk index,
+  stored in a `chapters` table and derived at **ingestion** from the source's **HTML edition**
+  while the typing text continues to come from the plain-text edition, per book, via a hybrid
+  extraction-plus-manifest-fallback approach — heading tags parsed out of the HTML where the
+  source has them, hand-declared titles in the manifest where it doesn't. Headings are aligned
+  back to the cleaned text by exact normalized-text matching with a monotonic cursor, not
+  paragraph-index bookkeeping: a heading's own paragraph is structurally guaranteed to survive
+  chunking as an exact `\n`-delimited segment, so the aligner just walks the chunk sequence once.
+  A heading that fails to align is fatal for that book's ingest, naming the heading — with one
+  documented exception, `firstHeadingImplicit`, for a book whose `cleaning.startAtMarker` skips
+  past its own first chapter heading before the text is ever chunked
+  ([ADR-0017](docs/adr/0017-chapter-structure-from-html.md)). Chapters never constrain chunk
+  boundaries — **a page may span a chapter boundary** — and a page belongs to the chapter its
+  **first character** falls in, so chapter page-ranges are contiguous and progress stays a count
+  rather than a weighted sum. A book with no derivable structure legally has no chapters.
 - **Window** — A contiguous run of **chunks** addressed by absolute index: the unit a typeable text is
   delivered in since Phase 3b (spec #18). Ten chunks (~5 KB) per window; the typing screen
   server-renders the first one from the resume index and fetches the rest from

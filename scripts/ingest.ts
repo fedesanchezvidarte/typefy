@@ -41,6 +41,8 @@ import {
 	type CoverImage
 } from '../src/lib/ingest/cover.ts';
 import { chunkParagraphs } from '../src/lib/chunking/chunker.ts';
+import { extractHeadings } from '../src/lib/ingest/headings.ts';
+import { alignChapters, type AlignChaptersResult } from '../src/lib/ingest/chapters.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = resolve(ROOT, 'scripts/catalog/books.json');
@@ -193,6 +195,35 @@ async function readSource(book: BookManifestEntry, refresh: boolean): Promise<st
 	return text;
 }
 
+/**
+ * The book's HTML edition, from the cache when possible — fetched **only** to learn where
+ * chapters begin (spec #33). Returns `undefined` when the manifest declares no
+ * `chaptersHtmlUrl`, never fetching when there is nothing to fetch.
+ */
+async function readChaptersHtml(
+	book: BookManifestEntry,
+	refresh: boolean
+): Promise<string | undefined> {
+	if (!book.chaptersHtmlUrl) {
+		return undefined;
+	}
+
+	const cached = resolve(CACHE, `${book.slug}.chapters.html`);
+	if (!refresh && existsSync(cached)) {
+		return readFileSync(cached, 'utf8');
+	}
+
+	console.log(`  fetching ${book.chaptersHtmlUrl}`);
+	const response = await fetch(book.chaptersHtmlUrl);
+	if (!response.ok) {
+		fail(`${book.slug}: chapters HTML fetch failed with ${response.status} ${response.statusText}`);
+	}
+	const html = await response.text();
+	mkdirSync(CACHE, { recursive: true });
+	writeFileSync(cached, html, 'utf8');
+	return html;
+}
+
 // ---------------------------------------------------------------------------
 // Preparation — pure pipeline over one book
 // ---------------------------------------------------------------------------
@@ -211,6 +242,12 @@ interface PreparedBook {
 	disallowed: ReturnType<typeof findDisallowed>;
 	/** Absent when the manifest entry declares no cover — which CLEARS `cover_url` on write. */
 	cover?: PreparedCover;
+	/**
+	 * `undefined` when the manifest entry declares no chapters config at all — legal, "this book
+	 * has no chapters." Otherwise the aligner's own result, stored raw (never turned fatal here —
+	 * see `main()`) so `writeReport` can render it and `main()` can refuse the write.
+	 */
+	chapters?: AlignChaptersResult;
 }
 
 /**
@@ -264,14 +301,52 @@ function readCover(entry: BookManifestEntry): PreparedCover | undefined {
 	};
 }
 
+/**
+ * The book's chapter alignment result, or `undefined` when the manifest declares no chapters
+ * config at all (spec #33 §6).
+ *
+ * `chaptersHtmlUrl` wins when present: HTML is fetched, headings extracted with the configured
+ * (or default `h2`) selector, and any `excludeTitles` dropped by exact match against the RAW
+ * extracted title, before folding. Otherwise `chapters.titles` is the fallback path and the
+ * HTML fetch is skipped entirely. Alignment problems are never turned fatal here — that is
+ * `main()`'s job, mirroring how `disallowed` characters are collected in `prepare()` and only
+ * refused later.
+ */
+async function prepareChapters(
+	entry: BookManifestEntry,
+	chunks: readonly string[],
+	options: Options
+): Promise<AlignChaptersResult | undefined> {
+	const alignOptions = { firstHeadingImplicit: entry.chapters?.firstHeadingImplicit };
+
+	if (entry.chaptersHtmlUrl) {
+		const html = await readChaptersHtml(entry, options.refresh);
+		const selector = entry.chapters?.selector ?? 'h2';
+		const extracted = extractHeadings(html!, selector);
+		const excludeTitles = entry.chapters?.excludeTitles ?? [];
+		const titles = extracted
+			.filter((heading) => !excludeTitles.includes(heading.title))
+			.map((heading) => heading.title);
+		return alignChapters(titles, chunks, alignOptions);
+	}
+
+	if (entry.chapters?.titles) {
+		return alignChapters(entry.chapters.titles, chunks, alignOptions);
+	}
+
+	return undefined;
+}
+
 async function prepare(entry: BookManifestEntry, options: Options): Promise<PreparedBook> {
 	const raw = await readSource(entry, options.refresh);
 	const cleaned = cleanSource(raw, entry.cleaning);
+	const chunks = chunkParagraphs(cleaned);
 	return {
 		entry,
-		chunks: chunkParagraphs(cleaned),
+		chunks,
 		disallowed: findDisallowed(cleaned),
-		cover: readCover(entry)
+		cover: readCover(entry),
+		chapters: await prepareChapters(entry, chunks, options)
 	};
 }
 
@@ -296,7 +371,10 @@ function writeReport(prepared: PreparedBook): string {
 							source: prepared.cover.source
 						}
 					}
-				: {})
+				: {}),
+			// Only a successful alignment has rows to show; a failed one is reported via the fatal
+			// error in `main()` instead, and "declares no chapters" renders "None declared."
+			...(prepared.chapters?.ok ? { chapters: prepared.chapters.chapters } : {})
 		}),
 		'utf8'
 	);
@@ -621,6 +699,8 @@ async function writeBook(
 		.upsert(rows, { onConflict: 'book_id,index' });
 	if (chunkError) fail(`${entry.slug}: writing chunks failed — ${chunkError.message}`);
 
+	await writeChapters(client, prepared, bookId);
+
 	// Publishing is never implied by ingestion: a book becomes visible only after its report
 	// has been read (spec #17 §1).
 	if (options.publish) {
@@ -630,6 +710,38 @@ async function writeBook(
 			.eq('id', bookId);
 		if (error) fail(`${entry.slug}: publishing failed — ${error.message}`);
 	}
+}
+
+/**
+ * Rewrites a book's `chapters` rows wholesale (spec #33): delete then, only if there is
+ * anything to write, insert. **Always deletes first**, even for a book with no chapters config
+ * at all — a manifest edit that REMOVES chapters config must clear stale rows from a previous
+ * ingest, the same posture `writeCover` already takes with `cover_url`. No FK relationship to
+ * `chunks`/`chunk_attempts`, so this is independent of `--allow-shrink`/`--allow-recut`.
+ */
+async function writeChapters(
+	client: SupabaseClient,
+	prepared: PreparedBook,
+	bookId: string
+): Promise<void> {
+	const chapters = prepared.chapters?.ok ? prepared.chapters.chapters : [];
+
+	const { error: deleteError } = await client.from('chapters').delete().eq('book_id', bookId);
+	if (deleteError) {
+		fail(`${prepared.entry.slug}: clearing existing chapters failed — ${deleteError.message}`);
+	}
+	if (chapters.length === 0) {
+		return;
+	}
+
+	const rows = chapters.map((chapter) => ({
+		book_id: bookId,
+		index: chapter.index,
+		title: chapter.title,
+		start_chunk_index: chapter.startChunkIndex
+	}));
+	const { error: insertError } = await client.from('chapters').insert(rows);
+	if (insertError) fail(`${prepared.entry.slug}: writing chapters failed — ${insertError.message}`);
 }
 
 async function confirm(question: string): Promise<boolean> {
@@ -680,6 +792,12 @@ async function main(): Promise<void> {
 			fail(
 				`${entry.slug}: ${book.disallowed.length} disallowed character(s): ${summary}\n` +
 					`  See the report. Each one would make its passage impossible to complete.`
+			);
+		}
+		if (book.chapters && !book.chapters.ok) {
+			fail(
+				`${entry.slug}: chapter alignment failed:\n${book.chapters.problems.map((p) => `  - ${p}`).join('\n')}\n` +
+					`  See the report. A subtly wrong chapter list is worse than none (spec #33).`
 			);
 		}
 		prepared.push(book);
