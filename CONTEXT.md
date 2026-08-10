@@ -64,10 +64,10 @@ sized by a dual character/line budget, carrying the source's paragraph breaks as
 actually types, with a **teleprompter** scroll, a **page navigator** and **in-page restore**
 shipping alongside it. **5c** (spec #33), written together with 5b and 5d in one design session and
 approved in that order, is now also complete: **chapter** structure is derived at ingestion and
-stored, with no UI yet. **5d** (spec #34) remains **specified but not implemented**: it spends 5c's
-structure on a **book detail screen** where a reader can see a book and start from any chapter. The
-**Chapter** glossary entry below is what the code does **today**; every other definition, page model
-included, is likewise current. Two consequences of 5b are worth stating once here: it
+stored, with no UI yet. **5d** (spec #34) is now complete too, and spends 5c's structure on a
+**book detail screen** where a reader can see a book and start from any chapter — which also makes
+**chapters navigable** for the first time. Every definition below, page model and chapter model
+included, is current. Two consequences of 5b are worth stating once here: it
 **discarded all existing progress** on shipping (re-chunking would otherwise have left progress
 rows pointing at text that no longer existed at that `chunk_id` — see the Ingestion entry and
 [ADR-0006](docs/adr/0006-books-chunks-data-model.md)'s Phase 5b amendment), and the "never say
@@ -111,9 +111,14 @@ Phased roadmap:
   edition, aligned back to the cleaned text, stored in a `chapters` table; no UI — a pure heading
   extractor (`src/lib/ingest/headings.ts`) and aligner (`src/lib/ingest/chapters.ts`), wired into
   `scripts/ingest.ts`, reconciled against all 12 catalog books
-  ([ADR-0017](docs/adr/0017-chapter-structure-from-html.md)) and **5d** (📋 spec #34 — the
-  **book detail screen** at `/books/[slug]`, chapter picker and Open Library metadata, the layer
-  that actually surfaces 5c's structure to a reader).
+  ([ADR-0017](docs/adr/0017-chapter-structure-from-html.md)) and **5d** (✅ spec #34 — the
+  **book detail screen** at `/books/[slug]`, now every library entry point's destination: the
+  **chapter** list as primary navigation into typing, plus `books.year` and a per-locale
+  `books.summary` fetched at ingestion from **Open Library**
+  ([ADR-0018](docs/adr/0018-per-locale-book-summaries.md),
+  [ADR-0019](docs/adr/0019-ingest-time-open-library-metadata.md),
+  [ADR-0020](docs/adr/0020-chapter-progress-pure-module.md)) — the layer that actually surfaces
+  5c's structure to a reader).
   The order is load-bearing the way Phases 3 and 4 were, and more strictly: a chapter's start position
   **is** a chunk index, and 5b re-chunks every book, so recording structure before 5b landed would
   have recorded it against indices that were about to change.
@@ -161,6 +166,13 @@ Use these terms as defined here; do not drift to synonyms.
   the product never displays a print page count anywhere, so there is never a second, contradicting
   number for the same book. Paraglide keys are `page_*`; the canonical query parameter is `?page=N`,
   with `?passage=N` still accepted so pre-5b links work.
+
+  Phase 5d is where that rule is stated most strongly: the **book detail screen** shows a "Pages"
+  fact taken straight from `books.chunk_count`, and shows **no print edition's page count beside
+  it** — not as a secondary figure, not in the **summary** panel, nowhere. **Open Library** carries
+  edition page counts and they are deliberately not fetched. The same rule is why niebla's Open
+  Library "description" (`ix, 178 pages ; 20 cm`) disqualified that book from having a work id at
+  all: a physical-extent note is a second, contradicting page count wearing a blurb's clothes.
 - **Chapter** — A **navigational overlay** on a book's chunks: a title and a start chunk index,
   stored in a `chapters` table and derived at **ingestion** from the source's **HTML edition**
   while the typing text continues to come from the plain-text edition, per book, via a hybrid
@@ -176,6 +188,18 @@ Use these terms as defined here; do not drift to synonyms.
   boundaries — **a page may span a chapter boundary** — and a page belongs to the chapter its
   **first character** falls in, so chapter page-ranges are contiguous and progress stays a count
   rather than a weighted sum. A book with no derivable structure legally has no chapters.
+
+  **Navigable since Phase 5d** (spec #34): the **book detail screen**'s chapter list is the primary
+  navigation into typing, each row a link to `/type/[slug]?page=<firstPage>` — a `<nav>` rather than
+  a region, since every row is a link and nothing in it is prose. ADR-0017's attribution rule,
+  recorded there in advance *for* 5d, is now the thing that actually renders per-chapter progress:
+  `buildChapterProgress` (`src/lib/library/chapter-progress.ts`) derives each chapter's 1-based
+  inclusive page range from `[start_i, start_{i+1})` and buckets the user's completed page indices
+  into it by binary search over the chapter starts — the indices arrive **unsorted** by design, and
+  front matter preceding the first chapter belongs to no chapter and is ignored rather than folded
+  into chapter one ([ADR-0020](docs/adr/0020-chapter-progress-pure-module.md)). Starting from an
+  arbitrary chapter needs no new **resume** logic: typing chapter 4 first leaves the computed resume
+  index inside chapter 1.
 - **Window** — A contiguous run of **chunks** addressed by absolute index: the unit a typeable text is
   delivered in since Phase 3b (spec #18). Ten chunks (~5 KB) per window; the typing screen
   server-renders the first one from the resume index and fetches the rest from
@@ -284,14 +308,21 @@ Use these terms as defined here; do not drift to synonyms.
   written **unpublished** — publishing is a separate, deliberate step after its **ingestion
   report** has been read. Phase 1 fixture texts remain chunked by hand.
 - **Manifest** — `scripts/catalog/books.json`, committed: the source of truth for which books the
-  catalog contains and their metadata, `sourceUrl`, licence and per-book cleaning overrides.
+  catalog contains and their metadata, `sourceUrl`, licence, per-book cleaning overrides and — since
+  Phase 5d (spec #34) — the `openLibraryWork` id, the optional `year` override and any per-locale
+  `summary` overrides.
   Ingestion reads it and never invents metadata — Gutenberg's header formats vary by decade, so an
   auto-parsed title is a wrong title written straight into the live catalog with no review step.
   With ingestion writing directly to the database, the manifest is what still lets the repository
   say what the catalog *is*.
 - **Ingestion report** — `scripts/catalog/reports/<slug>.md`, committed and generated by
-  `ingest --dry-run`: chunk count and size statistics, the first and last two chunks in full, and
-  every character outside the typeable set. It replaces the content diff that direct-to-database
+  `ingest --dry-run`: chunk count and size statistics, the first and last two chunks in full, every
+  character outside the typeable set, the derived **chapter** list, and — since Phase 5d (spec #34) —
+  a `## Metadata` section carrying the **year** (attributed to the **manifest** or to **Open
+  Library**, with any disagreement between them flagged), the **summary**'s length and opening, and
+  any lookup failure verbatim. That last part is the only committed record that a non-fatal lookup
+  stopped working, which is what makes it a PR diff rather than a year that quietly went blank. It
+  replaces the content diff that direct-to-database
   writes removed, and because it is in git, a later cleaner change shows its blast radius across
   every book as a diff rather than as a surprise a user finds by typing into it. **No book is
   published on a report nobody read.**
@@ -448,13 +479,58 @@ Use these terms as defined here; do not drift to synonyms.
   already-correct but **unmeasured**: only the **measured span** typed in the current sitting sets
   `measured_chars` and `measured_ms`, so returning to a page never fabricates a WPM for time the user
   was away, and the 100-character best floor excludes trivial tails from personal bests.
-- **Book detail screen** _(specified, spec #34 — not yet shipped)_ — `/books/[slug]`, the canonical
-  page for a book and the destination of every library entry point, continue reading included. Cover
-  left; title, author, year, page count and summary right; the **chapter** list below with per-chapter
-  progress and a start action each. The page count shown is **ours**, never a print edition's.
-  `year` (the work's first publication year) and `summary` are fetched at ingestion from Open Library
-  by a **manifest**-declared work id — never by search — with a per-locale summary override in the
-  manifest winning where present. A failed lookup is not fatal: the book ships without them.
+- **Book detail screen** — `/books/[slug]`, shipped in Phase 5d (spec #34): the canonical page for a
+  book and the destination of **every** library entry point, continue reading included — one
+  `BookCard` link change covers all three surfaces, and `/type/[slug]` is now something this screen
+  links *into* rather than something the library links straight to. Cover left; title, author,
+  **year**, page count and **summary** right; a primary **Start typing** / **Continue typing**
+  action (chosen from whether anything has been typed, and carrying **no** `?page=` so the existing
+  **resume** logic still decides where the book opens); overall progress; then the **chapter** list.
+  The page count shown is **ours**, never a print edition's. An unknown slug and an unpublished book
+  both 404, indistinguishably — RLS owns publication, so the route has no `published_at` predicate.
+  A **guest** issues **zero progress queries** and sees the whole screen minus the progress section
+  and the per-chapter numerals; page ranges still render, because the same pure fold runs with an
+  empty completed set. A book with no chapters renders no chapter list at all rather than an
+  empty-state panel. Reads: one query for the book with its chapters embedded, plus — signed in only
+  — the book rollup count and the completed page indices in parallel
+  ([ADR-0020](docs/adr/0020-chapter-progress-pure-module.md)).
+- **Summary** — A book's blurb: **display-only, never typed**. Stored in `books.summary`, a
+  **locale-keyed `jsonb` map**, not a single string. The `default` key holds **Open Library**'s
+  description, whose **language is unverified** — which is exactly why it is not filed under `"en"` —
+  and every other key is a **UI locale** (`en`, `es`) supplied as a **manifest** override that wins
+  for that locale. Resolution is `summary[locale] ?? summary.default ?? null`, in one pure function
+  (`resolveSummary`, `src/lib/library/summary.ts`), called server-side so the first paint is already
+  the right language. The axis is the **reader's locale, not the book's content language**: the same
+  Spanish book can show the English blurb at `/books/el-buscon` and a Spanish one at
+  `/es/books/el-buscon`. Absent (`{}`, the column default) is a normal state and the screen omits the
+  section entirely. **Never machine-translated.** Because it is never typed, the **typeable character
+  set** deliberately does not apply to it — curly quotes and em dashes survive verbatim
+  ([ADR-0018](docs/adr/0018-per-locale-book-summaries.md),
+  [ADR-0013](docs/adr/0013-typeable-character-set.md)'s scope amendment).
+- **Year** — A book's **first publication year of the work** (`books.year`) — never the Project
+  Gutenberg release date, never a particular edition's date. Nullable, because a book with no
+  declared **Open Library** work, or a lookup that failed, simply has no year and the screen omits
+  the fact; that is an expected state, not a defect. Written by **ingestion** only, as
+  `manifest.year ?? openLibrary.first_publish_year` — **a hand-declared manifest year always wins**,
+  because Open Library reports the earliest edition it has *catalogued*, which disagrees with the
+  accepted date for don-quijote (1600 vs 1605), marianela (1883 vs 1878) and dr-jekyll-and-mr-hyde
+  (1875 vs 1886). Every disagreement is flagged in the **ingestion report**, so a redundant override
+  is visible and can be deleted ([ADR-0019](docs/adr/0019-ingest-time-open-library-metadata.md)).
+- **Open Library** — The third-party source of a book's **year** and its `default` **summary**,
+  consulted **at ingestion only** — never at runtime, never from a browser. Addressed by a
+  **manifest**-declared **work** id (`/works/OL144961W`), validated by shape, and **never by
+  search**: searching "El Buscón" surfaces editions dated 1927, 1961 and 1979 beside the real 1626,
+  and a confidently wrong year renders exactly like a right one. `first_publish_year` does not live
+  on the work document, so ingestion issues a second request keyed on the *same* declared id
+  (`search.json?q=key:/works/…`) rather than trusting the work document's `first_publish_date`,
+  which is an edition date. **A failed lookup is not fatal** — unlike chapter alignment: text and
+  chapters are the product, a blurb is not, so the book ships without them and the **ingestion
+  report** says why. Both fields are **written on every ingest, including to `null` and `{}`**, so
+  deleting a manifest override clears it; the accepted trap is that an outage during a re-ingest
+  wipes a previously good value, which is recoverable by one command and visible in the report diff.
+  Two books (niebla, trafalgar) deliberately declare no work id — Open Library's "description" for
+  them is a physical-extent or series note — and get their years from the manifest override alone.
+  See [ADR-0019](docs/adr/0019-ingest-time-open-library-metadata.md).
 - **Profile** — A signed-in user's identity row (display name, avatar, optional locale preference),
   created automatically on first sign-in and readable/editable only by that user. A null `locale` means
   "no explicit preference", leaving the cookie > `Accept-Language` > EN detection to apply.
@@ -505,3 +581,7 @@ Use these terms as defined here; do not drift to synonyms.
 - [ADR-0014](docs/adr/0014-mode-measurement-axis.md) — Mode as the measurement axis
 - [ADR-0015](docs/adr/0015-ch-measure-chunking-contract.md) — The `ch` measure as a chunking contract
 - [ADR-0016](docs/adr/0016-teleprompter-scroll.md) — The teleprompter scroll model
+- [ADR-0017](docs/adr/0017-chapter-structure-from-html.md) — Chapter structure derived from the HTML edition at ingestion
+- [ADR-0018](docs/adr/0018-per-locale-book-summaries.md) — Per-locale book summaries as a jsonb map with an unverified `default`
+- [ADR-0019](docs/adr/0019-ingest-time-open-library-metadata.md) — Ingest-time Open Library metadata: declared work id, non-fatal failure, always-write
+- [ADR-0020](docs/adr/0020-chapter-progress-pure-module.md) — Chapter progress aggregated in a pure module over paginated indices

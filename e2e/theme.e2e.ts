@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
+import { openBookFromCard } from './support/library';
 
 /**
  * Two-axis theming (spec #9, ADR-0011): palette and font are independent,
@@ -87,8 +88,9 @@ test.describe('font axis', () => {
 		// route gets one with no featured-book arrangement needed (unlike the landing hero).
 		await page.goto('/type');
 		await expect(page.getByTestId('text-picker')).toBeVisible();
-		await page.getByTestId(`text-picker-option-${prideAndPrejudiceExcerpt.id}`).click();
-		await expect(page.getByTestId('typing-surface')).toBeVisible();
+		// Two hops since spec #34: the card leads to `/books/[slug]`, whose primary action
+		// leads to the surface. The shared helper owns that walk.
+		await openBookFromCard(page, prideAndPrejudiceExcerpt.id);
 
 		await openPencilPanel(page);
 

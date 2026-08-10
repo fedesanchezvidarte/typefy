@@ -546,5 +546,114 @@
 				"testTitleContains": "restores the typed prefix, measures only the new span, and sets no best under the floor"
 			}
 		]
+	},
+	{
+		"id": "book-detail-screen-is-canonical",
+		"glossaryTerm": "Book detail screen",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "renders the cover, title, author, year, our page count and the summary for a published book"
+			},
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "a library card and a search result both navigate to /books/[slug], not straight into typing"
+			},
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "the continue-reading section navigates to /books/[slug] like every other entry point"
+			}
+		]
+	},
+	{
+		"id": "book-detail-screen-guest-and-404",
+		"glossaryTerm": "Book detail screen",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "the screen renders fully for a signed-out visitor, with no progress elements anywhere"
+			},
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "an unknown slug is a 404, and so is an unpublished book — indistinguishably"
+			}
+		]
+	},
+	{
+		"id": "summary-per-locale-override",
+		"glossaryTerm": "Summary",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "renders the same book under the ES locale, with the Spanish summary override winning over the Open Library default"
+			},
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "a book with no summary and no chapters renders without an empty panel and without a chapter list"
+			}
+		]
+	},
+	{
+		"id": "year-first-publication",
+		"glossaryTerm": "Year",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "renders the cover, title, author, year, our page count and the summary for a published book"
+			},
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "a book with no summary and no chapters renders without an empty panel and without a chapter list"
+			}
+		]
+	},
+	{
+		"id": "open-library-ingest-time-only",
+		"glossaryTerm": "Open Library",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "renders the same book under the ES locale, with the Spanish summary override winning over the Open Library default"
+			},
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "the screen renders fully for a signed-out visitor, with no progress elements anywhere"
+			}
+		]
+	},
+	{
+		"id": "chapter-navigable-into-typing",
+		"glossaryTerm": "Chapter",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "the chapter list shows each chapter title, its page range and its size"
+			},
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "choosing a chapter opens the typing screen at the page containing that chapter start"
+			},
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "completing a page inside a later chapter increments only that chapter and leaves the resume page inside chapter 1"
+			}
+		]
+	},
+	{
+		"id": "page-count-is-ours-not-a-print-edition",
+		"glossaryTerm": "Page",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/book-detail.e2e.ts",
+				"testTitleContains": "the page count on the detail screen equals the typing screen's, and no other count appears"
+			}
+		]
 	}
 ]

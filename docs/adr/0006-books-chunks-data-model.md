@@ -314,6 +314,17 @@ rather than deletion. `--allow-recut` overrides it. This is the guard that makes
 chunking (5c's chapter derivation does not re-chunk, but a future cleaner fix might) fail loudly
 instead of silently invalidating progress the way this one would have without it.
 
+## Amendment (2026-08-10, Phase 5d implementation — spec #34)
+
+`books` gains two metadata columns, `year` and `summary`
+(`supabase/migrations/20260810081926_book_detail_metadata.sql`). This extends the model rather than
+changing it: metadata *about* a book, on the `books` row beside title/author/cover, written
+exclusively by ingestion, riding the existing publication-gating RLS policy unchanged, with no new
+table, no new policy and no index. The per-locale `summary` shape and its `default` key are recorded
+in [ADR-0018](0018-per-locale-book-summaries.md); the ingest-time Open Library lookup that populates
+both, including the always-write/clear posture this ADR's Phase 3c amendment established for
+`cover_url`, is in [ADR-0019](0019-ingest-time-open-library-metadata.md).
+
 ## Alternatives considered
 
 - **Text in static repo files** — Acceptable for 20 books, but hundreds of MB blow up the repo and the

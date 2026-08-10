@@ -304,13 +304,9 @@ test.describe('cover fallback on load failure', () => {
 			title: 'Cover fallback probe',
 			author: 'probe',
 			language: 'en',
-			contents: ['Probe passage for the cover fallback test.']
+			contents: ['Probe passage for the cover fallback test.'],
+			coverUrl: DEAD_COVER_URL
 		});
-		const { error } = await service
-			.from('books')
-			.update({ cover_url: DEAD_COVER_URL })
-			.eq('slug', SLUG);
-		expect(error, `setting a cover_url on ${SLUG} failed: ${error?.message}`).toBeNull();
 	});
 
 	test.afterAll(async () => {
@@ -330,6 +326,34 @@ test.describe('cover fallback on load failure', () => {
 		// no broken-image box is left in its place.
 		await expect(card.getByTestId('generated-cover')).toBeVisible();
 		await expect(card.locator('img')).toHaveCount(0);
+	});
+
+	/**
+	 * The same guarantee on the BOOK DETAIL SCREEN (spec #34).
+	 *
+	 * Spec #34 extracted the card's cover-with-fallback into `BookCover` precisely so the
+	 * detail screen could not grow a second implementation that drifts out from under the
+	 * test above. That argument is only worth anything if something actually exercises the
+	 * second consumer: a shared component with one covered call site is indistinguishable
+	 * from a duplicated one until the day it is edited.
+	 *
+	 * Deliberately in this file rather than in `book-detail.e2e.ts` — it is the same
+	 * criterion, the same probe book and the same dead URL, and splitting the pair across two
+	 * files is how one half quietly stops being maintained with the other.
+	 */
+	test('the same dead cover_url falls back to the generated cover on the book detail screen too', async ({
+		page
+	}) => {
+		await page.route(DEAD_COVER_URL, (route) => route.abort('failed'));
+
+		await page.goto(`/books/${book.slug}`);
+		await expect(page.getByTestId('book-detail-start')).toBeVisible();
+
+		// Scoped to `<main>`: the header carries no cover, but scoping states the claim as
+		// "the screen's own cover", which is what the criterion is about.
+		const main = page.getByRole('main');
+		await expect(main.getByTestId('generated-cover')).toBeVisible();
+		await expect(main.locator('img')).toHaveCount(0);
 	});
 });
 

@@ -29,7 +29,15 @@
      (ingestion found no headings in the HTML edition), not a failure, and an empty-state panel
      would report it as one — the reader still has the primary Start/Continue action above. -->
 {#if chapters.length > 0}
-	<section data-testid="chapter-list" aria-labelledby="chapters-heading" class="mt-10">
+	<!-- A `<nav>`, not a `<section>` (spec #34 phase 8, a11y).
+	     `<section aria-labelledby>` exposes this as a plain `region`, which says only "here is
+	     a named box". The chapter list is the spec's PRIMARY NAVIGATION into typing — every row
+	     is a link into `/type/[slug]?page=N` and nothing here is prose — so a screen-reader user
+	     jumping by landmark should find it under navigation, next to the site nav, rather than
+	     having to know a region called "Chapters" exists. `aria-labelledby` stays: with more
+	     than one `<nav>` in the document each needs its own accessible name to be tellable
+	     apart, and the heading already is that name. -->
+	<nav data-testid="chapter-list" aria-labelledby="chapters-heading" class="mt-10">
 		<h2 id="chapters-heading" class="mb-3 text-[15px] font-semibold text-fg">
 			{m.book_detail_chapters_heading()}
 		</h2>
@@ -67,5 +75,5 @@
 				</li>
 			{/each}
 		</ul>
-	</section>
+	</nav>
 {/if}

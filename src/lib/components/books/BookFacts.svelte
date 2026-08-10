@@ -23,7 +23,9 @@
 	<h1 class="text-[28px] leading-[1.15] font-semibold tracking-[-0.02em] text-fg">{book.title}</h1>
 	<p class="mt-1.5 text-[15px] text-muted">{book.author}</p>
 
-	<dl class="mt-5 flex flex-wrap gap-x-8 gap-y-3">
+	<!-- The test ids address the VALUES, not the labels: the labels are translated and an
+	     E2E locator built on them would be a locator that only works in one locale. -->
+	<dl data-testid="book-facts" class="mt-5 flex flex-wrap gap-x-8 gap-y-3">
 		<!-- Omitted entirely when absent: a failed or absent Open Library lookup is a real,
 		     expected state, and an empty "First published —" row would render it as a defect. -->
 		{#if book.year !== null}
@@ -31,7 +33,9 @@
 				<dt class="text-[11px] tracking-[0.12em] text-muted uppercase">
 					{m.book_detail_year_label()}
 				</dt>
-				<dd class="mt-0.5 text-[15px] text-fg tabular-nums">{book.year}</dd>
+				<dd data-testid="book-fact-year" class="mt-0.5 text-[15px] text-fg tabular-nums">
+					{book.year}
+				</dd>
 			</div>
 		{/if}
 		<!-- OUR page count (`books.chunk_count` under the spec #32 page model). The print
@@ -41,7 +45,9 @@
 			<dt class="text-[11px] tracking-[0.12em] text-muted uppercase">
 				{m.book_detail_pages_label()}
 			</dt>
-			<dd class="mt-0.5 text-[15px] text-fg tabular-nums">{book.chunkCount}</dd>
+			<dd data-testid="book-fact-pages" class="mt-0.5 text-[15px] text-fg tabular-nums">
+				{book.chunkCount}
+			</dd>
 		</div>
 	</dl>
 
