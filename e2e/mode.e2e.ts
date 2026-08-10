@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { guestTest, type AuthUser } from './fixtures/auth';
 import { isLocalStack } from './support/supabase';
-import { gridCard } from './support/library';
+import { gridCard, openBookFromCard, startTypingByKeyboard } from './support/library';
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
 import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
 
@@ -200,10 +200,10 @@ test.describe('the choice is durable', () => {
 		// over the fetch, reads the same cookie, and the `{#key}` remounts the session in it.
 		await page.getByTestId('pick-another').click();
 		await expect(page.getByTestId('text-picker')).toBeVisible();
-		await expect(async () => {
-			await page.getByTestId(`text-picker-option-${SHORT_ID}`).click();
-			await expect(page.getByTestId('typing-surface')).toBeVisible({ timeout: 2000 });
-		}).toPass();
+		// Still a client-side navigation, just one hop longer since spec #34: card →
+		// `/books/[slug]` → the surface. What the criterion is about is unaffected — the
+		// second book's load re-runs over the fetch and reads the same cookie either way.
+		await openBookFromCard(page, SHORT_ID);
 		await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 		await expect(meta(page)).toHaveText(`Page 1 of ${tortoiseAndHare.chunkCount} · 0%`);
 
@@ -644,11 +644,14 @@ test.describe('accessibility (phase 8)', () => {
 		}
 		expect(reached, 'Tab should reach a book card within 30 stops').toBe(true);
 
+		// Enter now opens the book's DETAIL screen (spec #34), and its primary action is the
+		// next keyboard stop on the way to typing. Both halves are part of the same criterion:
+		// the whole flow with the mouse unplugged, including the screen the repoint inserted.
 		await expect(async () => {
 			await page.keyboard.press('Enter');
-			await expect(page.getByTestId('typing-surface')).toBeVisible({ timeout: 2000 });
+			await expect(page.getByTestId('book-detail-start')).toBeVisible({ timeout: 2000 });
 		}).toPass();
-		await expect(page.getByTestId('typing-input')).toBeFocused();
+		await startTypingByKeyboard(page);
 
 		/** Where focus is right now, as a test id — '' would mean it fell to `<body>`. */
 		const focusedTestId = () =>

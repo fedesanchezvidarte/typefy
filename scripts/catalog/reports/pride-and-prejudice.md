@@ -18,6 +18,21 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value                             |
+| ---------------------- | --------------------------------- |
+| Open Library work      | `/works/OL66554W`                 |
+| First publication year | 1813 (Open Library)               |
+| Description            | 687 characters, from Open Library |
+| Summary overrides      | None                              |
+
+Opening of the description, as it would be stored under `default`:
+
+```
+Pride and Prejudice is an 1813 novel of manners written by Jane Austen. The novel follows the character development of Elizabeth Bennet, the dynamic protagonist of the book who learns about the reperc…
+```
+
 ## Chapters
 
 | #   | Title            | Start page | Pages |

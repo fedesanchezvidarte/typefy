@@ -14,6 +14,7 @@ import {
 	setFeatured,
 	type ProbeBook
 } from './support/probe-books';
+import { startTypingByKeyboard } from './support/library';
 import { PREFETCH_THRESHOLD, WINDOW_SIZE } from '../src/lib/reading/window';
 import { ATTEMPT_BUFFER_KEY, type BufferedChunkAttempt } from '../src/lib/progress/buffer';
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
@@ -865,12 +866,13 @@ test.describe('windowed reading (spec #18)', () => {
 			}
 			expect(reached, `Tab should reach ${cardTestId} within 30 stops`).toBe(true);
 
-			// Enter starts the session once hydrated — no pointer has been used, and none will be.
+			// Enter opens the book's detail screen (spec #34), and its primary action starts the
+			// session — still no pointer, and none will be used.
 			await expect(async () => {
 				await page.keyboard.press('Enter');
-				await expect(page.getByTestId('typing-surface')).toBeVisible({ timeout: 2000 });
+				await expect(page.getByTestId('book-detail-start')).toBeVisible({ timeout: 2000 });
 			}).toPass();
-			await expect(typingInput(page)).toBeFocused();
+			await startTypingByKeyboard(page);
 			await watchForAwaiting(page);
 
 			// Across the boundary, keyboard only, including a mistake and its correction — the

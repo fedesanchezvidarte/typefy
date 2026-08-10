@@ -248,3 +248,199 @@ describe('parseManifest — chapters config (spec #33)', () => {
 		});
 	});
 });
+
+/*
+ * Spec #34: the manifest is where a book declares its Open Library work and any hand-written
+ * per-locale summary. Both are optional and independent of each other.
+ */
+describe('parseManifest — Open Library work id (spec #34)', () => {
+	it('accepts a well-formed work id and carries it through', () => {
+		const result = parseManifest(manifest({ ...valid, openLibraryWork: '/works/OL144961W' }));
+		if (!result.ok) throw new Error('expected acceptance');
+		expect(result.books[0].openLibraryWork).toBe('/works/OL144961W');
+	});
+
+	it('accepts an entry with no openLibraryWork at all', () => {
+		const result = parseManifest(manifest(valid));
+		if (!result.ok) throw new Error('expected acceptance');
+		expect(result.books[0].openLibraryWork).toBeUndefined();
+	});
+
+	/*
+	 * The shape check IS the "by declared id only, never by search" rule: a search term cannot
+	 * be expressed in a field that only admits `/works/OL<digits>W`. That matters because
+	 * searching Open Library for "El Buscón" returns editions dated 1961 and 1979 alongside the
+	 * work's real 1626 — a wrong year nobody would notice.
+	 */
+	it('rejects a search term dressed up as a work id', () => {
+		const problems = problemsOf(manifest({ ...valid, openLibraryWork: 'El Buscón' })).join(' ');
+		expect(problems).toMatch(/openLibraryWork/);
+	});
+
+	it('rejects an EDITION id, which would carry an edition date rather than the work year', () => {
+		const problems = problemsOf(manifest({ ...valid, openLibraryWork: '/books/OL7353617M' })).join(
+			' '
+		);
+		expect(problems).toMatch(/openLibraryWork/);
+	});
+
+	it('rejects a bare id with no /works/ prefix', () => {
+		expect(problemsOf(manifest({ ...valid, openLibraryWork: 'OL144961W' })).join(' ')).toMatch(
+			/openLibraryWork/
+		);
+	});
+
+	it('rejects a full URL', () => {
+		const problems = problemsOf(
+			manifest({ ...valid, openLibraryWork: 'https://openlibrary.org/works/OL144961W' })
+		).join(' ');
+		expect(problems).toMatch(/openLibraryWork/);
+	});
+
+	it('rejects a non-string openLibraryWork', () => {
+		expect(problemsOf(manifest({ ...valid, openLibraryWork: 144961 })).join(' ')).toMatch(
+			/openLibraryWork/
+		);
+	});
+});
+
+describe('parseManifest — summary overrides (spec #34)', () => {
+	it('accepts a summary keyed by a known locale and carries it through', () => {
+		const result = parseManifest(manifest({ ...valid, summary: { es: 'Un resumen.' } }));
+		if (!result.ok) throw new Error('expected acceptance');
+		expect(result.books[0].summary).toEqual({ es: 'Un resumen.' });
+	});
+
+	it('accepts several locales at once', () => {
+		const result = parseManifest(
+			manifest({ ...valid, summary: { en: 'A summary.', es: 'Un resumen.' } })
+		);
+		if (!result.ok) throw new Error('expected acceptance');
+		expect(result.books[0].summary).toEqual({ en: 'A summary.', es: 'Un resumen.' });
+	});
+
+	/*
+	 * The two fields are independent: a hand-written summary for a book with no Open Library
+	 * work is legitimate, and a work id with no override is the common case.
+	 */
+	it('accepts a summary with no openLibraryWork', () => {
+		expect(parseManifest(manifest({ ...valid, summary: { es: 'Un resumen.' } })).ok).toBe(true);
+	});
+
+	it('accepts an openLibraryWork with no summary', () => {
+		expect(parseManifest(manifest({ ...valid, openLibraryWork: '/works/OL144961W' })).ok).toBe(
+			true
+		);
+	});
+
+	/*
+	 * A typo'd locale key is REPORTED, never dropped. Silently ignoring `"sp"` produces a book
+	 * whose Spanish summary mysteriously never appears, with nothing anywhere saying why.
+	 */
+	it('rejects an unknown locale key rather than ignoring it', () => {
+		const problems = problemsOf(manifest({ ...valid, summary: { sp: 'Un resumen.' } })).join(' ');
+		expect(problems).toMatch(/summary/);
+		expect(problems).toMatch(/sp/);
+	});
+
+	it('rejects an empty-string summary — an absent summary is expressed by omission', () => {
+		expect(problemsOf(manifest({ ...valid, summary: { es: '' } })).join(' ')).toMatch(/summary/);
+	});
+
+	it('rejects a non-string summary value', () => {
+		expect(problemsOf(manifest({ ...valid, summary: { es: 42 } })).join(' ')).toMatch(/summary/);
+	});
+
+	it('rejects a summary that is not an object', () => {
+		expect(problemsOf(manifest({ ...valid, summary: 'Un resumen.' })).join(' ')).toMatch(/summary/);
+		expect(problemsOf(manifest({ ...valid, summary: ['Un resumen.'] })).join(' ')).toMatch(
+			/summary/
+		);
+	});
+
+	it('rejects an empty summary object — it declares nothing and is always a mistake', () => {
+		expect(problemsOf(manifest({ ...valid, summary: {} })).join(' ')).toMatch(/summary/);
+	});
+});
+
+/*
+ * The year override (spec #34). Same doctrine as the per-locale `summary` override: a value
+ * declared in the manifest wins over whatever Open Library returned. It exists because Open
+ * Library's `first_publish_year` is the earliest *catalogued edition*, which for several books
+ * in this catalog is not the work's first publication — 1600 for a Quijote first published in
+ * 1605, 1884 for a Trafalgar first published in 1873.
+ */
+describe('parseManifest — year override (spec #34)', () => {
+	it('accepts a declared year and carries it through', () => {
+		const result = parseManifest(manifest({ ...valid, year: 1605 }));
+		if (!result.ok) throw new Error('expected acceptance');
+		expect(result.books[0].year).toBe(1605);
+	});
+
+	it('accepts an entry with no year at all', () => {
+		const result = parseManifest(manifest(valid));
+		if (!result.ok) throw new Error('expected acceptance');
+		expect(result.books[0].year).toBeUndefined();
+	});
+
+	/*
+	 * The two fields are independent in both directions. A declared year with NO work id is the
+	 * niebla/trafalgar case — books deliberately given no `openLibraryWork` because Open
+	 * Library's description for them is a physical-extent or series note rather than a blurb.
+	 * Without this, they would ship with no year at all.
+	 */
+	it('accepts a year with no openLibraryWork', () => {
+		expect(parseManifest(manifest({ ...valid, year: 1914 })).ok).toBe(true);
+	});
+
+	it('accepts an openLibraryWork with no year', () => {
+		expect(parseManifest(manifest({ ...valid, openLibraryWork: '/works/OL144961W' })).ok).toBe(
+			true
+		);
+	});
+
+	it('accepts a negative year — antiquity is in scope for a public-domain catalog', () => {
+		const result = parseManifest(manifest({ ...valid, year: -800 }));
+		if (!result.ok) throw new Error('expected acceptance');
+		expect(result.books[0].year).toBe(-800);
+	});
+
+	/*
+	 * The bounds mirror `books_year_plausible` in the Phase 2 migration exactly. This is a typo
+	 * catch — a Gutenberg id or an ISBN landing in the field — not a claim about publishing
+	 * history, and catching it here means a bad manifest fails before the database is touched.
+	 */
+	it('rejects a year past the upper bound the database check constraint uses', () => {
+		expect(problemsOf(manifest({ ...valid, year: 2201 })).join(' ')).toMatch(/year/);
+	});
+
+	it('rejects a year below the lower bound', () => {
+		expect(problemsOf(manifest({ ...valid, year: -3001 })).join(' ')).toMatch(/year/);
+	});
+
+	it('accepts the exact bounds, which are legal values rather than exclusive limits', () => {
+		expect(parseManifest(manifest({ ...valid, year: 2200 })).ok).toBe(true);
+		expect(parseManifest(manifest({ ...valid, year: -3000 })).ok).toBe(true);
+	});
+
+	it('rejects a Gutenberg id mistakenly pasted into the year field', () => {
+		expect(problemsOf(manifest({ ...valid, year: 32315 })).join(' ')).toMatch(/year/);
+	});
+
+	it('rejects a non-integer year rather than rounding it', () => {
+		expect(problemsOf(manifest({ ...valid, year: 1605.5 })).join(' ')).toMatch(/year/);
+	});
+
+	/*
+	 * A quoted year is the likeliest hand-editing mistake in a JSON file whose every other
+	 * field is a string. It is refused rather than coerced: `books.year` is an integer column,
+	 * and a manifest that means 1605 should say 1605.
+	 */
+	it('rejects a year given as a string, rather than coercing it', () => {
+		expect(problemsOf(manifest({ ...valid, year: '1605' })).join(' ')).toMatch(/year/);
+	});
+
+	it('rejects a year of the wrong type entirely', () => {
+		expect(problemsOf(manifest({ ...valid, year: null })).join(' ')).toMatch(/year/);
+	});
+});

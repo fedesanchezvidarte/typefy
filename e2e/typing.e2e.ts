@@ -6,6 +6,7 @@ import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
 import { donQuijoteExcerpt } from '../src/lib/fixtures/es';
 import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
 import { fixtureTexts } from '../src/lib/fixtures/index';
+import { openBookFromCard, startTypingByKeyboard } from './support/library';
 
 const EN_ID = prideAndPrejudiceExcerpt.id;
 const ES_ID = donQuijoteExcerpt.id;
@@ -30,17 +31,18 @@ async function type(page: Page, text: string) {
 
 /**
  * Opens the library at /type (or a locale-prefixed variant) and picks a book.
- * The click only registers once the page has hydrated, so it is retried (same
- * pattern as smoke.e2e.ts). Resolves with the hidden input focused and ready.
+ *
+ * Since spec #34 a card leads to `/books/[slug]` rather than straight into typing, so this
+ * is two hops: the card, then the detail screen's primary action. Both are retried, because
+ * either only takes effect once the page has hydrated. The postcondition is unchanged —
+ * resolves with the hidden input focused and ready — so every test below still starts from
+ * exactly the state it did before the repoint. The walk itself lives in `support/library.ts`
+ * so the suite has one copy of it.
  */
 async function pickText(page: Page, textId: string, path = '/type') {
 	await page.goto(path);
 	await expect(page.getByTestId('text-picker')).toBeVisible();
-	await expect(async () => {
-		await page.getByTestId(`text-picker-option-${textId}`).click();
-		await expect(page.getByTestId('typing-surface')).toBeVisible({ timeout: 2000 });
-	}).toPass();
-	await expect(page.getByTestId('typing-input')).toBeFocused();
+	await openBookFromCard(page, textId);
 }
 
 test.describe('library grid', () => {
@@ -97,12 +99,15 @@ test.describe('library grid', () => {
 		}
 		expect(reached, 'Tab should reach a book card within 30 stops').toBe(true);
 
-		// Enter activates the focused card once hydrated (retried like clicks).
+		// Enter activates the focused card once hydrated (retried like clicks). Since spec #34
+		// that lands on the book's detail screen rather than on the typing surface, so the walk
+		// continues from there — the criterion is "keyboard-only from the library to typing",
+		// and the detail screen is now part of that path rather than a detour around it.
 		await expect(async () => {
 			await page.keyboard.press('Enter');
-			await expect(page.getByTestId('typing-surface')).toBeVisible({ timeout: 2000 });
+			await expect(page.getByTestId('book-detail-start')).toBeVisible({ timeout: 2000 });
 		}).toPass();
-		await expect(page.getByTestId('typing-input')).toBeFocused();
+		await startTypingByKeyboard(page);
 	});
 });
 

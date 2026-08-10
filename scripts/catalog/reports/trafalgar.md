@@ -18,6 +18,15 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value           |
+| ---------------------- | --------------- |
+| Open Library work      | None declared   |
+| First publication year | 1873 (manifest) |
+| Description            | None            |
+| Summary overrides      | None            |
+
 ## Chapters
 
 None declared — this book has no derivable chapter structure.

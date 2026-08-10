@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
-import { getBookActivity, getBookCompletionCount, getCompletedChunkIds } from './progress';
+import {
+	getBookActivity,
+	getBookCompletionCount,
+	getCompletedChunkIds,
+	getCompletedChunkIndexes
+} from './progress';
 
 /**
  * Service tests (spec #12, Phase C): the injected Supabase client is mocked — a real DB
@@ -223,5 +228,141 @@ describe('getBookCompletionCount', () => {
 		await expect(getBookCompletionCount(client, USER, BOOK)).rejects.toEqual({
 			message: 'timeout'
 		});
+	});
+});
+
+/**
+ * A mock whose `.range()` serves successive PAGES, so pagination is exercised rather than
+ * assumed. Each entry is one `{ data, error }` the next `.range()` call resolves to.
+ */
+function mockPagedSupabase(pages: { data: unknown; error: unknown }[]) {
+	const calls: QueryCall[] = [];
+	const builder: Record<string, unknown> = {};
+	const record =
+		(method: string) =>
+		(...args: unknown[]) => {
+			calls.push({ method, args });
+			return builder;
+		};
+	builder.select = record('select');
+	builder.eq = record('eq');
+	builder.not = record('not');
+	builder.order = record('order');
+	let page = 0;
+	builder.range = (...args: unknown[]) => {
+		calls.push({ method: 'range', args });
+		const result = pages[page] ?? { data: [], error: null };
+		page += 1;
+		return {
+			then: (onFulfilled: (value: unknown) => unknown, onRejected?: (r: unknown) => unknown) =>
+				Promise.resolve(result).then(onFulfilled, onRejected)
+		};
+	};
+	const client = {
+		from: (...args: unknown[]) => {
+			calls.push({ method: 'from', args });
+			return builder;
+		}
+	};
+	return { client: client as unknown as SupabaseClient<Database>, calls };
+}
+
+/** `n` rows of embedded `chunks(index)`, starting at `from`. */
+function chunkRows(from: number, n: number) {
+	return Array.from({ length: n }, (_, i) => ({ chunks: { index: from + i } }));
+}
+
+describe('getCompletedChunkIndexes', () => {
+	it('returns the completed chunk indices', async () => {
+		const { client } = mockPagedSupabase([{ data: chunkRows(0, 3), error: null }]);
+		expect(await getCompletedChunkIndexes(client, USER, BOOK)).toEqual([0, 1, 2]);
+	});
+
+	it('returns an empty array when the user has completed nothing', async () => {
+		const { client } = mockPagedSupabase([{ data: [], error: null }]);
+		expect(await getCompletedChunkIndexes(client, USER, BOOK)).toEqual([]);
+	});
+
+	it('reads chunk_progress with chunks(index) embedded, scoped and completion-filtered', async () => {
+		const { client, calls } = mockPagedSupabase([{ data: [], error: null }]);
+
+		await getCompletedChunkIndexes(client, USER, BOOK);
+
+		expect(calls.find((c) => c.method === 'from')?.args).toEqual(['chunk_progress']);
+		expect(calls.find((c) => c.method === 'select')?.args[0]).toBe('chunks(index)');
+		expect(calls.filter((c) => c.method === 'eq').map((c) => c.args)).toEqual([
+			['user_id', USER],
+			['book_id', BOOK]
+		]);
+		// Row existence is NOT completion — the trigger writes a row on every attempt.
+		expect(calls.find((c) => c.method === 'not')?.args).toEqual(['first_completed_at', 'is', null]);
+	});
+
+	it('orders by chunk_id, the stable key .range() can partition on', async () => {
+		const { client, calls } = mockPagedSupabase([{ data: [], error: null }]);
+		await getCompletedChunkIndexes(client, USER, BOOK);
+		expect(calls.find((c) => c.method === 'order')?.args[0]).toBe('chunk_id');
+	});
+
+	it('paginates past the 1,000-row cap instead of silently under-reporting', async () => {
+		// supabase/config.toml sets max_rows = 1000 and don-quijote runs ~2,000 pages. An
+		// unpaginated read returns 1,000 rows with no error and every chapter past the
+		// truncation point reads as untouched.
+		const { client, calls } = mockPagedSupabase([
+			{ data: chunkRows(0, 1000), error: null },
+			{ data: chunkRows(1000, 1000), error: null },
+			{ data: chunkRows(2000, 40), error: null }
+		]);
+
+		const indexes = await getCompletedChunkIndexes(client, USER, BOOK);
+
+		expect(indexes).toHaveLength(2040);
+		expect(indexes[2039]).toBe(2039);
+		expect(calls.filter((c) => c.method === 'range').map((c) => c.args)).toEqual([
+			[0, 999],
+			[1000, 1999],
+			[2000, 2999]
+		]);
+	});
+
+	it('stops after a short page rather than issuing a needless final request', async () => {
+		const { client, calls } = mockPagedSupabase([{ data: chunkRows(0, 12), error: null }]);
+		await getCompletedChunkIndexes(client, USER, BOOK);
+		expect(calls.filter((c) => c.method === 'range')).toHaveLength(1);
+	});
+
+	it('issues exactly one more request when the last full page ends the set', async () => {
+		const { client, calls } = mockPagedSupabase([
+			{ data: chunkRows(0, 1000), error: null },
+			{ data: [], error: null }
+		]);
+		expect(await getCompletedChunkIndexes(client, USER, BOOK)).toHaveLength(1000);
+		expect(calls.filter((c) => c.method === 'range')).toHaveLength(2);
+	});
+
+	it('throws on a mid-pagination error rather than returning a partial read', async () => {
+		// A partial read must never be reported as progress — that renders a wrong bar
+		// instead of an error, which is this file's standing doctrine.
+		const { client } = mockPagedSupabase([
+			{ data: chunkRows(0, 1000), error: null },
+			{ data: null, error: { message: 'timeout' } }
+		]);
+		await expect(getCompletedChunkIndexes(client, USER, BOOK)).rejects.toEqual({
+			message: 'timeout'
+		});
+	});
+
+	it('throws when the first page errors', async () => {
+		const { client } = mockPagedSupabase([{ data: null, error: { message: 'timeout' } }]);
+		await expect(getCompletedChunkIndexes(client, USER, BOOK)).rejects.toEqual({
+			message: 'timeout'
+		});
+	});
+
+	it('skips a row whose embedded chunk is missing rather than emitting a hole', async () => {
+		const { client } = mockPagedSupabase([
+			{ data: [{ chunks: { index: 4 } }, { chunks: null }, { chunks: { index: 9 } }], error: null }
+		]);
+		expect(await getCompletedChunkIndexes(client, USER, BOOK)).toEqual([4, 9]);
 	});
 });

@@ -18,6 +18,21 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value                             |
+| ---------------------- | --------------------------------- |
+| Open Library work      | `/works/OL138052W`                |
+| First publication year | 1865 (Open Library)               |
+| Description            | 473 characters, from Open Library |
+| Summary overrides      | None                              |
+
+Opening of the description, as it would be stored under `default`:
+
+```
+Alice's Adventures in Wonderland (commonly Alice in Wonderland) is an 1865 English children's novel by Lewis Carroll. A young girl named Alice falls through a rabbit hole into a fantasy world of anthr…
+```
+
 ## Chapters
 
 None declared — this book has no derivable chapter structure.

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
-import { getBookSummaryBySlug, getChunkWindow, getHeroBook, listBooks } from './books';
+import {
+	getBookDetailBySlug,
+	getBookSummaryBySlug,
+	getChunkWindow,
+	getHeroBook,
+	listBooks
+} from './books';
 
 /**
  * Service tests (spec #7): the injected Supabase client is mocked — a real DB call must
@@ -472,5 +478,106 @@ describe('getHeroBook', () => {
 	it('throws when the database returns an error', async () => {
 		const { client } = mockSupabase({ data: null, error: { message: 'timeout' } });
 		await expect(getHeroBook(client, 'es')).rejects.toEqual({ message: 'timeout' });
+	});
+});
+
+describe('getBookDetailBySlug', () => {
+	const detailRow = {
+		id: 'b0000000-0000-0000-0000-000000000009',
+		slug: 'don-quijote',
+		title: 'Don Quijote de la Mancha',
+		author: 'Miguel de Cervantes',
+		language: 'es',
+		chunk_count: 2000,
+		cover_url: null,
+		year: 1605,
+		summary: { default: 'An English blurb', es: 'Una reseña' },
+		chapters: [
+			{ index: 1, title: 'Capítulo II', start_chunk_index: 12 },
+			{ index: 0, title: 'Capítulo I', start_chunk_index: 0 }
+		]
+	};
+
+	it('maps the row to a TypeableTextDetail — summary fields plus year, summary and chapters', async () => {
+		const { client } = mockSupabase({ data: detailRow, error: null });
+
+		const book = await getBookDetailBySlug(client, 'don-quijote');
+
+		expect(book).toEqual({
+			id: 'don-quijote',
+			bookId: 'b0000000-0000-0000-0000-000000000009',
+			title: 'Don Quijote de la Mancha',
+			author: 'Miguel de Cervantes',
+			language: 'es',
+			chunkCount: 2000,
+			coverUrl: null,
+			year: 1605,
+			summary: { default: 'An English blurb', es: 'Una reseña' },
+			chapters: [
+				{ index: 0, title: 'Capítulo I', startChunkIndex: 0 },
+				{ index: 1, title: 'Capítulo II', startChunkIndex: 12 }
+			]
+		});
+	});
+
+	it('sorts chapters defensively by index, never trusting the query row order', async () => {
+		const { client } = mockSupabase({ data: detailRow, error: null });
+		const book = await getBookDetailBySlug(client, 'don-quijote');
+		expect(book?.chapters.map((c) => c.index)).toEqual([0, 1]);
+	});
+
+	it('reads books and chapters in ONE round trip, embedding chapters', async () => {
+		const { client, calls } = mockSupabase({ data: detailRow, error: null });
+
+		await getBookDetailBySlug(client, 'don-quijote');
+
+		expect(calls.filter((c) => c.method === 'from').map((c) => c.args)).toEqual([['books']]);
+		const select = calls.find((c) => c.method === 'select')?.args[0] as string;
+		expect(select).toContain('year');
+		expect(select).toContain('summary');
+		expect(select).toContain('chapters(index, title, start_chunk_index)');
+		expect(calls.some((c) => c.method === 'maybeSingle')).toBe(true);
+	});
+
+	it('applies no published_at predicate — RLS owns publication for every caller', async () => {
+		const { client, calls } = mockSupabase({ data: detailRow, error: null });
+
+		await getBookDetailBySlug(client, 'don-quijote');
+
+		expect(calls.filter((c) => c.method === 'eq').map((c) => c.args)).toEqual([
+			['slug', 'don-quijote']
+		]);
+	});
+
+	it('returns a book with no chapters as an empty list, not null', async () => {
+		// El Buscón-class books: no headings in the HTML, so no chapters row at all. The
+		// screen renders without a chapter list rather than 404ing.
+		const { client } = mockSupabase({ data: { ...detailRow, chapters: [] }, error: null });
+		const book = await getBookDetailBySlug(client, 'el-buscon');
+		expect(book?.chapters).toEqual([]);
+	});
+
+	it('passes a missing year and an empty summary map through untouched', async () => {
+		// A failed or absent Open Library lookup is explicitly non-fatal. `resolveSummary`
+		// turns `{}` into "no panel"; this service does not pre-empt that decision.
+		const { client } = mockSupabase({
+			data: { ...detailRow, year: null, summary: {} },
+			error: null
+		});
+		const book = await getBookDetailBySlug(client, 'don-quijote');
+		expect(book?.year).toBeNull();
+		expect(book?.summary).toEqual({});
+	});
+
+	it('returns null for an unknown or unpublished slug, so the route 404s on both', async () => {
+		const { client } = mockSupabase({ data: null, error: null });
+		expect(await getBookDetailBySlug(client, 'nope')).toBeNull();
+	});
+
+	it('throws when the database returns an error', async () => {
+		const { client } = mockSupabase({ data: null, error: { message: 'timeout' } });
+		await expect(getBookDetailBySlug(client, 'don-quijote')).rejects.toEqual({
+			message: 'timeout'
+		});
 	});
 });

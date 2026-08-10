@@ -25,6 +25,15 @@ import { anonClient, type AnyClient } from './supabase';
  * fixed slug means a re-run reuses its rows rather than accumulating probes.
  */
 
+/** A chapter as the manifest/ingestion would produce it — 0-based, in reading order. */
+export interface ProbeChapterSpec {
+	/** 0-based sequence number within the book. */
+	index: number;
+	title: string;
+	/** 0-based chunk index whose first character opens this chapter. */
+	startChunkIndex: number;
+}
+
 export interface ProbeBookSpec {
 	slug: string;
 	title: string;
@@ -32,6 +41,27 @@ export interface ProbeBookSpec {
 	language: 'en' | 'es';
 	/** Chunk contents in index order. `chunk_count` is derived from this, never passed in. */
 	contents: readonly string[];
+	/**
+	 * The detail screen's back-cover facts (spec #34). Optional here because most probe books
+	 * predate them, but ALWAYS WRITTEN — see the "written on every arrangement" note below.
+	 *
+	 * The published seeded fixtures carry neither: they are excerpts with no Open Library work
+	 * and no chapter structure, which is exactly why the metadata and chapter criteria need a
+	 * probe book rather than a fixture. Publishing the real catalog books to get their metadata
+	 * is not an option — they are deliberately unpublished, and publishing one is the user's
+	 * call, not a test's.
+	 */
+	year?: number | null;
+	/**
+	 * The raw per-locale map as `books.summary` holds it: a `default` key standing in for Open
+	 * Library's description, plus locale keys that win over it. Passed through unresolved so a
+	 * spec can arrange the exact shape `resolveSummary` is meant to narrow.
+	 */
+	summary?: Record<string, string>;
+	/** A cover URL to attach at arrangement time, so no spec has to follow up with an update. */
+	coverUrl?: string | null;
+	/** Chapter structure. `[]` and omitted are the same thing: a book with no structure. */
+	chapters?: readonly ProbeChapterSpec[];
 }
 
 /** A probe book as the database holds it, in the shape the specs address it by. */
@@ -45,6 +75,8 @@ export interface ProbeBook {
 	chunkIds: string[];
 	/** Chunk contents in index order — what a test actually types. */
 	contents: readonly string[];
+	/** The chapters as arranged, in reading order. Empty for a book with no structure. */
+	chapters: readonly ProbeChapterSpec[];
 }
 
 /**
@@ -54,6 +86,14 @@ export interface ProbeBook {
  * the publication-gating policy (20260731120000) makes an unpublished book a 404 on the
  * typing route. It is published locally and only for the duration of the spec —
  * {@link retireProbeBook} takes it back out of the catalog in `afterAll`.
+ *
+ * **`year`, `summary` and `cover_url` are written on EVERY arrangement, including to
+ * `null`/`{}`/`null` when the spec omits them.** This is deliberately the same always-write
+ * posture `scripts/ingest.ts` takes with the same three columns (spec #34 Feature Brief,
+ * §"Write posture"): probe slugs are FIXED and reused across runs, so a value left behind by
+ * a previous spec would otherwise leak into the next one's assertions — and the case that
+ * leaks worst is "a book with no summary renders without an empty panel", which passes
+ * vacuously right up until some other spec's summary is still sitting on the row.
  */
 export async function arrangeProbeBook(
 	service: AnyClient,
@@ -69,7 +109,10 @@ export async function arrangeProbeBook(
 				language: spec.language,
 				chunk_count: spec.contents.length,
 				published_at: new Date().toISOString(),
-				featured: false
+				featured: false,
+				year: spec.year ?? null,
+				summary: spec.summary ?? {},
+				cover_url: spec.coverUrl ?? null
 			},
 			{ onConflict: 'slug' }
 		)
@@ -103,6 +146,27 @@ export async function arrangeProbeBook(
 		spec.contents.length
 	);
 
+	// Chapters (spec #33) are DELETED AND REINSERTED, never upserted — the ingestion role has
+	// `select, insert, delete` on `chapters` and deliberately no `update` (20260809180633),
+	// because ingestion always rewrites a book's chapter list whole. Doing the same here means
+	// a probe re-run with fewer chapters than the last one cannot leave a stale row behind,
+	// and it keeps the arrangement on the same grants the real writer has.
+	const wipe = await service.from('chapters').delete().eq('book_id', book.data!.id);
+	expect(wipe.error, `clearing ${spec.slug}'s chapters failed: ${wipe.error?.message}`).toBeNull();
+
+	const chapters = spec.chapters ?? [];
+	if (chapters.length > 0) {
+		const { error } = await service.from('chapters').insert(
+			chapters.map((chapter) => ({
+				book_id: book.data!.id,
+				index: chapter.index,
+				title: chapter.title,
+				start_chunk_index: chapter.startChunkIndex
+			}))
+		);
+		expect(error, `arranging ${spec.slug}'s chapters failed: ${error?.message}`).toBeNull();
+	}
+
 	// Publication, confirmed through a CLIENT role rather than assumed from the write.
 	//
 	// This is the one place a service-role read would be worthless, so it is the one place
@@ -126,7 +190,8 @@ export async function arrangeProbeBook(
 		slug: spec.slug,
 		chunkCount: spec.contents.length,
 		chunkIds: inRange.map((chunk) => chunk.id),
-		contents: spec.contents
+		contents: spec.contents,
+		chapters
 	};
 }
 

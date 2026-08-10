@@ -59,6 +59,32 @@ Two rules govern the general fold:
 The allowed set is asserted against the Phase 1 fixtures in the test suite, so it stays a
 *description* of what hand-cleaning already produced rather than a constraint invented later.
 
+### Scope: this governs text the user must TYPE, not text the app displays
+
+Stated explicitly as of Phase 5d (spec #34), because until then it was only implicit and the
+distinction is about to look like an oversight.
+
+**The rule applies to typeable text — a book's chunks — and to nothing else.** Its entire
+justification is the engine's exact comparison: a character outside the set makes a passage
+*impossible to complete* and silently walls off the rest of the book. That argument has no purchase
+on text nobody types. Interface copy, book titles and authors, and — the case that prompted this —
+**book summaries** are display-only, and typography in them is not a defect.
+
+So `books.summary` legitimately contains curly quotes, em dashes and ellipsis characters, straight
+from Open Library, and `findDisallowed` is **deliberately not run over it**
+([ADR-0019](0019-ingest-time-open-library-metadata.md)). `scripts/ingest.ts` calls `findDisallowed`
+on the cleaned source text only; `src/lib/ingest/open-library.ts` carries the same note at the top
+of the module.
+
+**This is not a weakening of the rule, and gating the summary on it would not be extra safety — it
+would be a category error.** A blurb full of hyphens where the source had em dashes buys nothing (no
+one types it) and costs fidelity in the one place fidelity is free. A future reader who notices that
+a summary contains `—` and reaches for the normalizer should stop here: the absence is the decision.
+
+The boundary is stated as a question rather than a list, so it holds for content this project has
+not built yet: *does the user have to reproduce this character on a keyboard?* If yes, the set
+applies. If no, it does not.
+
 ## Consequences
 
 - The typing engine — the most-tested module in the codebase — needs no change, no equivalence

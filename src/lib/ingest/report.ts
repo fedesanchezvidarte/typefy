@@ -34,6 +34,34 @@ export interface ChapterReportEntry {
 	startChunkIndex: number;
 }
 
+/**
+ * The Open Library lookup, as the report presents it (spec #34).
+ *
+ * Present on every ingest — including when nothing was declared and when the lookup failed —
+ * because the failure is deliberately **non-fatal**, and a non-fatal failure that appears
+ * nowhere is a year that quietly turns blank between one ingest and the next.
+ */
+export interface MetadataReportEntry {
+	/** The manifest's declared work id. Absent → nothing was declared, which is not a failure. */
+	work?: string;
+	/** The year actually written to the catalog — the manifest's when declared, else the fetched one. */
+	year: number | null;
+	/**
+	 * What Open Library's `first_publish_year` produced. Absent when no lookup was attempted;
+	 * `null` when one was and yielded nothing. Kept separate from `year` so the report can
+	 * attribute the number rather than presenting two sources as one anonymous fact.
+	 */
+	openLibraryYear?: number | null;
+	/** The manifest's declared year, when it declared one. Wins over `openLibraryYear`. */
+	manifestYear?: number;
+	/** Open Library's description — what would be stored under the `default` summary key. */
+	description: string | null;
+	/** Locale keys the manifest overrides, e.g. `['es']`. */
+	overrides?: readonly string[];
+	/** The reason the lookup produced nothing usable. Never fatal; always reported. */
+	failure?: string;
+}
+
 export interface ReportInput {
 	slug: string;
 	title: string;
@@ -48,6 +76,8 @@ export interface ReportInput {
 	budget?: PageBudget;
 	/** Absent when the book declares no chapters config at all (spec #33). */
 	chapters?: readonly ChapterReportEntry[];
+	/** The Open Library lookup and any manifest overrides (spec #34). */
+	metadata?: MetadataReportEntry;
 }
 
 /**
@@ -107,6 +137,128 @@ function coverLines(cover: CoverReportEntry | undefined): string[] {
 	];
 }
 
+/** How much of the description the report quotes. See `metadataLines`. */
+const DESCRIPTION_PREVIEW = 200;
+
+/**
+ * The year, with **where it came from** (spec #34).
+ *
+ * A bare number cannot be reviewed: the whole point of the manifest override is that Open
+ * Library's `first_publish_year` is the earliest *catalogued edition*, so "1600" for Don
+ * Quijote is not a typo to fix but a different fact wearing the same name. The reader has to
+ * be able to tell a hand-declared year from a fetched one, and above all has to be TOLD when
+ * the two disagree — that disagreement is the reason this override exists, and it is the one
+ * thing in this section worth a human's attention.
+ *
+ * Agreement is reported too, and is not noise: it says the override has become redundant
+ * because Open Library caught up, which is a reason to delete a line from the manifest.
+ */
+function yearCell(metadata: MetadataReportEntry): string {
+	const { year, manifestYear, openLibraryYear } = metadata;
+
+	if (year === null) {
+		return 'None';
+	}
+	if (manifestYear === undefined) {
+		return `${year} (Open Library)`;
+	}
+	// A declared year with nothing to compare against — no lookup, or one that failed. It must
+	// not read as an "override", because there is nothing it overrode.
+	if (openLibraryYear === undefined || openLibraryYear === null) {
+		return `${year} (manifest)`;
+	}
+	if (openLibraryYear === manifestYear) {
+		return `${year} (manifest, agrees with Open Library)`;
+	}
+	return `${year} (manifest override; Open Library says ${openLibraryYear})`;
+}
+
+/**
+ * The `## Metadata` section (spec #34).
+ *
+ * The description is reported by **length plus its opening**, never in full: a report is a
+ * review artefact, and a multi-paragraph blurb pasted whole would drown the sections that
+ * actually need reading. The length is what makes a silently truncated or swapped description
+ * visible in a diff; the opening is what makes it recognisable.
+ */
+function metadataLines(metadata: MetadataReportEntry | undefined): string[] {
+	const overrides = metadata?.overrides ?? [];
+
+	// "Nothing declared" is not a failure and must not read as one — most of the catalog will
+	// sit here. A hand-written override with no work id is still something declared, so it
+	// takes the table branch rather than this one.
+	if (
+		!metadata ||
+		(metadata.work === undefined && overrides.length === 0 && metadata.manifestYear === undefined)
+	) {
+		return ['## Metadata', '', 'None declared — this book ships without a year or a summary.', ''];
+	}
+
+	const description = metadata.description;
+	const out = [
+		'## Metadata',
+		'',
+		'| Field | Value |',
+		'|---|---|',
+		`| Open Library work | ${metadata.work ? `\`${metadata.work}\`` : 'None declared'} |`,
+		`| First publication year | ${yearCell(metadata)} |`,
+		`| Description | ${
+			description ? `${description.length} characters, from Open Library` : 'None'
+		} |`,
+		`| Summary overrides | ${
+			overrides.length > 0
+				? overrides.map((locale) => `\`${locale}\` (manifest)`).join(', ')
+				: 'None'
+		} |`,
+		''
+	];
+
+	// The two sources disagreeing is not an error — it is the single fact in this section a
+	// reviewer should stop on, so it gets its own blockquote rather than living inside a table
+	// cell. Either the manifest is right and this is the override doing its job, or the
+	// manifest is stale and wants correcting; the report cannot know which, so it says both.
+	if (
+		metadata.manifestYear !== undefined &&
+		typeof metadata.openLibraryYear === 'number' &&
+		metadata.openLibraryYear !== metadata.manifestYear
+	) {
+		out.push(
+			`> The sources disagree: the manifest declares ${metadata.manifestYear}, Open Library ` +
+				`reports ${metadata.openLibraryYear}.`,
+			`> The manifest wins, so ${metadata.manifestYear} is what gets written. Open Library reports the`,
+			'> earliest edition it has CATALOGUED, which is not the same fact as first publication —',
+			'> confirm the declared year is still the better one before publishing.',
+			''
+		);
+	}
+
+	// A failure is non-fatal, so this blockquote is the only place a reviewer meets it in the
+	// committed diff. Same shape as the over-budget warning above, deliberately: one thing to
+	// learn to read, not two.
+	if (metadata.failure) {
+		out.push(
+			`> Open Library lookup failed: ${metadata.failure}`,
+			'> This book is ingested without a year and without a `default` summary; any manifest',
+			'> override is unaffected. Re-run the ingest once the lookup works to restore them.',
+			''
+		);
+	}
+
+	if (description) {
+		const preview = description.slice(0, DESCRIPTION_PREVIEW);
+		out.push(
+			'Opening of the description, as it would be stored under `default`:',
+			'',
+			'```',
+			description.length > DESCRIPTION_PREVIEW ? `${preview}…` : preview,
+			'```',
+			''
+		);
+	}
+
+	return out;
+}
+
 /** Builds the committed markdown report for one book. */
 export function buildReport(input: ReportInput): string {
 	const budget = input.budget ?? DEFAULT_BUDGET;
@@ -156,6 +308,8 @@ export function buildReport(input: ReportInput): string {
 			''
 		);
 	}
+
+	out.push(...metadataLines(input.metadata));
 
 	out.push('## Chapters', '');
 	if (input.chapters === undefined) {

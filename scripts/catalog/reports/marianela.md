@@ -18,6 +18,26 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value                                            |
+| ---------------------- | ------------------------------------------------ |
+| Open Library work      | `/works/OL815453W`                               |
+| First publication year | 1878 (manifest override; Open Library says 1883) |
+| Description            | 854 characters, from Open Library                |
+| Summary overrides      | None                                             |
+
+> The sources disagree: the manifest declares 1878, Open Library reports 1883.
+> The manifest wins, so 1878 is what gets written. Open Library reports the
+> earliest edition it has CATALOGUED, which is not the same fact as first publication —
+> confirm the declared year is still the better one before publishing.
+
+Opening of the description, as it would be stored under `default`:
+
+```
+«Marianela» (1878) pertenece a lo que Galdós llamó Novelas de la Primera época (que comprenden obras como «Doña Perfecta» y «Gloria»). Partiendo de un caso extraído de un tratado de Psicología (la rec…
+```
+
 ## Chapters
 
 None declared — this book has no derivable chapter structure.
