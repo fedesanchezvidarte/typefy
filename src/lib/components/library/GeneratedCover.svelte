@@ -9,10 +9,17 @@
 
 	let { book }: Props = $props();
 
-	/* Content language label — the book's language, independent of UI locale. */
+	/* The badge names the book's CONTENT language (`books.language`), but it is chrome
+	   describing the book to the reader — so it is written in the UI locale, not in the
+	   language it names. Under `/es` an English book reads "INGLÉS".
+
+	   Hence `book_language_*` (exonyms: English/Spanish, Inglés/Español) rather than the
+	   `lang_label_*` bundle, whose values are endonyms — identical in both locales on
+	   purpose, because LanguageSwitcher offers each UI locale in its own language. Same
+	   two languages, two different jobs; reusing one set for both is the bug this fixes. */
 	const languageLabels = {
-		en: m.lang_label_en,
-		es: m.lang_label_es
+		en: m.book_language_en,
+		es: m.book_language_es
 	};
 
 	const titleSize = $derived(coverTitleSize(book.title));

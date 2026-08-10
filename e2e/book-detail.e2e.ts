@@ -150,6 +150,13 @@ test.describe('book detail screen', () => {
 		// typographic cover — the same component the card uses since spec #34.
 		await expect(main.getByTestId('generated-cover')).toBeVisible();
 
+		// Its badge is the ONLY place this screen states the book's content language, which is
+		// why the a11y pass left the generated cover readable rather than `aria-hidden`. The
+		// probe is an `en` book under the EN locale, so the exonym and the endonym coincide
+		// here — the ES test below is the half that can actually fail. Uppercasing is CSS, so
+		// the accessible text is the sentence-case message.
+		await expect(main.getByTestId('generated-cover')).toContainText('English');
+
 		// Values, not labels: the labels are translated, and a locator built on them would
 		// only work in one locale.
 		await expect(main.getByTestId('book-fact-year')).toHaveText(String(YEAR));
@@ -176,6 +183,13 @@ test.describe('book detail screen', () => {
 		await expect(main.getByRole('heading', { level: 1 })).toHaveText('The Detail Probe');
 		await expect(main.getByTestId('book-fact-year')).toHaveText(String(YEAR));
 		await expect(main.getByTestId('book-fact-pages')).toHaveText(String(full.chunkCount));
+
+		// The cover's content-language badge is chrome, so it turns over with the locale even
+		// though the language it names does not: the book is still `en`, and under ES that
+		// reads "INGLÉS" — not the endonym "English" the language switcher shows. Asserting
+		// the negative too, because rendering the endonym is exactly the regression (A3).
+		await expect(main.getByTestId('generated-cover')).toContainText('Inglés');
+		await expect(main.getByTestId('generated-cover')).not.toContainText('English');
 
 		await expect(main.getByTestId('book-facts')).toContainText('Primera publicación');
 		await expect(main.getByTestId('book-facts')).toContainText('Páginas');
