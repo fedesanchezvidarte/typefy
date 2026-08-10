@@ -21,6 +21,26 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value                                            |
+| ---------------------- | ------------------------------------------------ |
+| Open Library work      | `/works/OL24156W`                                |
+| First publication year | 1886 (manifest override; Open Library says 1875) |
+| Description            | 677 characters, from Open Library                |
+| Summary overrides      | None                                             |
+
+> The sources disagree: the manifest declares 1886, Open Library reports 1875.
+> The manifest wins, so 1886 is what gets written. Open Library reports the
+> earliest edition it has CATALOGUED, which is not the same fact as first publication —
+> confirm the declared year is still the better one before publishing.
+
+Opening of the description, as it would be stored under `default`:
+
+```
+Mr. Gabriel Utterson is a serious, austere lawyer living a humdrum life in Victorian London. Yet there is a strange clause in his friend, Dr. Henry Jekyll's will: should he disappear for more than 3 m…
+```
+
 ## Chapters
 
 None declared — this book has no derivable chapter structure.

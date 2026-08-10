@@ -1,6 +1,21 @@
 export type Language = 'en' | 'es';
 
 /**
+ * A **UI locale** — what Paraglide renders the interface in, and the axis a per-locale book
+ * summary is keyed on (spec #34).
+ *
+ * Declared here rather than imported from `$lib/paraglide/runtime` on purpose: that module is
+ * generated at build time and gitignored, and `types.ts` is the one module every tier the
+ * `lib-patterns` two-tier rule names may import from. A shared contract must not depend on an
+ * artifact that does not exist in a fresh checkout.
+ *
+ * It coincides with {@link Language} on two strings today and stays **independent by rule**
+ * (CONTEXT.md): content language is a property of the book, locale is a property of the
+ * reader. Never substitute one for the other because the unions happen to match.
+ */
+export type Locale = 'en' | 'es';
+
+/**
  * The MEASUREMENT axis (spec #24). It answers exactly one question — *is this stretch of
  * typing being measured?* — and must never accumulate a second meaning.
  *
@@ -81,6 +96,71 @@ export interface TypeableTextSummary {
 	 * human — there is no heuristic.
 	 */
 	coverUrl: string | null;
+}
+
+/**
+ * Locale-keyed book summaries (spec #34) — the validated view of the `books.summary` jsonb map.
+ *
+ * `default` is Open Library's description, whose language is **unverified** — which is exactly
+ * why it is not filed under `'en'`. Any locale key overrides it, so the resolution rule is a
+ * one-liner: `summary[locale] ?? summary.default ?? null`. That rule lives in exactly one
+ * place, `resolveSummary` (`$lib/library/summary`); no component ever reads this map directly,
+ * and nothing else ever narrows the raw `Json` the generated types hand back.
+ *
+ * `Partial` because every key is optional — a book with no summary at all is `{}`, the column's
+ * default, and is a normal state rather than a defect.
+ */
+export type SummaryByLocale = Partial<Record<'default' | Locale, string>>;
+
+/**
+ * One chapter of a book as ingestion derived it (ADR-0017): its 0-based position, its title,
+ * and the index of the chunk it starts at. Mirrors a `chapters` row minus the keys.
+ *
+ * `startChunkIndex` is a **chunk** index, not a page number. The 1-based page numbers a reader
+ * sees are derived from it by `buildChapterProgress`, which is the only place the two
+ * vocabularies meet.
+ */
+export interface ChapterSummary {
+	index: number;
+	title: string;
+	startChunkIndex: number;
+}
+
+/**
+ * A chapter with its resolved page range and one user's progress inside it (spec #34) — what
+ * the detail screen's chapter list renders.
+ *
+ * Produced by `buildChapterProgress` (`$lib/library/chapter-progress`), which applies
+ * ADR-0017's attribution rule: a page belongs to the chapter its FIRST character falls in, so
+ * ranges are contiguous and non-overlapping and progress stays a plain count with no weighted
+ * sum anywhere in the product.
+ */
+export interface ChapterProgress extends ChapterSummary {
+	/** 1-based, inclusive — what the UI shows. */
+	firstPage: number;
+	/** 1-based, inclusive. Equals `firstPage` for a one-page chapter. */
+	lastPage: number;
+	pageCount: number;
+	/** 0 for a guest and for a chapter with no completions — never null. */
+	pagesCompleted: number;
+}
+
+/**
+ * A book's summary row PLUS the facts only the detail screen needs (spec #34).
+ *
+ * **Extends `TypeableTextSummary` rather than replacing it, and that is load-bearing.** The
+ * typing path reads `getBookSummaryBySlug` on a hot route; it must not start paying for a
+ * jsonb column and an embedded chapter list to serve a screen it never renders. Anything the
+ * typing path needs belongs on the summary; anything only `/books/[slug]` needs belongs here.
+ */
+export interface TypeableTextDetail extends TypeableTextSummary {
+	/**
+	 * The WORK's first publication year (never a Gutenberg release date, never an edition
+	 * date). Null is a real, expected state: the Open Library lookup is explicitly non-fatal.
+	 */
+	year: number | null;
+	summary: SummaryByLocale;
+	chapters: readonly ChapterSummary[];
 }
 
 /**

@@ -21,6 +21,21 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value                             |
+| ---------------------- | --------------------------------- |
+| Open Library work      | `/works/OL450063W`                |
+| First publication year | 1818 (Open Library)               |
+| Description            | 470 characters, from Open Library |
+| Summary overrides      | None                              |
+
+Opening of the description, as it would be stored under `default`:
+
+```
+*Frankenstein; or, The Modern Prometheus* is an 1818 novel written by English author Mary Shelley. Frankenstein tells the story of Victor Frankenstein, a young scientist who creates a sapient creature…
+```
+
 ## Chapters
 
 None declared — this book has no derivable chapter structure.

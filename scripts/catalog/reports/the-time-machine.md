@@ -18,6 +18,21 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value                             |
+| ---------------------- | --------------------------------- |
+| Open Library work      | `/works/OL52267W`                 |
+| First publication year | 1895 (Open Library)               |
+| Description            | 502 characters, from Open Library |
+| Summary overrides      | None                              |
+
+Opening of the description, as it would be stored under `default`:
+
+```
+The Time Traveller, a dreamer obsessed with traveling through time, builds himself a time machine and, much to his surprise, travels over 800,000 years into the future. He lands in the year 802701: th…
+```
+
 ## Chapters
 
 None declared — this book has no derivable chapter structure.

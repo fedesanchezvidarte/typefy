@@ -21,6 +21,21 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value                            |
+| ---------------------- | -------------------------------- |
+| Open Library work      | `/works/OL32466W`                |
+| First publication year | 1843 (Open Library)              |
+| Description            | 74 characters, from Open Library |
+| Summary overrides      | None                             |
+
+Opening of the description, as it would be stored under `default`:
+
+```
+A retelling of the story about a miser whose life is changed by Christmas.
+```
+
 ## Chapters
 
 None declared — this book has no derivable chapter structure.

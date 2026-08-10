@@ -21,6 +21,15 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value           |
+| ---------------------- | --------------- |
+| Open Library work      | None declared   |
+| First publication year | 1914 (manifest) |
+| Description            | None            |
+| Summary overrides      | None            |
+
 ## Chapters
 
 | #   | Title               | Start page | Pages |

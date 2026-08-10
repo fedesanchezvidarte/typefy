@@ -21,6 +21,21 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value                             |
+| ---------------------- | --------------------------------- |
+| Open Library work      | `/works/OL7985084W`               |
+| First publication year | 1554 (Open Library)               |
+| Description            | 852 characters, from Open Library |
+| Summary overrides      | None                              |
+
+Opening of the description, as it would be stored under `default`:
+
+```
+*The Life of Lazarillo de Tormes and of His Fortunes and Adversities* (Spanish: *La vida de Lazarillo de Tormes y de sus fortunas y adversidades*) is a Spanish novella, published anonymously because o…
+```
+
 ## Chapters
 
 None declared — this book has no derivable chapter structure.

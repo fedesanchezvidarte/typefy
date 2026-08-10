@@ -18,6 +18,21 @@
 | Longest (lines)                         | 24     |
 | Over the budget (1600 chars / 24 lines) | 0      |
 
+## Metadata
+
+| Field                  | Value                              |
+| ---------------------- | ---------------------------------- |
+| Open Library work      | `/works/OL144961W`                 |
+| First publication year | 1626 (Open Library)                |
+| Description            | 1340 characters, from Open Library |
+| Summary overrides      | None                               |
+
+Opening of the description, as it would be stored under `default`:
+
+```
+*La vida del Buscón* (de título completo *Historia de la vida del Buscón, llamado don Pablos; ejemplo de vagamundos y espejo de tacaños,* y conocida también como *El Buscón)*​ es una novela picaresca …
+```
+
 ## Chapters
 
 | #   | Title                                                                                                                                                | Start page | Pages |

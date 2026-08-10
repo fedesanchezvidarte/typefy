@@ -203,3 +203,253 @@ describe('buildReport', () => {
 		});
 	});
 });
+
+/*
+ * Spec #34. The report is the only review artefact for the year and summary — ingestion
+ * writes straight to the database, so a lookup that silently started failing would otherwise
+ * be invisible until someone noticed a blank line on a screen.
+ */
+describe('buildReport — ## Metadata', () => {
+	it('places the section between ## Chunks and ## Chapters', () => {
+		const report = buildReport(base);
+		expect(report.indexOf('## Chunks')).toBeLessThan(report.indexOf('## Metadata'));
+		expect(report.indexOf('## Metadata')).toBeLessThan(report.indexOf('## Chapters'));
+	});
+
+	it('says nothing is declared when the book declares no work and no override', () => {
+		const report = buildReport(base);
+		expect(report).toContain('None declared — this book ships without a year or a summary.');
+	});
+
+	it('reports the work id and the year it produced', () => {
+		const report = buildReport({
+			...base,
+			metadata: { work: '/works/OL144961W', year: 1626, description: null }
+		});
+		expect(report).toContain('/works/OL144961W');
+		expect(report).toContain('1626');
+	});
+
+	it('reports the description by LENGTH, not in full', () => {
+		const description = 'x'.repeat(412);
+		const report = buildReport({
+			...base,
+			metadata: { work: '/works/OL144961W', year: 1626, description }
+		});
+		expect(report).toContain('412 characters');
+		expect(report).not.toContain(description);
+	});
+
+	it('quotes only the opening of the description', () => {
+		const description = `${'a'.repeat(200)}${'b'.repeat(300)}`;
+		const report = buildReport({
+			...base,
+			metadata: { work: '/works/OL144961W', year: null, description }
+		});
+		expect(report).toContain('a'.repeat(200));
+		expect(report).not.toContain('b'.repeat(10));
+	});
+
+	it('quotes a short description whole without an ellipsis', () => {
+		const report = buildReport({
+			...base,
+			metadata: { work: '/works/OL144961W', year: null, description: 'A short blurb.' }
+		});
+		expect(report).toContain('A short blurb.');
+		expect(report).not.toContain('A short blurb.…');
+	});
+
+	it('lists the manifest summary override locales', () => {
+		const report = buildReport({
+			...base,
+			metadata: {
+				work: '/works/OL144961W',
+				year: 1626,
+				description: 'A blurb.',
+				overrides: ['es']
+			}
+		});
+		expect(report).toMatch(/`es`.*manifest/);
+	});
+
+	/*
+	 * A failure is NON-FATAL, so it must be loud somewhere. The blockquote follows the
+	 * over-budget warning's shape, which is what a reviewer already knows how to read.
+	 */
+	it('renders a failure as a blockquote naming the reason verbatim', () => {
+		const report = buildReport({
+			...base,
+			metadata: {
+				work: '/works/OL144961W',
+				year: null,
+				description: null,
+				failure: 'Open Library returned 404 Not Found'
+			}
+		});
+		expect(report).toContain('> ');
+		expect(report).toContain('Open Library returned 404 Not Found');
+	});
+
+	it('still reports the work id when the lookup failed, so the wrong id is visible', () => {
+		const report = buildReport({
+			...base,
+			metadata: {
+				work: '/works/OL999999999W',
+				year: null,
+				description: null,
+				failure: 'Open Library returned 404 Not Found'
+			}
+		});
+		expect(report).toContain('/works/OL999999999W');
+	});
+
+	/*
+	 * A hand-written summary with no Open Library work is legitimate, so it must not fall into
+	 * the "None declared" branch — that would report a book as having no summary while shipping
+	 * one.
+	 */
+	it('reports manifest overrides even when no work is declared', () => {
+		const report = buildReport({
+			...base,
+			metadata: { year: null, description: null, overrides: ['es'] }
+		});
+		expect(report).not.toContain('None declared — this book ships without a year or a summary.');
+		expect(report).toContain('`es`');
+	});
+
+	it('leaves every other section unchanged', () => {
+		const report = buildReport({
+			...base,
+			metadata: { work: '/works/OL144961W', year: 1626, description: 'A blurb.' }
+		});
+		expect(report).toContain('## Chunks');
+		expect(report).toContain('## Chapters');
+		expect(report).toContain('## Disallowed characters');
+		expect(report).toContain('## Boundary chunks');
+	});
+});
+
+/*
+ * Year provenance (spec #34). The manifest may declare a `year` that overrides Open Library's
+ * `first_publish_year`, so the report has to answer a question it did not have before: WHERE
+ * did this number come from? A reviewer reading the diff must be able to tell a hand-declared
+ * 1605 from a fetched 1626, and — the case the override exists for — must be told when the two
+ * sources disagree, because that disagreement is the thing worth a human's attention.
+ */
+describe('buildReport — ## Metadata year provenance', () => {
+	it('attributes a fetched year to Open Library', () => {
+		const report = buildReport({
+			...base,
+			metadata: {
+				work: '/works/OL144961W',
+				year: 1626,
+				openLibraryYear: 1626,
+				description: null
+			}
+		});
+		expect(report).toContain('1626 (Open Library)');
+	});
+
+	it('attributes a declared year to the manifest', () => {
+		const report = buildReport({
+			...base,
+			metadata: { year: 1914, manifestYear: 1914, description: null, overrides: ['es'] }
+		});
+		expect(report).toContain('1914 (manifest)');
+	});
+
+	/*
+	 * The case the override was added for. Both numbers appear, labelled, and the disagreement
+	 * is called out rather than left for the reader to spot by comparing two cells.
+	 */
+	it('shows both numbers and names the disagreement when the sources differ', () => {
+		const report = buildReport({
+			...base,
+			metadata: {
+				work: '/works/OL503666W',
+				year: 1605,
+				manifestYear: 1605,
+				openLibraryYear: 1600,
+				description: null
+			}
+		});
+		expect(report).toContain('1605 (manifest override');
+		expect(report).toContain('1600');
+		expect(report).toMatch(/disagree/i);
+	});
+
+	/*
+	 * Agreement is worth stating too: it tells the reviewer the override is now redundant
+	 * because Open Library has been corrected, which is a reason to delete it.
+	 */
+	it('says the sources agree when the declared year matches the fetched one', () => {
+		const report = buildReport({
+			...base,
+			metadata: {
+				work: '/works/OL144961W',
+				year: 1626,
+				manifestYear: 1626,
+				openLibraryYear: 1626,
+				description: null
+			}
+		});
+		expect(report).toContain('1626 (manifest, agrees with Open Library)');
+		expect(report).not.toMatch(/disagree/i);
+	});
+
+	/*
+	 * A declared year for a book with no work id — the niebla/trafalgar case. There is nothing
+	 * to disagree with, so it must not read as an override of anything.
+	 */
+	it('does not claim an override when there was no lookup to override', () => {
+		const report = buildReport({
+			...base,
+			metadata: { year: 1873, manifestYear: 1873, description: null, overrides: ['es'] }
+		});
+		expect(report).toContain('1873 (manifest)');
+		// Not `not.toContain('override')` — the `Summary overrides` row legitimately says it.
+		expect(report).not.toContain('manifest override');
+	});
+
+	/*
+	 * A failed lookup leaves no fetched year to compare against, so a declared year stands
+	 * alone — and must still be reported as present, since it is still written to the catalog.
+	 */
+	it('reports a declared year even when the Open Library lookup failed', () => {
+		const report = buildReport({
+			...base,
+			metadata: {
+				work: '/works/OL503666W',
+				year: 1605,
+				manifestYear: 1605,
+				openLibraryYear: null,
+				description: null,
+				failure: 'Open Library returned 404 Not Found — check the work id in the manifest.'
+			}
+		});
+		expect(report).toContain('1605 (manifest)');
+		expect(report).toContain('404 Not Found');
+	});
+
+	it('still says None when neither source produced a year', () => {
+		const report = buildReport({
+			...base,
+			metadata: {
+				work: '/works/OL144961W',
+				year: null,
+				openLibraryYear: null,
+				description: 'A blurb.'
+			}
+		});
+		expect(report).toContain('| First publication year | None |');
+	});
+
+	it('renders a book with a declared year but nothing else as a table, not "None declared"', () => {
+		const report = buildReport({
+			...base,
+			metadata: { year: 1914, manifestYear: 1914, description: null }
+		});
+		expect(report).not.toContain('None declared — this book ships without a year or a summary.');
+		expect(report).toContain('1914 (manifest)');
+	});
+});

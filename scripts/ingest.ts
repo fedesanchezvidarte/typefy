@@ -43,6 +43,7 @@ import {
 import { chunkParagraphs } from '../src/lib/chunking/chunker.ts';
 import { extractHeadings } from '../src/lib/ingest/headings.ts';
 import { alignChapters, type AlignChaptersResult } from '../src/lib/ingest/chapters.ts';
+import { parseOpenLibraryWork } from '../src/lib/ingest/open-library.ts';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MANIFEST = resolve(ROOT, 'scripts/catalog/books.json');
@@ -224,6 +225,104 @@ async function readChaptersHtml(
 	return html;
 }
 
+/** Open Library is a courtesy dependency, not a critical one; it does not get to hang a run. */
+const OPEN_LIBRARY_TIMEOUT_MS = 10_000;
+
+/** One Open Library GET, decoded as JSON. Never throws; every failure is a readable reason. */
+async function getJson(url: string): Promise<{ json: unknown } | { failure: string }> {
+	let text: string;
+	try {
+		const response = await fetch(url, {
+			signal: AbortSignal.timeout(OPEN_LIBRARY_TIMEOUT_MS),
+			headers: { accept: 'application/json' }
+		});
+		if (!response.ok) {
+			return {
+				failure:
+					`Open Library returned ${response.status} ${response.statusText}` +
+					(response.status === 404 ? ' — check the work id in the manifest.' : '.')
+			};
+		}
+		text = await response.text();
+	} catch (cause) {
+		return { failure: `Open Library request failed — ${(cause as Error).message}.` };
+	}
+
+	try {
+		return { json: JSON.parse(text) };
+	} catch (cause) {
+		return { failure: `Open Library returned unparseable JSON — ${(cause as Error).message}.` };
+	}
+}
+
+/**
+ * The Open Library payload for one declared work id, from the cache when possible (spec #34).
+ *
+ * **Two requests, both addressed by the declared id, merged into one payload.** The work
+ * document carries the description but *not* `first_publish_year`; that field exists only on a
+ * search document, so it is requested as `q=key:/works/OL…W` — a lookup of one known id, not a
+ * title search, which is the distinction the spec's "never by search" rule actually cares
+ * about. (The work document's own `first_publish_date` is an edition date — "1853" for Pride
+ * and Prejudice — and is never used; see `open-library.ts`.)
+ *
+ * Cached in the same `.cache/sources` directory and honouring the same `--refresh` flag as
+ * `readSource` and `readChaptersHtml`, so a `--dry-run` after the first run costs no request.
+ * Only a fully successful pair is cached, so a 404 or a timeout is retried on the next run
+ * rather than frozen in. The cache is keyed on the **slug**, exactly as the source and
+ * chapters caches are — so CHANGING a book's `openLibraryWork` needs `--refresh`, or the old
+ * work's payload is reused. Same caveat, same shape, one rule to remember rather than three.
+ *
+ * Returns reasons instead of calling `fail()`: every failure here is non-fatal. A `failure`
+ * alongside a `payload` is the partial case — the description arrived, the year lookup did
+ * not — and it is reported rather than silently rendered as "no year".
+ */
+async function readOpenLibraryWork(
+	work: string,
+	slug: string,
+	refresh: boolean
+): Promise<{ payload?: unknown; failure?: string }> {
+	const cached = resolve(CACHE, `${slug}.openlibrary.json`);
+	if (!refresh && existsSync(cached)) {
+		try {
+			return { payload: JSON.parse(readFileSync(cached, 'utf8')) };
+		} catch {
+			// A corrupt cache file is not worth a refusal — re-fetch and overwrite it.
+		}
+	}
+
+	const workUrl = `https://openlibrary.org${work}.json`;
+	console.log(`  fetching ${workUrl}`);
+	const document = await getJson(workUrl);
+	if ('failure' in document) {
+		return { failure: `${document.failure} (${work})` };
+	}
+
+	const searchUrl =
+		`https://openlibrary.org/search.json?q=${encodeURIComponent(`key:${work}`)}` +
+		`&fields=key,first_publish_year&limit=1`;
+	const search = await getJson(searchUrl);
+	if ('failure' in search) {
+		// The description is still worth having, so this is a partial success, not a write-off.
+		return {
+			payload: document.json,
+			failure: `the first publication year lookup for ${work} failed — ${search.failure}`
+		};
+	}
+
+	const doc = (search.json as { docs?: { first_publish_year?: unknown }[] }).docs?.[0];
+	const payload = {
+		...(document.json as Record<string, unknown>),
+		...(doc?.first_publish_year !== undefined ? { first_publish_year: doc.first_publish_year } : {})
+	};
+
+	mkdirSync(CACHE, { recursive: true });
+	// The MERGED payload is what gets cached — the bytes inspected when a year or a blurb looks
+	// wrong are then exactly the bytes `parseOpenLibraryWork` was handed, which is the same
+	// property `readSource`'s cache exists for.
+	writeFileSync(cached, JSON.stringify(payload, null, '\t'), 'utf8');
+	return { payload };
+}
+
 // ---------------------------------------------------------------------------
 // Preparation — pure pipeline over one book
 // ---------------------------------------------------------------------------
@@ -234,6 +333,22 @@ interface PreparedCover {
 	image: CoverImage;
 	license: string;
 	source: string;
+}
+
+/** The Open Library lookup's outcome for one book (spec #34). Never a reason to stop. */
+interface PreparedMetadata {
+	/** Absent when the entry declares no `openLibraryWork` — "None declared", not a failure. */
+	work?: string;
+	/** The year to write: the manifest's when declared, otherwise Open Library's. */
+	year: number | null;
+	/** What Open Library produced. Absent when no lookup ran; `null` when one ran and failed. */
+	openLibraryYear?: number | null;
+	/** The manifest's declared year, when it declared one. Always wins over the fetched one. */
+	manifestYear?: number;
+	/** Open Library's description → the `default` summary key. `null` on any failure. */
+	description: string | null;
+	/** Present only when the lookup was attempted and produced nothing usable. Never fatal. */
+	failure?: string;
 }
 
 interface PreparedBook {
@@ -248,6 +363,8 @@ interface PreparedBook {
 	 * see `main()`) so `writeReport` can render it and `main()` can refuse the write.
 	 */
 	chapters?: AlignChaptersResult;
+	/** Always present; a book with no `openLibraryWork` gets `{ year: null, description: null }`. */
+	metadata: PreparedMetadata;
 }
 
 /**
@@ -337,6 +454,82 @@ async function prepareChapters(
 	return undefined;
 }
 
+/**
+ * The book's year and description from Open Library, or the reason there are none (spec #34).
+ *
+ * Runs inside `prepare()`, alongside `prepareChapters` — i.e. **before any credential is
+ * read**, extending the ordering discipline `readCover`'s docstring already states to this
+ * network call. Nothing privileged is in memory while a third-party host is being talked to.
+ *
+ * **Failure is non-fatal here, unlike chapter alignment, and that asymmetry is the design.**
+ * A subtly wrong chapter list is worse than none, so `main()` turns it fatal; a missing blurb
+ * is not — text and chapters are the product, a blurb is not. So a network error, a timeout, a
+ * non-200 (a 404 for a wrong work id included), unparseable JSON, and valid JSON carrying
+ * neither field all resolve to `{ year: null, description: null, failure }`, and ingestion
+ * continues. The reason is printed live by `main()` and written into the committed report.
+ *
+ * **A manifest `year` wins over the fetched one**, on the same doctrine as the per-locale
+ * `summary` overrides: the manifest is the source of truth and a third party is a convenience.
+ * Both numbers are carried through separately so the report can attribute each and flag a
+ * disagreement — which is the whole reason the override exists, since Open Library's
+ * `first_publish_year` is its earliest CATALOGUED edition rather than first publication.
+ */
+async function prepareMetadata(
+	entry: BookManifestEntry,
+	options: Options
+): Promise<PreparedMetadata> {
+	// A declared year with no work id is the niebla/trafalgar case — books deliberately given
+	// no `openLibraryWork` because Open Library's description for them is a physical-extent or
+	// series note rather than a blurb. Not a failure, and it must still be written.
+	const declared = entry.year === undefined ? {} : { manifestYear: entry.year };
+
+	if (!entry.openLibraryWork) {
+		// Not a failure: most of the catalog may legitimately sit here.
+		return { ...declared, year: entry.year ?? null, description: null };
+	}
+
+	const work = entry.openLibraryWork;
+	const { payload, failure } = await readOpenLibraryWork(work, entry.slug, options.refresh);
+	if (payload === undefined) {
+		// The lookup failed outright, so there is no fetched year to compare against — but a
+		// declared one still stands, and is still written. That is the always-write posture
+		// working in the maintainer's favour for once: a manifest year survives an outage.
+		return {
+			work,
+			...declared,
+			year: entry.year ?? null,
+			openLibraryYear: null,
+			description: null,
+			failure: failure!
+		};
+	}
+
+	const { year, description } = parseOpenLibraryWork(payload);
+	if (year === null && description === null) {
+		return {
+			work,
+			...declared,
+			year: entry.year ?? null,
+			openLibraryYear: null,
+			description: null,
+			failure:
+				failure ??
+				`${work} carries neither a usable first publication year nor a usable description.`
+		};
+	}
+
+	// A partial failure travels WITH the usable half: the report says the year lookup failed
+	// rather than showing a blank year that reads as "this work has no year".
+	return {
+		work,
+		...declared,
+		year: entry.year ?? year,
+		openLibraryYear: year,
+		description,
+		...(failure ? { failure } : {})
+	};
+}
+
 async function prepare(entry: BookManifestEntry, options: Options): Promise<PreparedBook> {
 	const raw = await readSource(entry, options.refresh);
 	const cleaned = cleanSource(raw, entry.cleaning);
@@ -346,7 +539,8 @@ async function prepare(entry: BookManifestEntry, options: Options): Promise<Prep
 		chunks,
 		disallowed: findDisallowed(cleaned),
 		cover: readCover(entry),
-		chapters: await prepareChapters(entry, chunks, options)
+		chapters: await prepareChapters(entry, chunks, options),
+		metadata: await prepareMetadata(entry, options)
 	};
 }
 
@@ -374,7 +568,25 @@ function writeReport(prepared: PreparedBook): string {
 				: {}),
 			// Only a successful alignment has rows to show; a failed one is reported via the fatal
 			// error in `main()` instead, and "declares no chapters" renders "None declared."
-			...(prepared.chapters?.ok ? { chapters: prepared.chapters.chapters } : {})
+			...(prepared.chapters?.ok ? { chapters: prepared.chapters.chapters } : {}),
+			// Always passed, including on failure: this is the ONLY committed record that a
+			// non-fatal lookup stopped working, which is what makes it show up in a PR diff
+			// rather than as a year that silently went blank.
+			metadata: {
+				...(prepared.metadata.work ? { work: prepared.metadata.work } : {}),
+				year: prepared.metadata.year,
+				...(prepared.metadata.manifestYear !== undefined
+					? { manifestYear: prepared.metadata.manifestYear }
+					: {}),
+				...(prepared.metadata.openLibraryYear !== undefined
+					? { openLibraryYear: prepared.metadata.openLibraryYear }
+					: {}),
+				description: prepared.metadata.description,
+				...(prepared.entry.summary
+					? { overrides: Object.keys(prepared.entry.summary).sort() }
+					: {}),
+				...(prepared.metadata.failure ? { failure: prepared.metadata.failure } : {})
+			}
 		}),
 		'utf8'
 	);
@@ -625,7 +837,28 @@ async function writeBook(
 				// two featured entries in one language; `books_featured_per_language_idx` is the
 				// database's own copy of that rule, and it is what catches the case the manifest
 				// cannot see — a book featured by an EARLIER ingest that this run does not touch.
-				featured: entry.featured
+				featured: entry.featured,
+				// ALWAYS written, including to `null` and `{}` — the same posture `writeCover`
+				// takes with `cover_url`, for the same reason: removing `summary.es` from the
+				// manifest and re-ingesting must CLEAR it, or a summary the maintainer deleted
+				// lingers in the catalog forever. The manifest is the source of truth for what
+				// the catalog is, including for absences.
+				//
+				// THE ACCEPTED TRAP, stated rather than hidden: if Open Library is down during a
+				// re-ingest, this wipes a previously good `year` and `default` summary. Accepted
+				// because (a) preserving a value nobody can currently reproduce would make the
+				// catalog depend on ingestion history instead of on the manifest, which is exactly
+				// what the manifest doctrine exists to prevent; (b) the loss is fully recoverable
+				// by re-running one command; (c) the report's `## Metadata` blockquote makes it
+				// visible in the PR diff rather than silent. Manifest overrides are unaffected —
+				// they are local and never depend on the network.
+				year: prepared.metadata.year,
+				// Manifest overrides merged LAST, so a locale key always wins over Open Library's
+				// language-unverified `default`.
+				summary: {
+					...(prepared.metadata.description ? { default: prepared.metadata.description } : {}),
+					...entry.summary
+				}
 			},
 			{ onConflict: 'slug' }
 		)
@@ -784,6 +1017,30 @@ async function main(): Promise<void> {
 		if (book.cover) {
 			const { format, width, height, bytes } = book.cover.image;
 			console.log(`  cover: ${format} ${width}x${height}, ${Math.round(bytes / 1024)} KB`);
+		}
+		// Printed live as well as written to the report: the report is for the reviewer reading
+		// the diff later, this line is for the operator watching the run now. A failure that is
+		// only discoverable after the fact is one nobody fixes in the same sitting.
+		if (book.metadata.failure) {
+			console.warn(`  metadata: ${book.metadata.failure} Continuing — this is not fatal.`);
+		} else if (book.metadata.work || book.metadata.manifestYear !== undefined) {
+			const year = book.metadata.year ?? 'no year';
+			const description = book.metadata.description
+				? `${book.metadata.description.length}-char description`
+				: 'no description';
+			console.log(`  metadata: ${year}, ${description}`);
+		}
+		// Surfaced live as well as in the report: an operator who has just edited a manifest year
+		// should learn on the spot that it contradicts Open Library, not three files later.
+		if (
+			book.metadata.manifestYear !== undefined &&
+			typeof book.metadata.openLibraryYear === 'number' &&
+			book.metadata.openLibraryYear !== book.metadata.manifestYear
+		) {
+			console.warn(
+				`  metadata: manifest declares ${book.metadata.manifestYear}, Open Library reports ` +
+					`${book.metadata.openLibraryYear} — the manifest wins.`
+			);
 		}
 		if (book.disallowed.length > 0) {
 			const summary = book.disallowed

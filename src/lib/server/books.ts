@@ -2,10 +2,13 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
 import { matchesSearch } from '$lib/library/search';
 import type {
+	ChapterSummary,
 	Chunk,
 	Language,
 	LanguageFilter,
+	SummaryByLocale,
 	TypeableText,
+	TypeableTextDetail,
 	TypeableTextSummary
 } from '$lib/types';
 
@@ -23,6 +26,7 @@ import type {
 type Client = SupabaseClient<Database>;
 type BookRow = Database['public']['Tables']['books']['Row'];
 type ChunkRow = Database['public']['Tables']['chunks']['Row'];
+type ChapterRow = Database['public']['Tables']['chapters']['Row'];
 
 /** The book columns the library needs — metadata only, no chunk content. */
 type BookSummaryRow = Pick<
@@ -32,9 +36,20 @@ type BookSummaryRow = Pick<
 /** One chunk's content columns, as embedded under a book. */
 type ChunkContentRow = Pick<ChunkRow, 'id' | 'index' | 'content' | 'char_count'>;
 type BookWithChunksRow = BookSummaryRow & { chunks: ChunkContentRow[] };
+/** One chapter's columns, as embedded under a book (spec #34). */
+type ChapterContentRow = Pick<ChapterRow, 'index' | 'title' | 'start_chunk_index'>;
+type BookDetailRow = BookSummaryRow &
+	Pick<BookRow, 'year' | 'summary'> & { chapters: ChapterContentRow[] };
 
 const BOOK_SUMMARY_COLUMNS = 'id, slug, title, author, language, chunk_count, cover_url';
+/**
+ * The summary columns plus the two facts only `/books/[slug]` needs (spec #34). Defined as
+ * an extension of `BOOK_SUMMARY_COLUMNS` rather than a second literal so the two can never
+ * drift — and kept separate from it so the hot typing path never fetches the jsonb.
+ */
+export const BOOK_DETAIL_COLUMNS = `${BOOK_SUMMARY_COLUMNS}, year, summary`;
 const CHUNK_COLUMNS = 'id, index, content, char_count';
+const CHAPTER_COLUMNS = 'index, title, start_chunk_index';
 
 const LANGUAGES: readonly Language[] = ['en', 'es'];
 
@@ -55,6 +70,27 @@ function toSummary(row: BookSummaryRow): TypeableTextSummary {
 		language: toLanguage(row.language),
 		chunkCount: row.chunk_count,
 		coverUrl: row.cover_url
+	};
+}
+
+function toChapter(row: ChapterContentRow): ChapterSummary {
+	return { index: row.index, title: row.title, startChunkIndex: row.start_chunk_index };
+}
+
+function toDetail(row: BookDetailRow): TypeableTextDetail {
+	// Sorted defensively by index so ordering never depends on the query's row order — the
+	// same posture `toTypeableText` takes for chunks.
+	const chapters = [...(row.chapters ?? [])].sort((a, b) => a.index - b.index).map(toChapter);
+	return {
+		...toSummary(row),
+		year: row.year,
+		// `books.summary` is jsonb, so the generated type is `Json` and this cast is UNVERIFIED
+		// by design. The database's `jsonb_typeof = 'object'` check is the only guarantee at
+		// this boundary; `resolveSummary` accepts a raw `Json` for exactly that reason and is
+		// the single place a value here becomes a rendered string. Do not add a second
+		// validator here.
+		summary: (row.summary ?? {}) as SummaryByLocale,
+		chapters
 	};
 }
 
@@ -148,6 +184,42 @@ export async function getBookSummaryBySlug(
 		return null;
 	}
 	return toSummary(data as BookSummaryRow);
+}
+
+/**
+ * One book's metadata PLUS its year, its per-locale summary map and its full chapter list —
+ * everything `/books/[slug]` renders, in **one** round trip (spec #34). `null` when no book
+ * has that slug, which the route turns into a 404.
+ *
+ * Chapters arrive as a PostgREST embedded resource rather than a second query: they are read
+ * only ever alongside their book, so a separate `chapters` service would be a file with one
+ * caller. They are sorted by `index` in JS, defensively, the way `toTypeableText` already
+ * sorts chunks — an embedded resource's row order is not a contract.
+ *
+ * No `published_at` predicate, deliberately, on the identical reasoning
+ * {@link getBookSummaryBySlug} documents: RLS owns publication for every caller, and the
+ * `chapters` policy gates on the parent book independently. So an unpublished book returns
+ * `null` exactly as an unknown slug does, and the route 404s on both — which is the point.
+ *
+ * This is deliberately NOT what the typing path calls. `getBookSummaryBySlug` stays narrower
+ * so that hot route never pays for a jsonb column and an embedded chapter list.
+ */
+export async function getBookDetailBySlug(
+	client: Client,
+	slug: string
+): Promise<TypeableTextDetail | null> {
+	const { data, error } = await client
+		.from('books')
+		.select(`${BOOK_DETAIL_COLUMNS}, chapters(${CHAPTER_COLUMNS})`)
+		.eq('slug', slug)
+		.maybeSingle();
+	if (error) {
+		throw error;
+	}
+	if (!data) {
+		return null;
+	}
+	return toDetail(data as unknown as BookDetailRow);
 }
 
 /**

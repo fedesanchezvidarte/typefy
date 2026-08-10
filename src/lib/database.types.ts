@@ -70,7 +70,9 @@ export type Database = {
 					published_at: string | null;
 					slug: string;
 					source_url: string | null;
+					summary: Json;
 					title: string;
+					year: number | null;
 				};
 				Insert: {
 					author: string;
@@ -84,7 +86,9 @@ export type Database = {
 					published_at?: string | null;
 					slug: string;
 					source_url?: string | null;
+					summary?: Json;
 					title: string;
+					year?: number | null;
 				};
 				Update: {
 					author?: string;
@@ -98,7 +102,9 @@ export type Database = {
 					published_at?: string | null;
 					slug?: string;
 					source_url?: string | null;
+					summary?: Json;
 					title?: string;
+					year?: number | null;
 				};
 				Relationships: [];
 			};

@@ -25,6 +25,26 @@
 > lines. That is usually a single sentence emitted whole, which is intended; anything
 > else is worth investigating.
 
+## Metadata
+
+| Field                  | Value                                            |
+| ---------------------- | ------------------------------------------------ |
+| Open Library work      | `/works/OL503666W`                               |
+| First publication year | 1605 (manifest override; Open Library says 1600) |
+| Description            | 1524 characters, from Open Library               |
+| Summary overrides      | None                                             |
+
+> The sources disagree: the manifest declares 1605, Open Library reports 1600.
+> The manifest wins, so 1605 is what gets written. Open Library reports the
+> earliest edition it has CATALOGUED, which is not the same fact as first publication —
+> confirm the declared year is still the better one before publishing.
+
+Opening of the description, as it would be stored under `default`:
+
+```
+*Don Quijote de la Mancha* es una novela escrita por el español Miguel de Cervantes Saavedra. Publicada su primera parte con el título de *El ingenioso hidalgo don Quijote de la Mancha* a comienzos de…
+```
+
 ## Chapters
 
 | #   | Title                                                                                                                                                                                                                          | Start page | Pages |
