@@ -145,4 +145,61 @@ describe('buildReport', () => {
 			expect(buildReport(base)).not.toMatch(/cover/i);
 		});
 	});
+
+	describe('chapters (spec #33)', () => {
+		it('says none declared when the book has no chapters config', () => {
+			const report = buildReport(base);
+			expect(report).toContain('## Chapters');
+			expect(report).toMatch(/none declared/i);
+		});
+
+		it('lists index, title, start page (1-based) and page count', () => {
+			const report = buildReport({
+				...base,
+				chapters: [
+					{ index: 0, title: 'Chapter I.', startChunkIndex: 0 },
+					{ index: 1, title: 'CHAPTER II.', startChunkIndex: 1 }
+				]
+			});
+			expect(report).toContain('Chapter I.');
+			expect(report).toContain('CHAPTER II.');
+			// Chapter 1: starts at chunk 0 -> page 1, spans chunks 0..0 (1 page, chunks.length=3).
+			expect(report).toMatch(/\|\s*1\s*\|\s*Chapter I\.\s*\|\s*1\s*\|\s*1\s*\|/);
+			// Chapter 2: starts at chunk 1 -> page 2, spans chunks 1..2 (2 pages).
+			expect(report).toMatch(/\|\s*2\s*\|\s*CHAPTER II\.\s*\|\s*2\s*\|\s*2\s*\|/);
+		});
+
+		// The row values above happen to coincide (start page 1/pages 1, start page 2/pages 2),
+		// which would not catch the "Start page" and "Pages" columns being swapped, or an
+		// off-by-one that shifted both by the same amount. Distinguishable values close that gap.
+		it('does not confuse the start-page and page-count columns', () => {
+			const report = buildReport({
+				...base,
+				chunks: ['One. '.repeat(100).trim(), 'Two. ', 'Three. ', 'Four. ', 'Five. '],
+				chapters: [
+					{ index: 0, title: 'Chapter A', startChunkIndex: 0 },
+					{ index: 1, title: 'Chapter B', startChunkIndex: 2 },
+					{ index: 2, title: 'Chapter C', startChunkIndex: 3 }
+				]
+			});
+			// Chapter A: starts at chunk 0 -> page 1, spans chunks 0..1 (2 pages).
+			expect(report).toMatch(/\|\s*1\s*\|\s*Chapter A\s*\|\s*1\s*\|\s*2\s*\|/);
+			// Chapter B: starts at chunk 2 -> page 3, spans chunk 2 only (1 page).
+			expect(report).toMatch(/\|\s*2\s*\|\s*Chapter B\s*\|\s*3\s*\|\s*1\s*\|/);
+			// Chapter C: starts at chunk 3 -> page 4, spans chunks 3..4 (2 pages, chunks.length=5).
+			expect(report).toMatch(/\|\s*3\s*\|\s*Chapter C\s*\|\s*4\s*\|\s*2\s*\|/);
+		});
+
+		it('is placed after Chunks and before Disallowed characters', () => {
+			const report = buildReport({
+				...base,
+				chapters: [{ index: 0, title: 'Chapter I.', startChunkIndex: 0 }]
+			});
+			const chunksAt = report.indexOf('## Chunks');
+			const chaptersAt = report.indexOf('## Chapters');
+			const disallowedAt = report.indexOf('## Disallowed characters');
+			expect(chunksAt).toBeLessThan(chaptersAt);
+			expect(chaptersAt).toBeLessThan(disallowedAt);
+		});
+	});
 });

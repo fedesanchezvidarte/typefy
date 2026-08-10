@@ -160,7 +160,9 @@ test.describe('landing page', () => {
 			// navigation does.
 			await page.emulateMedia({ reducedMotion: 'reduce' });
 			await page.goto('/');
-			const tail = page.locator('h1 .tail');
+			// `.tail-text`, not `.tail`: the wrapper also holds the hidden width sizers (one per
+			// tail word), so its text content is not the animated frame.
+			const tail = page.locator('h1 .tail-text');
 			const initialText = await tail.textContent();
 
 			// The cycle's first hold is 1800ms (HOLD_MS) before it would start backspacing;

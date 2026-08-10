@@ -27,6 +27,13 @@ export interface CoverReportEntry {
 	source: string;
 }
 
+/** One chapter row as the report presents it (spec #33 §5). */
+export interface ChapterReportEntry {
+	index: number;
+	title: string;
+	startChunkIndex: number;
+}
+
 export interface ReportInput {
 	slug: string;
 	title: string;
@@ -39,6 +46,8 @@ export interface ReportInput {
 	disallowed: readonly DisallowedCharacter[];
 	/** Defaults to the shipped page budget — the same one the chunker just applied. */
 	budget?: PageBudget;
+	/** Absent when the book declares no chapters config at all (spec #33). */
+	chapters?: readonly ChapterReportEntry[];
 }
 
 /**
@@ -146,6 +155,21 @@ export function buildReport(input: ReportInput): string {
 			'> else is worth investigating.',
 			''
 		);
+	}
+
+	out.push('## Chapters', '');
+	if (input.chapters === undefined) {
+		out.push('None declared — this book has no derivable chapter structure.', '');
+	} else {
+		out.push('| # | Title | Start page | Pages |', '|---|---|---|---|');
+		input.chapters.forEach((chapter, i) => {
+			const nextStart = input.chapters![i + 1]?.startChunkIndex ?? input.chunks.length;
+			const pages = nextStart - chapter.startChunkIndex;
+			out.push(
+				`| ${chapter.index + 1} | ${chapter.title} | ${chapter.startChunkIndex + 1} | ${pages} |`
+			);
+		});
+		out.push('');
 	}
 
 	out.push('## Disallowed characters', '');
