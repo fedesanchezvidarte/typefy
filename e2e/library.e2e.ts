@@ -162,6 +162,25 @@ test.describe('language filter', () => {
 		await expect(filterOption(page, 'all')).toHaveAttribute('aria-current', 'page');
 		await expect(page.getByTestId(`text-picker-option-${ES_ID}`)).toBeVisible();
 	});
+
+	test('the `en` pill names the language in the UI locale, not its own — exonym, not endonym (spec #39, mirrors #38)', async ({
+		page
+	}) => {
+		// Under EN the exonym and LanguageSwitcher's endonym happen to coincide ("English"), so
+		// this half alone couldn't have caught the regression — it's here for symmetry with the
+		// ES assertion below, which is the one that actually proves it.
+		await gotoLibrary(page, '/type');
+		await expect(filterOption(page, 'en')).toContainText('English');
+
+		// Under ES the two diverge: the content-language pill is chrome describing the book to
+		// the reader, so it turns over with the UI locale even though the language it names does
+		// not. It must read the exonym "Inglés", never the language-switcher's endonym
+		// "English" — asserting the negative too, because rendering the endonym is exactly the
+		// bug #39 fixed (same class of regression as GeneratedCover's badge, spec #38).
+		await gotoLibrary(page, '/es/type');
+		await expect(filterOption(page, 'en')).toContainText('Inglés');
+		await expect(filterOption(page, 'en')).not.toContainText('English');
+	});
 });
 
 test.describe('continue reading', () => {

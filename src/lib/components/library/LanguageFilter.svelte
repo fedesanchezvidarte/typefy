@@ -21,11 +21,20 @@
 
 	let { active, query, sort }: Props = $props();
 
-	// The two language options reuse the content-language labels GeneratedCover already
-	// uses — that is exactly what they are. Only "All" is new.
+	/* These pills name a book's CONTENT language, but they are chrome describing the book
+	   to the reader — so, same as GeneratedCover's badge, they are written in the UI
+	   locale, not in the language they name. Under `/es` an English book's pill reads
+	   "Inglés".
+
+	   Hence `book_language_*` (exonyms: English/Spanish, Inglés/Español) rather than the
+	   `lang_label_*` bundle, whose values are endonyms — identical in both locales on
+	   purpose, because LanguageSwitcher offers each UI locale in its own language. Same
+	   two languages, two different jobs; reusing the endonym set here was the bug this
+	   fixes (see GeneratedCover.svelte for the identical fix, spec #38). Only "All"
+	   (`library_filter_all`) has no content-language counterpart to confuse it with. */
 	const labels: Record<LanguageFilter, () => string> = {
-		en: m.lang_label_en,
-		es: m.lang_label_es,
+		en: m.book_language_en,
+		es: m.book_language_es,
 		all: m.library_filter_all
 	};
 </script>
