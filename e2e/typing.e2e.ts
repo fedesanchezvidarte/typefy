@@ -262,39 +262,33 @@ test.describe('chunk completion', () => {
 	});
 });
 
-test.describe('restart controls', () => {
-	test('Escape restarts the passage: all states reset and typing starts clean', async ({
+/**
+ * Spec #45 removed restarting a page as an action — the button, the Escape shortcut, and the
+ * end-of-book summary's two actions with them. What is asserted here is the removal itself:
+ * nothing to press, and a key that used to reset the page now does nothing at all.
+ */
+test.describe('restarting a page is gone (spec #45)', () => {
+	test('no restart control exists, and Escape leaves the page exactly as typed', async ({
 		page
 	}) => {
-		await pickText(page, EN_ID);
-		await type(page, 'Ix is'); // one error, four correct-ish positions
-
-		await page.keyboard.press('Escape');
-		for (let i = 0; i < 5; i++) {
-			await expect(chars(page).nth(i)).toHaveAttribute('data-state', 'pending');
-		}
-		await expect(chars(page).nth(0)).toHaveClass(/caret/);
-		await expect(meta(page)).toContainText('Page 1 of 6');
-
-		// The reset attempt is discarded: a fresh correct keystroke is plain correct.
-		await type(page, 'I');
-		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
-	});
-
-	test('the restart-passage button resets states and refocuses the input', async ({ page }) => {
 		await pickText(page, EN_ID);
 		await type(page, 'It is '); // crosses a word boundary → numeric metrics
 		await expect(meta(page)).toContainText(/\d+ wpm/);
 
-		await page.getByTestId('restart-chunk').click();
-		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'pending');
-		await expect(meta(page)).toContainText('— wpm');
-		await expect(meta(page)).toContainText('Page 1 of 6');
+		await expect(page.getByTestId('restart-chunk')).toHaveCount(0);
+		await expect(page.getByTestId('pick-another')).toHaveCount(0);
 
-		// Button-triggered restarts must not strand focus on the button.
-		await expect(page.getByTestId('typing-input')).toBeFocused();
-		await type(page, 'I');
+		await page.keyboard.press('Escape');
+
+		// Untouched: states, metrics, page number and focus. A page is un-typed by
+		// backspacing, like any other text.
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
+		await expect(meta(page)).toContainText(/\d+ wpm/);
+		await expect(meta(page)).toContainText('Page 1 of 6');
+		await expect(page.getByTestId('typing-input')).toBeFocused();
+
+		await type(page, 'a'); // and typing carries straight on from where it stopped
+		await expect(chars(page).nth(6)).toHaveAttribute('data-state', 'correct');
 	});
 });
 
@@ -391,11 +385,10 @@ test.describe('full session (ES text, 5 chunks)', () => {
 		await expect(page.getByTestId('summary-time')).toContainText(/\d{2}:\d{2}/);
 		await expect(page.getByTestId('summary-time')).not.toContainText('00:00');
 
-		// "Type it again" returns to a clean passage 1, ready to type.
-		await page.getByTestId('summary-restart-session').click();
-		await expect(meta(page)).toContainText('Page 1 of 5');
-		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'pending');
-		await expect(page.getByTestId('typing-input')).toBeFocused();
+		// And nothing to press: spec #45 removed both summary actions, so the summary reports
+		// the run and the header is the way onward.
+		await expect(page.getByTestId('summary-restart-session')).toHaveCount(0);
+		await expect(page.getByTestId('summary-pick-another')).toHaveCount(0);
 	});
 });
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
 import {
+	getBookChapters,
 	getBookDetailBySlug,
 	getBookSummaryBySlug,
 	getChunkWindow,
@@ -579,5 +580,64 @@ describe('getBookDetailBySlug', () => {
 		await expect(getBookDetailBySlug(client, 'don-quijote')).rejects.toEqual({
 			message: 'timeout'
 		});
+	});
+});
+
+describe('getBookChapters', () => {
+	it('maps chapter rows to ChapterSummary, keyed by the book uuid', async () => {
+		const { client, calls } = mockSupabase({
+			data: [
+				{ index: 0, title: 'Capítulo primero', start_chunk_index: 2 },
+				{ index: 1, title: 'Capítulo segundo', start_chunk_index: 9 }
+			],
+			error: null
+		});
+
+		const chapters = await getBookChapters(client, 'b0000000-0000-0000-0000-000000000009');
+
+		expect(chapters).toEqual([
+			{ index: 0, title: 'Capítulo primero', startChunkIndex: 2 },
+			{ index: 1, title: 'Capítulo segundo', startChunkIndex: 9 }
+		]);
+		expect(calls).toContainEqual({ method: 'from', args: ['chapters'] });
+		expect(calls).toContainEqual({
+			method: 'eq',
+			args: ['book_id', 'b0000000-0000-0000-0000-000000000009']
+		});
+	});
+
+	it('selects index, title and start only — never the parent book or its jsonb summary', async () => {
+		// The typing route is the caller, and spec #45 pays for chapters there on the condition
+		// that it stays this narrow.
+		const { client, calls } = mockSupabase({ data: [], error: null });
+		await getBookChapters(client, 'b1');
+		const select = calls.find((call) => call.method === 'select');
+		expect(select?.args[0]).toBe('index, title, start_chunk_index');
+	});
+
+	it('sorts defensively by index rather than trusting row order', async () => {
+		const { client } = mockSupabase({
+			data: [
+				{ index: 2, title: 'Third', start_chunk_index: 20 },
+				{ index: 0, title: 'First', start_chunk_index: 0 },
+				{ index: 1, title: 'Second', start_chunk_index: 10 }
+			],
+			error: null
+		});
+		expect((await getBookChapters(client, 'b1')).map((c) => c.title)).toEqual([
+			'First',
+			'Second',
+			'Third'
+		]);
+	});
+
+	it('returns an empty list for a book with no derivable structure', async () => {
+		const { client } = mockSupabase({ data: [], error: null });
+		expect(await getBookChapters(client, 'b1')).toEqual([]);
+	});
+
+	it('throws when the database returns an error', async () => {
+		const { client } = mockSupabase({ data: null, error: { message: 'timeout' } });
+		await expect(getBookChapters(client, 'b1')).rejects.toEqual({ message: 'timeout' });
 	});
 });

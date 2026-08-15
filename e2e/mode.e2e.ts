@@ -198,7 +198,9 @@ test.describe('the choice is durable', () => {
 
 		// And a CLIENT-side navigation to another book too: `/type/[slug]`'s load re-runs
 		// over the fetch, reads the same cookie, and the `{#key}` remounts the session in it.
-		await page.getByTestId('pick-another').click();
+		// The library link in the header, since spec #45 removed the pick-another button — the
+		// navigation this criterion is about is a client-side one either way.
+		await page.getByTestId('nav-library').click();
 		await expect(page.getByTestId('text-picker')).toBeVisible();
 		// Still a client-side navigation, just one hop longer since spec #34: card →
 		// `/books/[slug]` → the surface. What the criterion is about is unaffected — the
@@ -526,15 +528,10 @@ test.describe('the session summary', () => {
 		await expect(page.getByTestId('summary-time')).not.toContainText('00:00');
 		await expect(page.getByTestId('summary-zen-note')).toBeVisible();
 		await expect(page.getByTestId('summary-sign-in-prompt')).toBeVisible();
-		await expect(page.getByTestId('summary-restart-session')).toBeVisible();
-		await expect(page.getByTestId('summary-pick-another')).toBeVisible();
 
-		// The actions still work, and the restart carries the mode over — it is a
-		// cookie-backed preference, not session state.
-		await page.getByTestId('summary-restart-session').click();
-		await expect(meta(page)).toHaveText(`Page 1 of ${tortoiseAndHare.chunkCount} · 0%`);
-		await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
-		await expect(page.getByTestId('typing-input')).toBeFocused();
+		// And the summary offers NO actions since spec #45 — it reports and nothing more.
+		await expect(page.getByTestId('summary-restart-session')).toHaveCount(0);
+		await expect(page.getByTestId('summary-pick-another')).toHaveCount(0);
 	});
 
 	test('a fully-Normal session is unchanged: all four tiles, no Zen note', async ({ page }) => {
@@ -686,8 +683,11 @@ test.describe('accessibility (phase 8)', () => {
 			'correct'
 		);
 
-		// Restarting the passage from the keyboard, then leaving Zen: still no stranding.
-		await page.keyboard.press('Escape');
+		// Un-typing from the keyboard, then leaving Zen: still no stranding. Backspace, not
+		// Escape — spec #45 removed restarting a page, so backspacing IS the way back.
+		for (let i = 0; i < opening.length; i++) {
+			await page.keyboard.press('Backspace');
+		}
 		await expect(page.locator('[data-testid="typing-surface"] .char').nth(0)).toHaveAttribute(
 			'data-state',
 			'pending'

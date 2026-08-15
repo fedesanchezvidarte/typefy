@@ -1,10 +1,12 @@
 import type { PageServerLoad } from './$types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '$lib/database.types';
-import type { ChunkWindow, Mode, TypeableTextSummary } from '$lib/types';
+import type { ChapterSummary, ChunkWindow, Mode, TypeableTextSummary } from '$lib/types';
 import { error } from '@sveltejs/kit';
-import { getBookSummaryBySlug, getChunkWindow } from '$lib/server/books';
+import { getBookChapters, getBookSummaryBySlug, getChunkWindow } from '$lib/server/books';
 import { getBookCompletionCount, getCompletedChunkIds } from '$lib/server/progress';
+import { activeChapter } from '$lib/library/chapter-progress';
+import { completionPercent } from '$lib/library/completion';
 import { resolveStartIndex } from '$lib/progress/resume';
 import { clampWindow, WINDOW_SIZE } from '$lib/reading/window';
 import { MODE_COOKIE, parseMode } from '$lib/mode/mode';
@@ -65,6 +67,35 @@ export interface TypingPageData {
 	 * then visibly stripping it on hydration, which a load read fixes at the same first paint.
 	 */
 	mode: Mode;
+	/**
+	 * The book's chapters (spec #45), index/title/start only — never the `summary` jsonb. The
+	 * header names the chapter the active page falls in, and re-names it client-side on every
+	 * page navigation, so the whole list travels once rather than a title per jump.
+	 */
+	chapters: ChapterSummary[];
+	/**
+	 * **The header's first paint**, and only that (spec #45).
+	 *
+	 * The typing screen's chrome lives in `AppHeader`'s center slot, which renders BEFORE the
+	 * page component that owns the live session — on the server there is no effect to fill it
+	 * from, and seeding it after hydration would render the metrics row empty and then populate
+	 * it, exactly the flash spec #24 §10 forbids for the mode axis. So the load computes the
+	 * opening values itself and the client overlays live ones from mount on.
+	 */
+	typingHeader: TypingHeaderSeed;
+}
+
+/** The values the header slot renders before the session is mounted. */
+export interface TypingHeaderSeed {
+	title: string;
+	author: string;
+	/** `null` for front matter and for a book with no chapters — both legal (ADR-0017). */
+	chapter: string | null;
+	/** 1-based, matching the page navigator and `?page=N`. */
+	current: number;
+	total: number;
+	pct: number;
+	zen: boolean;
 }
 
 /**
@@ -93,16 +124,31 @@ export const load = (async ({ params, locals, url, cookies }): Promise<TypingPag
 
 	if (!user) {
 		// A guest has no resume position, so the computed fallback is 0 and `?page=N` (or
-		// `?passage=N`) is the only thing that can move the opening index. One chunk read,
-		// nothing else.
+		// `?passage=N`) is the only thing that can move the opening index. One chunk read, one
+		// chapter read, nothing else — chapters are world-readable through their parent book's
+		// policy, so this stays a guest-safe pair of reads rather than a progress query.
 		const startIndex = resolveStartIndex(pageParam, book.chunkCount, 0);
+		const [window, chapters] = await Promise.all([
+			readWindow(locals.supabase, book, startIndex),
+			getBookChapters(locals.supabase, book.bookId)
+		]);
 		return {
 			book,
-			window: await readWindow(locals.supabase, book, startIndex),
+			window,
 			startIndex,
 			completedChunkIds: [],
 			chunksCompleted: 0,
-			mode
+			mode,
+			chapters,
+			// A guest's percentage is session-relative (spec #12 §4), and at first paint the
+			// session has typed nothing — so the opening page index IS the figure.
+			typingHeader: seedHeader(
+				book,
+				chapters,
+				startIndex,
+				completionPercent(book, startIndex),
+				mode
+			)
 		};
 	}
 
@@ -116,26 +162,67 @@ export const load = (async ({ params, locals, url, cookies }): Promise<TypingPag
 
 	const startIndex = resolveStartIndex(pageParam, book.chunkCount, computedStartIndex);
 
-	// Independent again: the window's content and the book's completed set. The intersection
-	// happens here rather than in the query because `chunk_progress` is keyed by chunk uuid,
-	// which only the window read knows.
-	const [window, completed] = await Promise.all([
+	// Independent again: the window's content, the book's completed set and its chapters. The
+	// intersection happens here rather than in the query because `chunk_progress` is keyed by
+	// chunk uuid, which only the window read knows.
+	const [window, completed, chapters] = await Promise.all([
 		readWindow(locals.supabase, book, startIndex),
-		getCompletedChunkIds(locals.supabase, user.id, book.bookId)
+		getCompletedChunkIds(locals.supabase, user.id, book.bookId),
+		getBookChapters(locals.supabase, book.bookId)
 	]);
+
+	// Filtered through the window's own chunks, so the ids arrive in index order.
+	const completedChunkIds = window.chunks
+		.filter((chunk) => completed.has(chunk.id))
+		.map((chunk) => chunk.id);
 
 	return {
 		book,
 		window,
 		startIndex,
-		// Filtered through the window's own chunks, so the ids arrive in index order.
-		completedChunkIds: window.chunks
-			.filter((chunk) => completed.has(chunk.id))
-			.map((chunk) => chunk.id),
+		completedChunkIds,
 		chunksCompleted,
-		mode
+		mode,
+		chapters,
+		// The same figure `TypingSession`'s `pct` opens on for a signed-in user: the larger of
+		// the two completion sources, clamped to 100%. Mirrored here rather than derived there
+		// because the header paints before the session exists — the two must agree at first
+		// paint or the number visibly changes on hydration.
+		typingHeader: seedHeader(
+			book,
+			chapters,
+			startIndex,
+			completionPercent(
+				book,
+				Math.min(Math.max(completedChunkIds.length, chunksCompleted), book.chunkCount)
+			),
+			mode
+		)
 	};
 }) satisfies PageServerLoad;
+
+/**
+ * The header slot's opening values. Pure assembly over what the load already has — the chapter
+ * comes from the same `activeChapter` fold the client re-runs on every page navigation, so the
+ * server's answer and the client's first answer are the same answer.
+ */
+function seedHeader(
+	book: TypeableTextSummary,
+	chapters: readonly ChapterSummary[],
+	startIndex: number,
+	pct: number,
+	mode: Mode
+): TypingHeaderSeed {
+	return {
+		title: book.title,
+		author: book.author,
+		chapter: activeChapter(chapters, startIndex)?.title ?? null,
+		current: startIndex + 1,
+		total: book.chunkCount,
+		pct,
+		zen: mode === 'zen'
+	};
+}
 
 /**
  * The window opening at `startIndex`, at most `WINDOW_SIZE` chunks long however long the

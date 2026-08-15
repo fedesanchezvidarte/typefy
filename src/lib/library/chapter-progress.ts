@@ -79,6 +79,35 @@ export function buildChapterProgress(
 }
 
 /**
+ * The chapter a single page belongs to, or `null` when it belongs to none — what the typing
+ * screen's header names while the user types (spec #45).
+ *
+ * The **same** attribution rule `buildChapterProgress` applies, deliberately through the same
+ * `findOwner`: a page belongs to the chapter its first character falls in, so a page spanning a
+ * boundary is named by the chapter that starts on it. Two implementations of that rule would be
+ * two chances for the header to disagree with the book detail screen's page ranges.
+ *
+ * `null` covers all three "no chapter" cases the product already has: a book with no derivable
+ * structure, front matter preceding the first chapter, and a nonsensical index.
+ */
+export function activeChapter(
+	chapters: readonly ChapterSummary[],
+	chunkIndex: number
+): ChapterSummary | null {
+	if (chapters.length === 0 || !Number.isInteger(chunkIndex) || chunkIndex < 0) {
+		return null;
+	}
+	const ordered = [...chapters].sort(
+		(a, b) => a.startChunkIndex - b.startChunkIndex || a.index - b.index
+	);
+	const owner = findOwner(
+		ordered.map((chapter) => chapter.startChunkIndex),
+		chunkIndex
+	);
+	return owner === null ? null : ordered[owner];
+}
+
+/**
  * The position of the last chapter starting at or before `index`, or `null` when `index`
  * precedes every chapter (front matter, which belongs to no chapter).
  *

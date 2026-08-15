@@ -534,7 +534,40 @@
 		"id": "teleprompter-band-math",
 		"glossaryTerm": "Teleprompter",
 		"status": "deferred",
-		"reason": "The scroll math is pure (src/lib/components/typing/teleprompter.ts) and fully pinned by teleprompter.spec.ts's computeTranslateY cases (band entry, both clamps). The DOM half is a single $effect that only ever feeds it real measurements; asserting a translateY pixel value through a real browser would measure font-metric and line-height rounding rather than the feature, which is exactly the class of E2E flake the pure-math split exists to avoid needing (spec #32 Feature Brief §11 R7)."
+		"reason": "The scroll math is pure (src/lib/components/typing/teleprompter.ts) and fully pinned by teleprompter.spec.ts. Since spec #45 that includes the PAGE band — bandTop 0 to containerHeight minus LOOKAHEAD_LINES x lineHeight — asserted as the three properties the band is for: the page holds completely still while the caret is above the margin, follows one line at a time once it reaches it, and always leaves LOOKAHEAD_LINES visible below the caret. The hero keeps the original middle-third band, also covered. The DOM half is a single $effect that only ever feeds the pure function real measurements; asserting a translateY pixel value through a real browser would measure font-metric and line-height rounding rather than the feature, which is exactly the class of E2E flake the pure-math split exists to avoid needing (spec #32 Feature Brief §11 R7)."
+	},
+	{
+		"id": "header-slot-carries-the-chrome",
+		"glossaryTerm": "Header slot",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/page-model.e2e.ts",
+				"testTitleContains": "the header carries book, chapter, page and metrics"
+			}
+		]
+	},
+	{
+		"id": "page-card-paragraph-blocks",
+		"glossaryTerm": "Page",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/page-model.e2e.ts",
+				"testTitleContains": "paragraphs render as blocks separated by exactly one blank line"
+			}
+		]
+	},
+	{
+		"id": "restarting-a-page-is-gone",
+		"glossaryTerm": "Page",
+		"status": "covered",
+		"citations": [
+			{
+				"file": "e2e/typing.e2e.ts",
+				"testTitleContains": "no restart control exists, and Escape leaves the page exactly as typed"
+			}
+		]
 	},
 	{
 		"id": "in-page-restore-across-reload",

@@ -5,8 +5,6 @@
 
 	interface Props {
 		summary: SessionSummary;
-		onRestartSession: () => void;
-		onPickAnother: () => void;
 		/**
 		 * Passages whose insert did not save this session, for ANY reason (spec #12 §6). Stated
 		 * once, quietly, here — never during typing, never as an alarm. Nothing renders at 0.
@@ -27,15 +25,7 @@
 		next: string;
 	}
 
-	let {
-		summary,
-		onRestartSession,
-		onPickAnother,
-		failedSaves,
-		pendingSaves,
-		signedIn,
-		next
-	}: Props = $props();
+	let { summary, failedSaves, pendingSaves, signedIn, next }: Props = $props();
 
 	/**
 	 * Both figures are `number | null` since spec #24, and they are null TOGETHER: the engine
@@ -80,8 +70,6 @@
 		return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 	}
 
-	const primaryButtonClasses =
-		'rounded-lg border border-border bg-sheet px-4 py-2.5 text-sm text-fg transition-colors hover:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 	const secondaryButtonClasses =
 		'rounded-lg border border-border bg-transparent px-4 py-2.5 text-sm text-muted transition-colors hover:border-accent hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
 </script>
@@ -202,24 +190,10 @@
 			</p>
 		{/if}
 	</div>
-	<div class="flex flex-wrap gap-2.5">
-		<button
-			type="button"
-			data-testid="summary-restart-session"
-			class={primaryButtonClasses}
-			onclick={onRestartSession}
-		>
-			{m.summary_type_again()}
-		</button>
-		<button
-			type="button"
-			data-testid="summary-pick-another"
-			class={secondaryButtonClasses}
-			onclick={onPickAnother}
-		>
-			{m.summary_back_to_library()}
-		</button>
-	</div>
+	<!-- No actions (spec #45). The summary REPORTS and nothing more: restarting a page or
+	     picking another book were removed from the typing flow entirely, and the header is the
+	     way onward from here. Resetting a book's stored progress is a different thing again,
+	     and it belongs on the book detail screen behind a confirmation. -->
 
 	{#if !signedIn}
 		<!-- Guests only: the one place progress-saving is surfaced (the typing surface stays clean).

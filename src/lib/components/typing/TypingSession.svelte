@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { SvelteSet, SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { Pathname } from '$app/types';
-	import { beforeNavigate, goto, pushState } from '$app/navigation';
+	import { beforeNavigate, pushState } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { m } from '$lib/paraglide/messages';
@@ -19,6 +19,7 @@
 	import type { ChunkEngineState } from '$lib/engine/types';
 	import type { MetricsSnapshot } from '$lib/engine/metrics';
 	import type {
+		ChapterSummary,
 		ChunkWindow,
 		ChunkWindowResponse,
 		Mode,
@@ -48,7 +49,8 @@
 		resolvedPrefixLength,
 		savePageState
 	} from '$lib/progress/page-state';
-	import PageMeta from './PageMeta.svelte';
+	import { activeChapter } from '$lib/library/chapter-progress';
+	import { useTypingHeader } from './typing-header.svelte';
 	import PageNavigator from './PageNavigator.svelte';
 	import SessionSummaryView from './SessionSummary.svelte';
 	import TypingSurface from './TypingSurface.svelte';
@@ -85,6 +87,13 @@
 		 */
 		mode: Mode;
 		/**
+		 * The book's chapters (spec #45), for the header's chapter name. Empty is legal and
+		 * ordinary — a book with no derivable structure simply shows no chapter (ADR-0017).
+		 * Read on every page change through `activeChapter`, so crossing a boundary re-names
+		 * the header with no request.
+		 */
+		chapters?: readonly ChapterSummary[];
+		/**
 		 * null for a guest — the sole gate on the write path. No insert, no import, no request.
 		 *
 		 * **It can flip to null mid-session** (ADR-0012, Phase 2c amendment). The parent derives it from
@@ -111,6 +120,7 @@
 		chunksCompleted,
 		completedChunkIds,
 		mode,
+		chapters = [],
 		userId
 	}: Props = $props();
 
@@ -775,17 +785,6 @@
 		}
 	}
 
-	function restartChunk() {
-		dispatch({ type: 'restart-chunk' });
-		surface?.focusInput(); // button-triggered restarts must not strand focus
-	}
-
-	function restartSession() {
-		dispatch({ type: 'restart-session' });
-		// From the summary the surface remounts and focuses itself on mount.
-		surface?.focusInput();
-	}
-
 	// ── Page navigator: the A' engine seek (spec #32 §10 D1) ───────────────────────────
 	//
 	// A jump never remounts `TypingSession` (see `+page.svelte`'s comment) — it is handled
@@ -838,10 +837,9 @@
 	 * which `page.url.pathname` is not guaranteed to be outside a real, fully-hydrated
 	 * navigation (a component-test harness in particular).
 	 *
-	 * The whole pathname+query string is built INSIDE the `resolve()` call, as one argument,
-	 * matching `pickAnother`'s `resolve(localizeHref(...) as Pathname)` below — not built up
-	 * outside it and concatenated on, which `svelte/no-navigation-without-resolve` does not
-	 * trace through, and would flag as an unvalidated `pushState()` target.
+	 * The whole pathname+query string is built INSIDE the `resolve()` call, as one argument —
+	 * not built up outside it and concatenated on, which `svelte/no-navigation-without-resolve`
+	 * does not trace through, and would flag as an unvalidated `pushState()` target.
 	 */
 	function updateUrlForIndex(index: number) {
 		const params = new SvelteURLSearchParams(page.url.search);
@@ -912,12 +910,46 @@
 		surface?.focusInput();
 	}
 
-	function pickAnother() {
-		goto(resolve(localizeHref('/type') as Pathname));
-	}
+	// ── The header's center slot (spec #45) ────────────────────────────────────────────
+	//
+	// The chrome that used to sit under the sheet lives in `AppHeader` now, and this is how it
+	// gets there: a context store the root layout created above the header, written from here.
+	// The load's `typingHeader` seed already rendered the same opening values on the server,
+	// so the swap at hydration is invisible — see `AppHeader.svelte` for why both exist.
 
-	const buttonClasses =
-		'rounded-lg border border-border bg-transparent px-3.5 py-[7px] text-[13px] text-muted transition-colors hover:border-accent hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+	const headerStore = useTypingHeader();
+
+	/**
+	 * The chapter the ACTIVE page falls in, re-derived on every page change — including a page
+	 * navigator jump, which is why this is a `$derived` over the session rather than something
+	 * the load computed once. `activeChapter` is the same fold the book detail screen's ranges
+	 * come from (ADR-0017), so the header can never name a chapter that screen disagrees with.
+	 */
+	const chapterTitle = $derived(activeChapter(chapters, session.activeIndex)?.title ?? null);
+
+	$effect(() => {
+		if (!headerStore) return;
+		headerStore.view = {
+			title: book.title,
+			author: book.author,
+			chapter: chapterTitle,
+			current: session.activeIndex + 1,
+			total: session.text.chunkCount,
+			pct,
+			live: liveMetrics,
+			zen,
+			onToggleZen: toggleZen
+		};
+	});
+
+	/*
+	 * Cleared on unmount, and ONLY on unmount — an effect with no reactive reads, so it never
+	 * re-runs and never fights the one above. Without it, navigating from a book to the library
+	 * would leave the last page's figures stranded in the header.
+	 */
+	$effect(() => () => {
+		if (headerStore) headerStore.view = null;
+	});
 </script>
 
 <!--
@@ -937,7 +969,20 @@
 	}}
 />
 
-<main class="mx-auto flex w-full max-w-[860px] flex-col items-center gap-5 px-6 pt-10 pb-24">
+<!--
+	Two layouts, one element (spec #45).
+
+	While typing, the shell is PINNED: exactly the viewport minus the header, so the card fills
+	the screen and the document never scrolls — the text scrolls inside the card instead. At the
+	summary the pin is dropped and the old comfortable padding returns, because a fixed height
+	there would clip the figures on a short viewport.
+-->
+<main
+	class={[
+		'mx-auto flex w-full max-w-[900px] flex-col items-center px-4 sm:px-6',
+		session.status === 'finished' ? 'gap-5 pt-10 pb-24' : 'typing-shell'
+	]}
+>
 	<!--
 		THE WINDOW LIVE REGION. It renders UNCONDITIONALLY, in every state of the session,
 		and only its TEXT changes.
@@ -961,32 +1006,31 @@
 	{#if session.status === 'finished'}
 		<SessionSummaryView
 			summary={sessionSummary(session)}
-			onRestartSession={restartSession}
-			onPickAnother={pickAnother}
 			{failedSaves}
 			{pendingSaves}
 			signedIn={!!page.data.user}
 			next={page.url.pathname + page.url.search}
 		/>
 	{:else}
-		<!-- Exactly two elements of chrome frame the sheet (brief §2): the book
-		     line above, the meta line (and its quiet buttons) below. -->
-		<!-- The page's h1, styled as quiet chrome: screen readers get structure,
-		     sighted users get the brief's minimal book line. -->
-		<h1
-			class="text-center text-sm font-normal tracking-[0.01em] text-muted"
-			data-testid="book-line"
-		>
-			{book.title} · {book.author}
-		</h1>
+		<!--
+			The page's h1. Visually hidden since spec #45: the title and author now read in the
+			header's center slot, and repeating them above the card would spend a line of the
+			card's height saying the same thing twice. Heading structure is unchanged for
+			anyone using assistive technology, which is the only reason this node exists.
+		-->
+		<h1 class="sr-only" data-testid="book-line">{book.title} · {book.author}</h1>
 		<!--
 			The sheet renders from `heldView`, never from `session.activeChunk` — see its
 			declaration. The surface therefore stays MOUNTED across a window boundary, which is
 			what keeps the hidden input (and focus) alive while the session is awaiting. The
 			passage just completed stays on screen, frozen: `cursor={-1}` puts the caret
 			nowhere, so nothing blinks in a place typing would not go.
+
+			The wrapper is the flex child that gives the pinned card its height (spec #45):
+			`min-h-0` because a flex child's default `min-height: auto` would let a tall page
+			push the card past the viewport and put the document back into scroll.
 		-->
-		<div class="flex w-full justify-center">
+		<div class="relative flex min-h-0 w-full flex-1 justify-center">
 			<TypingSurface
 				bind:this={surface}
 				text={heldView?.chunk.text ?? ''}
@@ -996,67 +1040,74 @@
 				passageKey={heldView?.index ?? session.activeIndex}
 				onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}
 				onBackspace={(timestamp) => dispatch({ type: 'backspace', timestamp })}
-				onRestartChunk={restartChunk}
 			/>
-		</div>
-		{#if session.status === 'awaiting'}
-			<!--
-				The awaiting panel: the session is between passages, waiting for its window.
+			{#if session.status === 'awaiting'}
+				<!--
+					The awaiting panel: the session is between passages, waiting for its window.
 
-				`data-state` is what separates the two readings a stopped session can have —
-				`loading` (a window is on its way) and `stalled` (this device has typed to the
-				end of what it holds, spec §8). Neither is the finished-book summary, which is a
-				different component entirely, with a heading, four figures and its own focus.
-				This is one quiet line in the same muted register as the rest of the chrome, and
-				it takes no focus at all: the input above still has it, so the moment the window
-				lands the user types on without touching anything.
-			-->
-			<div
-				data-testid="page-awaiting"
-				data-state={windowStalled ? 'stalled' : 'loading'}
-				class="flex w-full max-w-[720px] flex-col gap-1.5 rounded-lg border border-border px-4 py-3 text-center"
-			>
-				<p class="text-sm text-fg">{windowStatus}</p>
-				{#if windowStalled}
-					<p class="text-[13px] text-muted" data-testid="page-awaiting-hint">
-						{m.page_window_end_hint()}
-					</p>
-				{/if}
-			</div>
-		{/if}
-		<PageMeta
-			current={session.activeIndex + 1}
-			total={session.text.chunkCount}
-			{pct}
-			live={liveMetrics}
-			{zen}
-		/>
+					`data-state` is what separates the two readings a stopped session can have —
+					`loading` (a window is on its way) and `stalled` (this device has typed to the
+					end of what it holds, spec §8). Neither is the finished-book summary, which is a
+					different component entirely, with a heading, four figures and its own focus.
+					This is one quiet line in the same muted register as the rest of the chrome, and
+					it takes no focus at all: the input above still has it, so the moment the window
+					lands the user types on without touching anything.
+
+					An OVERLAY on the card's bottom edge since spec #45, not a block below it: the
+					card is pinned, and a panel that took its own height would resize the page under
+					the typist at the one moment the layout should be still.
+				-->
+				<div
+					data-testid="page-awaiting"
+					data-state={windowStalled ? 'stalled' : 'loading'}
+					class="awaiting"
+				>
+					<p class="text-sm text-fg">{windowStatus}</p>
+					{#if windowStalled}
+						<p class="text-[13px] text-muted" data-testid="page-awaiting-hint">
+							{m.page_window_end_hint()}
+						</p>
+					{/if}
+				</div>
+			{/if}
+		</div>
 		<PageNavigator
 			current={session.activeIndex + 1}
 			total={session.text.chunkCount}
 			onNavigate={navigateToIndex}
 		/>
-		<div class="mt-1 flex flex-wrap justify-center gap-2">
-			<button
-				type="button"
-				data-testid="zen-toggle"
-				class={buttonClasses}
-				aria-pressed={zen}
-				onclick={toggleZen}
-			>
-				{zen ? m.zen_exit() : m.zen_enter()}
-			</button>
-			<button
-				type="button"
-				data-testid="restart-chunk"
-				class={buttonClasses}
-				onclick={restartChunk}
-			>
-				{m.page_restart()}
-			</button>
-			<button type="button" data-testid="pick-another" class={buttonClasses} onclick={pickAnother}>
-				{m.typing_pick_another()}
-			</button>
-		</div>
 	{/if}
 </main>
+
+<style>
+	/*
+	 * The pinned shell (spec #45). `svh` rather than `vh`: on mobile `vh` is the LARGE viewport,
+	 * which sits behind the browser's own chrome and would push the page navigator off the
+	 * bottom of the screen.
+	 */
+	.typing-shell {
+		height: calc(100svh - var(--header-h));
+		gap: 10px;
+		padding-top: 14px;
+		padding-bottom: 14px;
+	}
+
+	/*
+	 * The awaiting overlay (spec #45): pinned to the card's bottom edge, inside the card's
+	 * own bounds, over a background that fades into the sheet so the text behind it does not
+	 * read through the message.
+	 */
+	.awaiting {
+		position: absolute;
+		right: 0;
+		bottom: 0;
+		left: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		border-radius: 0 0 12px 12px;
+		padding: 14px 20px 18px;
+		text-align: center;
+		background: linear-gradient(to top, var(--sheet) 62%, transparent);
+	}
+</style>

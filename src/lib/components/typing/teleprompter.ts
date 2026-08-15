@@ -14,6 +14,19 @@
  * boundary. See `measure.ts`'s module comment for the seam this preserves.
  */
 
+/**
+ * How many rendered lines stay visible BELOW the caret's line on the typing screen — the
+ * band's bottom margin, and the whole of what spec #45 changed here.
+ *
+ * Phase 5b's band was the viewport's middle third, which kept the text permanently in motion:
+ * the caret was pinned near the centre, so almost every new line scrolled. With the card now
+ * pinned to the viewport's height, the band runs from the very top to three lines short of the
+ * bottom instead, and `computeTranslateY`'s first case ("already inside the band → no scroll")
+ * does the rest: the page sits **completely still** until the caret reaches the last three
+ * lines, then follows one line at a time, always leaving this much lookahead in view.
+ */
+export const LOOKAHEAD_LINES = 3;
+
 export interface TeleprompterInput {
 	/** The active line's top edge, in the UNTRANSFORMED track's own coordinate space (px). */
 	activeLineTop: number;
