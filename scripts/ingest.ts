@@ -639,6 +639,12 @@ async function writeCover(
 	if (error) fail(`${entry.slug}: writing cover_url failed — ${error.message}`);
 }
 
+/**
+ * How many chunk ids one `chunk_attempts` count request may name. See the loop below for why
+ * a single unbatched request cannot work on a full-length book.
+ */
+const ATTEMPT_COUNT_BATCH = 200;
+
 /** Counts distinct `user_id`s among the `chunk_attempts` rows attached to `chunkIds`. */
 async function countAttemptsAtRisk(
 	client: SupabaseClient,
@@ -649,22 +655,40 @@ async function countAttemptsAtRisk(
 	if (chunkIds.length === 0) {
 		return { count: 0, users: 0 };
 	}
-	// A failure here must be fatal, never swallowed. This count IS the safety mechanism, and an
-	// error read as an empty result reports "this is free" about a chunk that may carry a
-	// user's history — the one direction a safety check must never fail in. (It did exactly
-	// that until `service_role` was granted SELECT on chunk_attempts.)
-	const { data, error } = await client
-		.from('chunk_attempts')
-		.select('user_id')
-		.in('chunk_id', chunkIds);
-	if (error) {
-		fail(
-			`${slug}: could not count the attempts at risk from ${action} — ${error.message}\n` +
-				`  Refusing to proceed without knowing what it would affect.`
-		);
+	// BATCHED, and it has to be. PostgREST puts `.in(...)` in the query STRING, so a single
+	// call over a whole book's chunk ids builds a URL of `37 * n` characters — around 50 KB for
+	// don-quijote — and the server answers `400 Bad Request` long before it answers the
+	// question. That failure is fatal by design (see below), so an unbatched count did not
+	// merely slow the re-cut down: it stopped it, on the first book with more chunks than a URL
+	// can name. 200 ids per request is ~7 KB, comfortably inside every proxy's limit.
+	const users = new Set<string>();
+	let count = 0;
+
+	for (let start = 0; start < chunkIds.length; start += ATTEMPT_COUNT_BATCH) {
+		const batch = chunkIds.slice(start, start + ATTEMPT_COUNT_BATCH);
+		// A failure here must be fatal, never swallowed. This count IS the safety mechanism, and
+		// an error read as an empty result reports "this is free" about a chunk that may carry a
+		// user's history — the one direction a safety check must never fail in. (It did exactly
+		// that until `service_role` was granted SELECT on chunk_attempts.)
+		const { data, error } = await client
+			.from('chunk_attempts')
+			.select('user_id')
+			.in('chunk_id', batch);
+		if (error) {
+			fail(
+				`${slug}: could not count the attempts at risk from ${action} — ${error.message}\n` +
+					`  Refusing to proceed without knowing what it would affect.`
+			);
+		}
+		count += data?.length ?? 0;
+		for (const row of data ?? []) {
+			users.add(row.user_id as string);
+		}
 	}
-	const users = new Set((data ?? []).map((row) => row.user_id as string));
-	return { count: data?.length ?? 0, users: users.size };
+
+	// Counted across batches, never per batch: a user who attempted chunks in two different
+	// batches is one user, and summing per-batch set sizes would report them twice.
+	return { count, users: users.size };
 }
 
 /**
@@ -691,15 +715,33 @@ async function computeShrinkCost(
 		return null;
 	}
 
-	const doomed = await client
-		.from('chunks')
-		.select('id')
-		.eq('book_id', bookId)
-		.gte('index', newLength);
-	if (doomed.error) {
-		fail(`${slug}: could not list the chunks at risk from shrinking — ${doomed.error.message}`);
+	// PAGINATED, for exactly the reason `readExistingContent` states below: PostgREST caps a
+	// response at 1,000 rows, and a re-cut that halves a long book leaves more trailing chunks
+	// than that. An unpaginated read would under-report the cost AND under-delete, leaving rows
+	// past the new end alive with no `chunk_count` that can reach them — the truncation class
+	// this codebase has removed everywhere else.
+	const doomedIds: string[] = [];
+	let offset = 0;
+	for (;;) {
+		const { data, error } = await client
+			.from('chunks')
+			.select('id')
+			.eq('book_id', bookId)
+			.gte('index', newLength)
+			.order('index', { ascending: true })
+			.range(offset, offset + RECUT_PAGE_SIZE - 1);
+		if (error) {
+			fail(
+				`${slug}: could not list the chunks at risk from shrinking at offset ${offset} — ${error.message}`
+			);
+		}
+		const page = (data ?? []) as { id: string }[];
+		doomedIds.push(...page.map((row) => row.id));
+		if (page.length < RECUT_PAGE_SIZE) {
+			break;
+		}
+		offset += RECUT_PAGE_SIZE;
 	}
-	const doomedIds = (doomed.data ?? []).map((row) => row.id as string);
 	const { count, users } = await countAttemptsAtRisk(client, slug, doomedIds, 'shrinking');
 
 	return {
@@ -915,8 +957,13 @@ async function writeBook(
 	}
 
 	if (shrinkCost) {
-		const { error } = await client.from('chunks').delete().in('id', shrinkCost.doomedIds);
-		if (error) fail(`${entry.slug}: deleting trailing chunks failed — ${error.message}`);
+		// Batched for the same reason the count above is: the ids travel in the URL, and a
+		// full-length book's trailing run is far more than one request can name.
+		for (let start = 0; start < shrinkCost.doomedIds.length; start += ATTEMPT_COUNT_BATCH) {
+			const batch = shrinkCost.doomedIds.slice(start, start + ATTEMPT_COUNT_BATCH);
+			const { error } = await client.from('chunks').delete().in('id', batch);
+			if (error) fail(`${entry.slug}: deleting trailing chunks failed — ${error.message}`);
+		}
 	}
 
 	await writeCover(client, prepared, bookId);
