@@ -7,25 +7,25 @@
 
 ## Chunks
 
-| Measure                                 | Value  |
-| --------------------------------------- | ------ |
-| Chunks                                  | 473    |
-| Total characters                        | 558112 |
-| Shortest                                | 149    |
-| Median                                  | 1221   |
-| Longest                                 | 1571   |
-| Median lines                            | 22     |
-| Longest (lines)                         | 24     |
-| Over the budget (1600 chars / 24 lines) | 0      |
+| Measure | Value |
+|---|---|
+| Chunks | 473 |
+| Total characters | 558112 |
+| Shortest | 149 |
+| Median | 1221 |
+| Longest | 1571 |
+| Median lines | 22 |
+| Longest (lines) | 24 |
+| Over the budget (1600 chars / 24 lines) | 0 |
 
 ## Metadata
 
-| Field                  | Value                              |
-| ---------------------- | ---------------------------------- |
-| Open Library work      | `/works/OL262421W`                 |
-| First publication year | 1892 (Open Library)                |
-| Description            | 2676 characters, from Open Library |
-| Summary overrides      | None                               |
+| Field | Value |
+|---|---|
+| Open Library work | `/works/OL262421W` |
+| First publication year | 1892 (Open Library) |
+| Description | 2676 characters, from Open Library |
+| Summary overrides | None |
 
 Opening of the description, as it would be stored under `default`:
 
@@ -35,20 +35,20 @@ The Adventures of Sherlock Holmes is a collection of twelve short stories by Art
 
 ## Chapters
 
-| #   | Title                                     | Start page | Pages |
-| --- | ----------------------------------------- | ---------- | ----- |
-| 1   | I. A SCANDAL IN BOHEMIA                   | 1          | 39    |
-| 2   | II. THE RED-HEADED LEAGUE                 | 40         | 42    |
-| 3   | III. A CASE OF IDENTITY                   | 82         | 30    |
-| 4   | IV. THE BOSCOMBE VALLEY MYSTERY           | 112        | 42    |
-| 5   | V. THE FIVE ORANGE PIPS                   | 154        | 34    |
-| 6   | VI. THE MAN WITH THE TWISTED LIP          | 188        | 42    |
-| 7   | VII. THE ADVENTURE OF THE BLUE CARBUNCLE  | 230        | 35    |
-| 8   | VIII. THE ADVENTURE OF THE SPECKLED BAND  | 265        | 45    |
-| 9   | IX. THE ADVENTURE OF THE ENGINEER'S THUMB | 310        | 39    |
-| 10  | X. THE ADVENTURE OF THE NOBLE BACHELOR    | 349        | 37    |
-| 11  | XI. THE ADVENTURE OF THE BERYL CORONET    | 386        | 43    |
-| 12  | XII. THE ADVENTURE OF THE COPPER BEECHES  | 429        | 45    |
+| # | Title | Start page | Pages |
+|---|---|---|---|
+| 1 | I. A SCANDAL IN BOHEMIA | 1 | 39 |
+| 2 | II. THE RED-HEADED LEAGUE | 40 | 42 |
+| 3 | III. A CASE OF IDENTITY | 82 | 30 |
+| 4 | IV. THE BOSCOMBE VALLEY MYSTERY | 112 | 42 |
+| 5 | V. THE FIVE ORANGE PIPS | 154 | 34 |
+| 6 | VI. THE MAN WITH THE TWISTED LIP | 188 | 42 |
+| 7 | VII. THE ADVENTURE OF THE BLUE CARBUNCLE | 230 | 35 |
+| 8 | VIII. THE ADVENTURE OF THE SPECKLED BAND | 265 | 45 |
+| 9 | IX. THE ADVENTURE OF THE ENGINEER'S THUMB | 310 | 39 |
+| 10 | X. THE ADVENTURE OF THE NOBLE BACHELOR | 349 | 37 |
+| 11 | XI. THE ADVENTURE OF THE BERYL CORONET | 386 | 43 |
+| 12 | XII. THE ADVENTURE OF THE COPPER BEECHES | 429 | 45 |
 
 ## Disallowed characters
 

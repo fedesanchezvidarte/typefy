@@ -7,25 +7,25 @@
 
 ## Chunks
 
-| Measure                                 | Value  |
-| --------------------------------------- | ------ |
-| Chunks                                  | 508    |
-| Total characters                        | 609151 |
-| Shortest                                | 176    |
-| Median                                  | 1253   |
-| Longest                                 | 1581   |
-| Median lines                            | 20     |
-| Longest (lines)                         | 24     |
-| Over the budget (1600 chars / 24 lines) | 0      |
+| Measure | Value |
+|---|---|
+| Chunks | 508 |
+| Total characters | 609151 |
+| Shortest | 176 |
+| Median | 1253 |
+| Longest | 1581 |
+| Median lines | 20 |
+| Longest (lines) | 24 |
+| Over the budget (1600 chars / 24 lines) | 0 |
 
 ## Metadata
 
-| Field                  | Value                                            |
-| ---------------------- | ------------------------------------------------ |
-| Open Library work      | `/works/OL61982W`                                |
+| Field | Value |
+|---|---|
+| Open Library work | `/works/OL61982W` |
 | First publication year | -700 (manifest override; Open Library says 1488) |
-| Description            | 473 characters, from Open Library                |
-| Summary overrides      | None                                             |
+| Description | 473 characters, from Open Library |
+| Summary overrides | None |
 
 > The sources disagree: the manifest declares -700, Open Library reports 1488.
 > The manifest wins, so -700 is what gets written. Open Library reports the
@@ -40,32 +40,32 @@ The Odyssey (/ˈɒdəsi/; Greek: Ὀδύσσεια, Odýsseia) is one of two maj
 
 ## Chapters
 
-| #   | Title      | Start page | Pages |
-| --- | ---------- | ---------- | ----- |
-| 1   | BOOK I     | 1          | 17    |
-| 2   | BOOK II    | 18         | 18    |
-| 3   | BOOK III   | 36         | 18    |
-| 4   | BOOK IV    | 54         | 35    |
-| 5   | BOOK V     | 89         | 19    |
-| 6   | BOOK VI    | 108        | 15    |
-| 7   | BOOK VII   | 123        | 16    |
-| 8   | BOOK VIII  | 139        | 26    |
-| 9   | BOOK IX    | 165        | 25    |
-| 10  | BOOK X     | 190        | 26    |
-| 11  | BOOK XI    | 216        | 27    |
-| 12  | BOOK XII   | 243        | 21    |
-| 13  | BOOK XIII  | 264        | 18    |
-| 14  | BOOK XIV   | 282        | 24    |
-| 15  | BOOK XV    | 306        | 23    |
-| 16  | BOOK XVI   | 329        | 20    |
-| 17  | BOOK XVII  | 349        | 24    |
-| 18  | BOOK XVIII | 373        | 18    |
-| 19  | BOOK XIX   | 391        | 24    |
-| 20  | BOOK XX    | 415        | 17    |
-| 21  | BOOK XXI   | 432        | 18    |
-| 22  | BOOK XXII  | 450        | 20    |
-| 23  | BOOK XXIII | 470        | 16    |
-| 24  | BOOK XXIV  | 486        | 23    |
+| # | Title | Start page | Pages |
+|---|---|---|---|
+| 1 | BOOK I | 1 | 17 |
+| 2 | BOOK II | 18 | 18 |
+| 3 | BOOK III | 36 | 18 |
+| 4 | BOOK IV | 54 | 35 |
+| 5 | BOOK V | 89 | 19 |
+| 6 | BOOK VI | 108 | 15 |
+| 7 | BOOK VII | 123 | 16 |
+| 8 | BOOK VIII | 139 | 26 |
+| 9 | BOOK IX | 165 | 25 |
+| 10 | BOOK X | 190 | 26 |
+| 11 | BOOK XI | 216 | 27 |
+| 12 | BOOK XII | 243 | 21 |
+| 13 | BOOK XIII | 264 | 18 |
+| 14 | BOOK XIV | 282 | 24 |
+| 15 | BOOK XV | 306 | 23 |
+| 16 | BOOK XVI | 329 | 20 |
+| 17 | BOOK XVII | 349 | 24 |
+| 18 | BOOK XVIII | 373 | 18 |
+| 19 | BOOK XIX | 391 | 24 |
+| 20 | BOOK XX | 415 | 17 |
+| 21 | BOOK XXI | 432 | 18 |
+| 22 | BOOK XXII | 450 | 20 |
+| 23 | BOOK XXIII | 470 | 16 |
+| 24 | BOOK XXIV | 486 | 23 |
 
 ## Disallowed characters
 

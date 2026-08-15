@@ -7,25 +7,25 @@
 
 ## Chunks
 
-| Measure                                 | Value  |
-| --------------------------------------- | ------ |
-| Chunks                                  | 193    |
-| Total characters                        | 232332 |
-| Shortest                                | 527    |
-| Median                                  | 1264   |
-| Longest                                 | 1550   |
-| Median lines                            | 21     |
-| Longest (lines)                         | 24     |
-| Over the budget (1600 chars / 24 lines) | 0      |
+| Measure | Value |
+|---|---|
+| Chunks | 193 |
+| Total characters | 232332 |
+| Shortest | 527 |
+| Median | 1264 |
+| Longest | 1550 |
+| Median lines | 21 |
+| Longest (lines) | 24 |
+| Over the budget (1600 chars / 24 lines) | 0 |
 
 ## Metadata
 
-| Field                  | Value                              |
-| ---------------------- | ---------------------------------- |
-| Open Library work      | `/works/OL144961W`                 |
-| First publication year | 1626 (Open Library)                |
-| Description            | 1340 characters, from Open Library |
-| Summary overrides      | None                               |
+| Field | Value |
+|---|---|
+| Open Library work | `/works/OL144961W` |
+| First publication year | 1626 (Open Library) |
+| Description | 1340 characters, from Open Library |
+| Summary overrides | None |
 
 Opening of the description, as it would be stored under `default`:
 
@@ -35,31 +35,31 @@ Opening of the description, as it would be stored under `default`:
 
 ## Chapters
 
-| #   | Title                                                                                                                                                | Start page | Pages |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- | ----- |
-| 1   | Libro Primero: Capítulo I: En que cuenta quién es el Buscón.                                                                                         | 1          | 3     |
-| 2   | Libro Primero: Capítulo II: De cómo fue a la escuela y lo que en ella le sucedió.                                                                    | 4          | 8     |
-| 3   | Libro Primero: Capítulo III: De cómo fue a un pupilaje por criado de don Diego Coronel.                                                              | 12         | 9     |
-| 4   | Libro Primero: Capítulo IV: De la convalecencia y ida a estudiar a Alcalá de Henares.                                                                | 21         | 12    |
-| 5   | Libro Primero: Capítulo V: De la entrada de Alcalá, patente y burlas que le hicieron por nuevo.                                                      | 33         | 10    |
-| 6   | Libro Primero: Capítulo VI: De las crueldades de la ama, y travesuras que hizo.                                                                      | 43         | 11    |
-| 7   | Libro Primero: Capítulo VII: De la ida de don Diego, y nuevas de la muerte de su padre y madre, y la resolución que tomó en sus cosas para adelante. | 54         | 4     |
-| 8   | Libro Segundo: Capítulo I: Del camino de Alcalá para Segovia, y de lo que le sucedió en él hasta Rejas, donde durmió aquella noche.                  | 58         | 8     |
-| 9   | Libro Segundo: Capítulo II: De lo que le sucedió hasta llegar a Madrid, con un poeta.                                                                | 66         | 5     |
-| 10  | Libro Segundo: Capítulo III: De lo que hizo en Madrid, y lo que le sucedió hasta llegar a Cercedilla, donde durmió.                                  | 71         | 15    |
-| 11  | Libro Segundo: Capítulo IV: Del hospedaje de su tío, y visitas; la cobranza de su hacienda y vuelta a la corte.                                      | 86         | 8     |
-| 12  | Libro Segundo: Capítulo V: De su huida, y los sucesos en ella hasta la Corte.                                                                        | 94         | 5     |
-| 13  | Libro Segundo: Capítulo VI: En que prosigue el camino y lo prometido de su vida y costumbres.                                                        | 99         | 7     |
-| 14  | Libro Tercero: Capítulo I: De lo que le sucedió en la Corte luego que llegó hasta que amaneció.                                                      | 106        | 5     |
-| 15  | Libro Tercero: Capítulo II: En que prosigue la materia comenzada y cuenta algunos raros sucesos.                                                     | 111        | 14    |
-| 16  | Libro Tercero: Capítulo III: En que prosigue la misma materia, hasta dar con todos en la cárcel.                                                     | 125        | 3     |
-| 17  | Libro Tercero: Capítulo IV: En que trata los sucesos de la cárcel, hasta salir la vieja azotada, los compañeros a la vergüenza y él en fiado.        | 128        | 10    |
-| 18  | Libro Tercero: Capítulo V: De cómo tomó posada, y la desgracia que le sucedió en ella.                                                               | 138        | 6     |
-| 19  | Libro Tercero: Capítulo VI: Prosigue el cuento, con otros varios sucesos.                                                                            | 144        | 7     |
-| 20  | Libro Tercero: Capítulo VII: En que se prosigue lo mismo, con otros sucesos y desgracias que le sucedieron.                                          | 151        | 12    |
-| 21  | Libro Tercero: Capítulo VIII: De su cura y otros sucesos peregrinos.                                                                                 | 163        | 8     |
-| 22  | Libro Tercero: Capítulo IX: En que se hace representante, poeta y galán de monjas.                                                                   | 171        | 15    |
-| 23  | Libro Tercero: Capítulo X: De lo que le sucedió en Sevilla hasta embarcarse a Indias.                                                                | 186        | 8     |
+| # | Title | Start page | Pages |
+|---|---|---|---|
+| 1 | Libro Primero: Capítulo I: En que cuenta quién es el Buscón. | 1 | 3 |
+| 2 | Libro Primero: Capítulo II: De cómo fue a la escuela y lo que en ella le sucedió. | 4 | 8 |
+| 3 | Libro Primero: Capítulo III: De cómo fue a un pupilaje por criado de don Diego Coronel. | 12 | 9 |
+| 4 | Libro Primero: Capítulo IV: De la convalecencia y ida a estudiar a Alcalá de Henares. | 21 | 12 |
+| 5 | Libro Primero: Capítulo V: De la entrada de Alcalá, patente y burlas que le hicieron por nuevo. | 33 | 10 |
+| 6 | Libro Primero: Capítulo VI: De las crueldades de la ama, y travesuras que hizo. | 43 | 11 |
+| 7 | Libro Primero: Capítulo VII: De la ida de don Diego, y nuevas de la muerte de su padre y madre, y la resolución que tomó en sus cosas para adelante. | 54 | 4 |
+| 8 | Libro Segundo: Capítulo I: Del camino de Alcalá para Segovia, y de lo que le sucedió en él hasta Rejas, donde durmió aquella noche. | 58 | 8 |
+| 9 | Libro Segundo: Capítulo II: De lo que le sucedió hasta llegar a Madrid, con un poeta. | 66 | 5 |
+| 10 | Libro Segundo: Capítulo III: De lo que hizo en Madrid, y lo que le sucedió hasta llegar a Cercedilla, donde durmió. | 71 | 15 |
+| 11 | Libro Segundo: Capítulo IV: Del hospedaje de su tío, y visitas; la cobranza de su hacienda y vuelta a la corte. | 86 | 8 |
+| 12 | Libro Segundo: Capítulo V: De su huida, y los sucesos en ella hasta la Corte. | 94 | 5 |
+| 13 | Libro Segundo: Capítulo VI: En que prosigue el camino y lo prometido de su vida y costumbres. | 99 | 7 |
+| 14 | Libro Tercero: Capítulo I: De lo que le sucedió en la Corte luego que llegó hasta que amaneció. | 106 | 5 |
+| 15 | Libro Tercero: Capítulo II: En que prosigue la materia comenzada y cuenta algunos raros sucesos. | 111 | 14 |
+| 16 | Libro Tercero: Capítulo III: En que prosigue la misma materia, hasta dar con todos en la cárcel. | 125 | 3 |
+| 17 | Libro Tercero: Capítulo IV: En que trata los sucesos de la cárcel, hasta salir la vieja azotada, los compañeros a la vergüenza y él en fiado. | 128 | 10 |
+| 18 | Libro Tercero: Capítulo V: De cómo tomó posada, y la desgracia que le sucedió en ella. | 138 | 6 |
+| 19 | Libro Tercero: Capítulo VI: Prosigue el cuento, con otros varios sucesos. | 144 | 7 |
+| 20 | Libro Tercero: Capítulo VII: En que se prosigue lo mismo, con otros sucesos y desgracias que le sucedieron. | 151 | 12 |
+| 21 | Libro Tercero: Capítulo VIII: De su cura y otros sucesos peregrinos. | 163 | 8 |
+| 22 | Libro Tercero: Capítulo IX: En que se hace representante, poeta y galán de monjas. | 171 | 15 |
+| 23 | Libro Tercero: Capítulo X: De lo que le sucedió en Sevilla hasta embarcarse a Indias. | 186 | 8 |
 
 ## Disallowed characters
 

@@ -7,25 +7,25 @@
 
 ## Chunks
 
-| Measure                                 | Value  |
-| --------------------------------------- | ------ |
-| Chunks                                  | 122    |
-| Total characters                        | 138732 |
-| Shortest                                | 294    |
-| Median                                  | 1150   |
-| Longest                                 | 1553   |
-| Median lines                            | 23     |
-| Longest (lines)                         | 24     |
-| Over the budget (1600 chars / 24 lines) | 0      |
+| Measure | Value |
+|---|---|
+| Chunks | 122 |
+| Total characters | 138732 |
+| Shortest | 294 |
+| Median | 1150 |
+| Longest | 1553 |
+| Median lines | 23 |
+| Longest (lines) | 24 |
+| Over the budget (1600 chars / 24 lines) | 0 |
 
 ## Metadata
 
-| Field                  | Value                             |
-| ---------------------- | --------------------------------- |
-| Open Library work      | `/works/OL362427W`                |
-| First publication year | 1597 (Open Library)               |
-| Description            | 388 characters, from Open Library |
-| Summary overrides      | None                              |
+| Field | Value |
+|---|---|
+| Open Library work | `/works/OL362427W` |
+| First publication year | 1597 (Open Library) |
+| Description | 388 characters, from Open Library |
+| Summary overrides | None |
 
 Opening of the description, as it would be stored under `default`:
 
@@ -35,13 +35,13 @@ Romeo and Juliet is a tragedy written by William Shakespeare early in his career
 
 ## Chapters
 
-| #   | Title   | Start page | Pages |
-| --- | ------- | ---------- | ----- |
-| 1   | ACT I   | 1          | 29    |
-| 2   | ACT II  | 30         | 26    |
-| 3   | ACT III | 56         | 31    |
-| 4   | ACT IV  | 87         | 18    |
-| 5   | ACT V   | 105        | 18    |
+| # | Title | Start page | Pages |
+|---|---|---|---|
+| 1 | ACT I | 1 | 29 |
+| 2 | ACT II | 30 | 26 |
+| 3 | ACT III | 56 | 31 |
+| 4 | ACT IV | 87 | 18 |
+| 5 | ACT V | 105 | 18 |
 
 ## Disallowed characters
 

@@ -10,25 +10,25 @@
 
 ## Chunks
 
-| Measure                                 | Value  |
-| --------------------------------------- | ------ |
-| Chunks                                  | 130    |
-| Total characters                        | 156887 |
-| Shortest                                | 417    |
-| Median                                  | 1260   |
-| Longest                                 | 1559   |
-| Median lines                            | 22     |
-| Longest (lines)                         | 24     |
-| Over the budget (1600 chars / 24 lines) | 0      |
+| Measure | Value |
+|---|---|
+| Chunks | 130 |
+| Total characters | 156887 |
+| Shortest | 417 |
+| Median | 1260 |
+| Longest | 1559 |
+| Median lines | 22 |
+| Longest (lines) | 24 |
+| Over the budget (1600 chars / 24 lines) | 0 |
 
 ## Metadata
 
-| Field                  | Value                            |
-| ---------------------- | -------------------------------- |
-| Open Library work      | `/works/OL32466W`                |
-| First publication year | 1843 (Open Library)              |
-| Description            | 74 characters, from Open Library |
-| Summary overrides      | None                             |
+| Field | Value |
+|---|---|
+| Open Library work | `/works/OL32466W` |
+| First publication year | 1843 (Open Library) |
+| Description | 74 characters, from Open Library |
+| Summary overrides | None |
 
 Opening of the description, as it would be stored under `default`:
 

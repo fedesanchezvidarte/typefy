@@ -10,64 +10,64 @@
 
 ## Chunks
 
-| Measure                                 | Value  |
-| --------------------------------------- | ------ |
-| Chunks                                  | 262    |
-| Total characters                        | 296721 |
-| Shortest                                | 170    |
-| Median                                  | 1160   |
-| Longest                                 | 1581   |
-| Median lines                            | 23     |
-| Longest (lines)                         | 24     |
-| Over the budget (1600 chars / 24 lines) | 0      |
+| Measure | Value |
+|---|---|
+| Chunks | 262 |
+| Total characters | 296721 |
+| Shortest | 170 |
+| Median | 1160 |
+| Longest | 1581 |
+| Median lines | 23 |
+| Longest (lines) | 24 |
+| Over the budget (1600 chars / 24 lines) | 0 |
 
 ## Metadata
 
-| Field                  | Value           |
-| ---------------------- | --------------- |
-| Open Library work      | None declared   |
+| Field | Value |
+|---|---|
+| Open Library work | None declared |
 | First publication year | 1914 (manifest) |
-| Description            | None            |
-| Summary overrides      | None            |
+| Description | None |
+| Summary overrides | None |
 
 ## Chapters
 
-| #   | Title               | Start page | Pages |
-| --- | ------------------- | ---------- | ----- |
-| 1   | I                   | 1          | 7     |
-| 2   | II                  | 8          | 7     |
-| 3   | III                 | 15         | 4     |
-| 4   | IV                  | 19         | 6     |
-| 5   | V                   | 25         | 11    |
-| 6   | VI                  | 36         | 6     |
-| 7   | VII                 | 42         | 4     |
-| 8   | VIII                | 46         | 10    |
-| 9   | IX                  | 56         | 4     |
-| 10  | X                   | 60         | 9     |
-| 11  | XI                  | 69         | 8     |
-| 12  | XII                 | 77         | 6     |
-| 13  | XIII                | 83         | 7     |
-| 14  | XIV                 | 90         | 10    |
-| 15  | XV                  | 100        | 8     |
-| 16  | XVI                 | 108        | 6     |
-| 17  | XVII                | 114        | 12    |
-| 18  | XVIII               | 126        | 6     |
-| 19  | XIX                 | 132        | 12    |
-| 20  | XX                  | 144        | 11    |
-| 21  | XXI                 | 155        | 8     |
-| 22  | XXII                | 163        | 6     |
-| 23  | XXIII               | 169        | 14    |
-| 24  | XXIV                | 183        | 10    |
-| 25  | XXV                 | 193        | 5     |
-| 26  | XXVI                | 198        | 4     |
-| 27  | XXVII               | 202        | 5     |
-| 28  | XXVIII              | 207        | 6     |
-| 29  | XXIX                | 213        | 7     |
-| 30  | XXX                 | 220        | 8     |
-| 31  | XXXI                | 228        | 12    |
-| 32  | XXXII               | 240        | 12    |
-| 33  | XXXIII              | 252        | 3     |
-| 34  | POR MODO DE EPÍLOGO | 255        | 8     |
+| # | Title | Start page | Pages |
+|---|---|---|---|
+| 1 | I | 1 | 7 |
+| 2 | II | 8 | 7 |
+| 3 | III | 15 | 4 |
+| 4 | IV | 19 | 6 |
+| 5 | V | 25 | 11 |
+| 6 | VI | 36 | 6 |
+| 7 | VII | 42 | 4 |
+| 8 | VIII | 46 | 10 |
+| 9 | IX | 56 | 4 |
+| 10 | X | 60 | 9 |
+| 11 | XI | 69 | 8 |
+| 12 | XII | 77 | 6 |
+| 13 | XIII | 83 | 7 |
+| 14 | XIV | 90 | 10 |
+| 15 | XV | 100 | 8 |
+| 16 | XVI | 108 | 6 |
+| 17 | XVII | 114 | 12 |
+| 18 | XVIII | 126 | 6 |
+| 19 | XIX | 132 | 12 |
+| 20 | XX | 144 | 11 |
+| 21 | XXI | 155 | 8 |
+| 22 | XXII | 163 | 6 |
+| 23 | XXIII | 169 | 14 |
+| 24 | XXIV | 183 | 10 |
+| 25 | XXV | 193 | 5 |
+| 26 | XXVI | 198 | 4 |
+| 27 | XXVII | 202 | 5 |
+| 28 | XXVIII | 207 | 6 |
+| 29 | XXIX | 213 | 7 |
+| 30 | XXX | 220 | 8 |
+| 31 | XXXI | 228 | 12 |
+| 32 | XXXII | 240 | 12 |
+| 33 | XXXIII | 252 | 3 |
+| 34 | POR MODO DE EPÍLOGO | 255 | 8 |
 
 ## Disallowed characters
 
