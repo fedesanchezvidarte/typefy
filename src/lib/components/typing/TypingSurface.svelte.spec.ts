@@ -5,22 +5,6 @@ import { CHARS_PER_LINE } from '$lib/chunking/measure';
 import TypingSurface from './TypingSurface.svelte';
 
 /**
- * The `ch` measure (spec #32 §5, ADR-0015), acceptance criterion #9 part 1: "the surface's
- * measure resolves to exactly `CHARS_PER_LINE` `ch` in every reading font" —
- * `computedWidth / widthOf('0') === CHARS_PER_LINE`. Deliberately NOT literal equality of
- * rendered characters-per-line across faces (part 2, and the property the spec's correction
- * explains is false for the proportional faces) — that is Phase 7's fuller coverage. This is
- * the one component test the Feature Brief asks the Phase 5 implementer to add as evidence,
- * not the whole suite.
- *
- * The width of `'0'` is asked of the BROWSER itself via a same-font probe span sized `1ch`,
- * rather than reimplemented with canvas text measurement — `1ch` is defined as that advance
- * width, so this is the most direct way to check "does our `max-width: {N}ch` actually land
- * on the inner, padding-free wrapper and resolve to exactly N," which is the thing that can
- * silently break (a typo landing the measure on `.surface` instead would read as measure
- * MINUS padding, not `N`).
- */
-/**
  * The typo is rendered as itself: expecting "Normal" and typing `p` for the `o` shows
  * "Nprmal", not "Normal" with a mark under a character the typist never produced. The wavy
  * underline and the error tint are unchanged — this ADDS a signal rather than replacing one,
@@ -96,6 +80,22 @@ describe('TypingSurface — incorrect positions show the character actually type
 	});
 });
 
+/**
+ * The `ch` measure (spec #32 §5, ADR-0015), acceptance criterion #9 part 1: "the surface's
+ * measure resolves to exactly `CHARS_PER_LINE` `ch` in every reading font" —
+ * `computedWidth / widthOf('0') === CHARS_PER_LINE`. Deliberately NOT literal equality of
+ * rendered characters-per-line across faces (part 2, and the property the spec's correction
+ * explains is false for the proportional faces) — that is Phase 7's fuller coverage. This is
+ * the one component test the Feature Brief asks the Phase 5 implementer to add as evidence,
+ * not the whole suite.
+ *
+ * The width of `'0'` is asked of the BROWSER itself via a same-font probe span sized `1ch`,
+ * rather than reimplemented with canvas text measurement — `1ch` is defined as that advance
+ * width, so this is the most direct way to check "does our `max-width: {N}ch` actually land
+ * on the inner, padding-free wrapper and resolve to exactly N," which is the thing that can
+ * silently break (a typo landing the measure on `.surface` instead would read as measure
+ * MINUS padding, not `N`).
+ */
 describe('TypingSurface — the ch measure', () => {
 	it('resolves the measure wrapper to exactly CHARS_PER_LINE ch', async () => {
 		// A desktop-width viewport (spec's own out-of-scope list explicitly excludes
