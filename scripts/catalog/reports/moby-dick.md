@@ -4,6 +4,9 @@
 
 - **Slug**: `moby-dick`
 - **Source**: https://www.gutenberg.org/cache/epub/2701/pg2701.txt
+- **Cover**: jpeg 800x1200, 60 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:Moby-Dick_FE_title_page.jpg
 
 ## Chunks
 

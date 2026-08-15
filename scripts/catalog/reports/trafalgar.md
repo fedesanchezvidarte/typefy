@@ -4,6 +4,9 @@
 
 - **Slug**: `trafalgar`
 - **Source**: https://www.gutenberg.org/cache/epub/16961/pg16961.txt
+- **Cover**: jpeg 800x1200, 91 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:Portada_Trafalgar_(1873).jpg
 
 ## Chunks
 

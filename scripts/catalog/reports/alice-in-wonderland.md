@@ -4,6 +4,9 @@
 
 - **Slug**: `alice-in-wonderland`
 - **Source**: https://www.gutenberg.org/cache/epub/11/pg11.txt
+- **Cover**: jpeg 800x1200, 216 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:Alice%27s_Adventures_in_Wonderland_cover_(1865).jpg
 
 ## Chunks
 

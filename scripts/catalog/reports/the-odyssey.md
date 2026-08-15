@@ -4,6 +4,9 @@
 
 - **Slug**: `the-odyssey`
 - **Source**: https://www.gutenberg.org/cache/epub/1727/pg1727.txt
+- **Cover**: jpeg 800x1200, 57 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:Odyssey_(Butler)_title_page.png
 
 ## Chunks
 

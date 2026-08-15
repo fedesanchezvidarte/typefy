@@ -4,6 +4,9 @@
 
 - **Slug**: `the-time-machine`
 - **Source**: https://www.gutenberg.org/cache/epub/35/pg35.txt
+- **Cover**: jpeg 800x1200, 265 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:The_Time_Machine_(Heinemann_text)_-_front_cover.jpg
 
 ## Chunks
 

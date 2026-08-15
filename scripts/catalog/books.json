@@ -1,6 +1,6 @@
 {
 	"$comment": "The catalog's source of truth (spec #17 §2). Ingestion reads this and never invents metadata. Each entry's sourceUrl and license are verified by hand against the source; a cover, when present, requires coverLicense and coverSource because Gutenberg's text is public domain but its scanned cover art often is not. Add a book: add an entry, run `npm run ingest -- --slug <slug> --target local --dry-run`, read the committed report, then ingest and publish.",
-	"$coverComment": "Covers (spec #19 §2) are supplied, never generated or transformed by ingestion. Each one was located on Wikimedia Commons, its licence read from that file's own description page, and the file fetched at a Commons-rendered width that already satisfies the 2:3 tolerance, the byte limit and the minimum width — no local cropping and no re-encoding. A book whose art could not be verified as freely licensed, or whose only available rendition failed validation, simply has no `cover` entry and renders GeneratedCover. A mixed shelf is the intended end state, not a gap.",
+	"$coverComment": "Covers (spec #19 §2) are supplied, never generated or transformed BY INGESTION — preparing them offline is the maintainer's job and always was. Each one was located on Wikimedia Commons, its licence read from that file's own description page, and the file fetched from Commons: directly for a plain image, or as a Commons-rendered page of a scanned volume for the-adventures-of-sherlock-holmes (page 1 of the 1892 djvu, its front board), marianela (page 1 of the IA pdf, its front board) and el-buscon (page 9 of the djvu, the 1911 Clásicos Castellanos title page — page 1 is a blank library board). Covers added before 2026-08-15 were used exactly as fetched; the ten added on that date were cropped to 2:3 and re-encoded as JPEG at 800px wide (marianela 431px, romeo-and-juliet 668px — the sources are smaller and upscaling is not done) so they clear the aspect band, the byte limit and the minimum width. The crop keeps the whole title block: it trims the empty foot of a tall title page, and for marianela the left edge carrying a library sticker. coverSource points at the Commons file page, which is the licence claim being made; it is NOT a claim that the committed bytes are byte-identical to it. A book whose art could not be verified as freely licensed simply has no `cover` entry and renders GeneratedCover.",
 	"$metadataComment": "openLibraryWork (spec #34) is an Open Library WORK id, looked up by that declared id and never by a title search — searching \"El Buscón\" surfaces works dated 1927, 1961 and 1979 beside the real 1626. Each id here was opened and checked against the right title and author. Two books deliberately have none: niebla, whose Open Library description is a physical-extent note (\"ix, 178 pages ; 20 cm\") rather than a blurb, and trafalgar, whose description is a series note (\"Episodios Nacionales / Serie 1 - Volume 1\") and whose first_publish_year (1884) is an edition date, not the 1873 first publication. A summary that is not a summary is worse than no summary, and there is no way to take the year without the description. `year` (spec #34) is an optional hand-declared first publication year that WINS over Open Library's first_publish_year, on the same doctrine as `summary`: the manifest is the source of truth and a third party is a convenience. It is needed because first_publish_year is the earliest edition Open Library has CATALOGUED, not first publication — it disagrees with the accepted date for don-quijote (reports 1600; part one was published in 1605), marianela (reports 1883; published 1878) and dr-jekyll-and-mr-hyde (reports 1875; published 1886). Each disagreement is printed during the run and flagged in the committed report, so an override that has become redundant is visible and can be deleted. niebla (1914) and trafalgar (1873) get their years this way too, since they have no openLibraryWork to fetch one from. `summary` holds hand-written per-locale overrides only — never a machine translation, never an invented blurb — and a locale key wins over Open Library's description.",
 	"books": [
 		{
@@ -16,7 +16,10 @@
 				"startAtMarker": "It is a truth universally acknowledged"
 			},
 			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/1342/pg1342-images.html",
-			"chapters": { "firstHeadingImplicit": true }
+			"chapters": { "firstHeadingImplicit": true },
+			"cover": "scripts/catalog/covers/pride-and-prejudice.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:PrideAndPrejudiceTitlePage.jpg"
 		},
 		{
 			"slug": "frankenstein",
@@ -45,7 +48,10 @@
 			"featured": false,
 			"cleaning": {
 				"startAtMarker": "The Time Traveller (for so it will be convenient"
-			}
+			},
+			"cover": "scripts/catalog/covers/the-time-machine.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:The_Time_Machine_(Heinemann_text)_-_front_cover.jpg"
 		},
 		{
 			"slug": "a-christmas-carol",
@@ -91,7 +97,10 @@
 			"featured": false,
 			"cleaning": {
 				"startAtMarker": "Alice was beginning to get very tired of sitting"
-			}
+			},
+			"cover": "scripts/catalog/covers/alice-in-wonderland.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Alice%27s_Adventures_in_Wonderland_cover_(1865).jpg"
 		},
 		{
 			"slug": "moby-dick",
@@ -113,7 +122,10 @@
 					"EXTRACTS. (Supplied by a Sub-Sub-Librarian)."
 				],
 				"firstHeadingImplicit": true
-			}
+			},
+			"cover": "scripts/catalog/covers/moby-dick.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Moby-Dick_FE_title_page.jpg"
 		},
 		{
 			"slug": "the-odyssey",
@@ -139,7 +151,10 @@
 					"FOOTNOTES:"
 				],
 				"firstHeadingImplicit": true
-			}
+			},
+			"cover": "scripts/catalog/covers/the-odyssey.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Odyssey_(Butler)_title_page.png"
 		},
 		{
 			"slug": "romeo-and-juliet",
@@ -156,7 +171,10 @@
 			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/1513/pg1513-images.html",
 			"chapters": {
 				"excludeTitles": ["by William Shakespeare"]
-			}
+			},
+			"cover": "scripts/catalog/covers/romeo-and-juliet.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Romeo_and_Juliet_Q1_Title_Page.jpg"
 		},
 		{
 			"slug": "the-adventures-of-sherlock-holmes",
@@ -174,7 +192,10 @@
 			"chapters": {
 				"excludeTitles": ["by Arthur Conan Doyle", "Contents"],
 				"firstHeadingImplicit": true
-			}
+			},
+			"cover": "scripts/catalog/covers/the-adventures-of-sherlock-holmes.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Doyle_-_Adventures_of_Sherlock_Holmes,_1892.djvu"
 		},
 		{
 			"slug": "don-quijote",
@@ -245,7 +266,10 @@
 			"cleaning": {
 				"startAtMarker": "Se me permitirá que antes de referir",
 				"endMarker": "FIN DE TRAFALGAR"
-			}
+			},
+			"cover": "scripts/catalog/covers/trafalgar.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Portada_Trafalgar_(1873).jpg"
 		},
 		{
 			"slug": "marianela",
@@ -259,7 +283,10 @@
 			"featured": false,
 			"cleaning": {
 				"startAtMarker": "Se puso el sol"
-			}
+			},
+			"cover": "scripts/catalog/covers/marianela.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Marianela_(IA_marianela00pereiala).pdf"
 		},
 		{
 			"slug": "el-buscon",
@@ -300,7 +327,10 @@
 					"Libro Tercero: Capítulo X: De lo que le sucedió en Sevilla hasta embarcarse a Indias."
 				],
 				"firstHeadingImplicit": true
-			}
+			},
+			"cover": "scripts/catalog/covers/el-buscon.jpg",
+			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Vida_del_Busc%C3%B3n.djvu"
 		},
 		{
 			"slug": "lazarillo-de-tormes",

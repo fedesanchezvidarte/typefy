@@ -4,6 +4,9 @@
 
 - **Slug**: `romeo-and-juliet`
 - **Source**: https://www.gutenberg.org/cache/epub/1513/pg1513.txt
+- **Cover**: jpeg 668x1002, 178 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:Romeo_and_Juliet_Q1_Title_Page.jpg
 
 ## Chunks
 

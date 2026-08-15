@@ -4,6 +4,9 @@
 
 - **Slug**: `el-buscon`
 - **Source**: https://www.gutenberg.org/cache/epub/32315/pg32315.txt
+- **Cover**: jpeg 800x1200, 52 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:Vida_del_Busc%C3%B3n.djvu
 
 ## Chunks
 

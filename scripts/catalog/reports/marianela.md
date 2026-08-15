@@ -4,6 +4,9 @@
 
 - **Slug**: `marianela`
 - **Source**: https://www.gutenberg.org/cache/epub/17340/pg17340.txt
+- **Cover**: jpeg 431x647, 28 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:Marianela_(IA_marianela00pereiala).pdf
 
 ## Chunks
 

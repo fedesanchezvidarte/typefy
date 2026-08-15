@@ -4,6 +4,9 @@
 
 - **Slug**: `the-adventures-of-sherlock-holmes`
 - **Source**: https://www.gutenberg.org/cache/epub/1661/pg1661.txt
+- **Cover**: jpeg 800x1200, 295 KB
+- **Cover licence**: Public domain (the Wikimedia Commons file page states: Public domain)
+- **Cover source**: https://commons.wikimedia.org/wiki/File:Doyle_-_Adventures_of_Sherlock_Holmes,_1892.djvu
 
 ## Chunks
 
