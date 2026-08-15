@@ -1,2 +1,6 @@
+# `set -e` so a failing step aborts the commit instead of being masked by the
+# exit status of the step after it.
+set -e
 npx lint-staged
-npm run check:migrations
+# --staged: only what is about to be committed, not unrelated working-tree edits.
+node scripts/check-migrations-append-only.js --staged

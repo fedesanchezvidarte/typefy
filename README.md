@@ -89,19 +89,29 @@ npm install
 npm run dev
 ```
 
-| Command              | Purpose                               |
-| -------------------- | ------------------------------------- |
-| `npm run dev`        | Start the dev server                  |
-| `npm run build`      | Production build (`adapter-vercel`)   |
-| `npm run preview`    | Preview the production build          |
-| `npm run check`      | Type check with `svelte-check`        |
-| `npm run lint`       | Prettier check + ESLint               |
-| `npm run format`     | Format with Prettier                  |
-| `npm run test:unit`  | Vitest (node + browser-mode projects) |
-| `npm run test:e2e`   | Playwright end-to-end tests           |
-| `npm run check:i18n` | EN/ES message key parity check        |
+| Command                    | Purpose                               |
+| -------------------------- | ------------------------------------- |
+| `npm run dev`              | Start the dev server                  |
+| `npm run build`            | Production build (`adapter-vercel`)   |
+| `npm run preview`          | Preview the production build          |
+| `npm run check`            | Type check with `svelte-check`        |
+| `npm run lint`             | Prettier check + ESLint               |
+| `npm run format`           | Format with Prettier                  |
+| `npm run test:unit`        | Vitest (node + browser-mode projects) |
+| `npm run test:e2e`         | Playwright end-to-end tests           |
+| `npm run check:i18n`       | EN/ES message key parity check        |
+| `npm run check:migrations` | Applied migrations are append-only    |
 
-CI (GitHub Actions) runs the parity check, lint, type check, unit tests and E2E on every PR to
+`check:migrations` fails when the branch modifies, deletes, or renames a migration file that already
+exists at the merge-base with `origin/main` — corrections belong in a new migration, because a
+database that already applied the old file never replays the edit. A migration added on the current
+branch stays freely editable. It also runs on `pre-commit` (over staged changes only) and is only as
+fresh as your local `origin/main`, so `git fetch` before trusting a local pass. Set
+`MIGRATIONS_APPEND_ONLY_BASE_REF` to compare against a different ref — useful on a fork with no
+`origin/main`. Locally the check skips with a warning when that ref is missing; in CI it fails
+instead, so a broken checkout can never report a silent pass.
+
+CI (GitHub Actions) runs the parity and append-only checks, lint, type check, unit tests and E2E on every PR to
 `main` and push to `main`, on Node 22. Deploys go out via Vercel on push to `main`, with preview
 deployments per PR.
 
