@@ -7,6 +7,10 @@
 	import { page } from '$app/state';
 	import { locales, localizeHref } from '$lib/paraglide/runtime';
 	import AppHeader from '$lib/components/AppHeader.svelte';
+	// Created HERE, above `AppHeader`, so the header can read it and the typing screen — a
+	// descendant of `children` — can write it (spec #45). Context flows the right way round;
+	// a prop or a snippet could not, since the header renders first.
+	import { provideTypingHeader } from '$lib/components/typing/typing-header.svelte';
 	// Statically importable because all three are Supabase-free (spec #15 §2/§4). The
 	// `@supabase/*` chunk is reached only through `drainOnce`'s own `await import()`, which
 	// runs only once a trigger has already decided there is something to drain — so the root
@@ -18,6 +22,8 @@
 	import favicon from '$lib/assets/favicon.svg';
 
 	let { children, data }: { children: import('svelte').Snippet; data: LayoutData } = $props();
+
+	provideTypingHeader();
 
 	/**
 	 * Sign-out and attribution hygiene (spec #15 §5). When no user is present, every

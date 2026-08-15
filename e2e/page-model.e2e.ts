@@ -69,7 +69,14 @@ test.describe('the page model (spec #32)', () => {
 			title: 'Page model probe',
 			author: 'probe',
 			language: 'en',
-			contents: Array.from({ length: CHUNK_COUNT }, (_, index) => probeChunk(index))
+			contents: Array.from({ length: CHUNK_COUNT }, (_, index) => probeChunk(index)),
+			// Spec #45's header names the chapter the active page falls in. Chapter one starts
+			// at index 1, deliberately, so page 1 is FRONT MATTER — the case that must render no
+			// chapter at all rather than folding into chapter one (ADR-0017).
+			chapters: [
+				{ index: 0, title: 'Probe Chapter One', startChunkIndex: 1 },
+				{ index: 1, title: 'Probe Chapter Two', startChunkIndex: 3 }
+			]
 		});
 	});
 
@@ -557,6 +564,96 @@ test.describe('the page model (spec #32)', () => {
 			await page.keyboard.press('Enter');
 			await expect(page.getByTestId('page-meta')).toContainText(`Page 1 of ${a11yBook.chunkCount}`);
 			await expect(page.getByTestId('typing-input')).toBeFocused();
+		});
+	});
+
+	/**
+	 * Spec #45 — the book page. Three things that are genuinely new browser behaviour: the
+	 * chrome having moved into the header, the chapter being named there, and paragraphs
+	 * rendering as blocks with a real blank line between them.
+	 *
+	 * The scroll model is deliberately NOT re-proved here, for the same reason spec #32's was
+	 * not: `computeTranslateY` is pure and fully unit-tested, and asserting a translateY pixel
+	 * value through a browser measures font metrics rather than the feature.
+	 */
+	test.describe('the book page (spec #45)', () => {
+		test('the header carries book, chapter, page and metrics — and re-names the chapter on navigation', async ({
+			page
+		}) => {
+			await page.goto(`/type/${book.slug}`);
+			await expect(page.getByTestId('typing-surface')).toBeVisible();
+			// Hydration, proved the way the navigator test proves it: the surface focuses its own
+			// input on mount, and the navigator buttons below do nothing until that has happened.
+			await expect(page.getByTestId('typing-input')).toBeFocused();
+
+			const slot = page.getByTestId('typing-header-slot');
+			await expect(slot).toBeVisible();
+			await expect(page.getByTestId('header-book')).toHaveText('Page model probe');
+			await expect(meta(page)).toContainText(`Page 1 of ${book.chunkCount}`);
+			// The whole line lives in the header now — nothing of it is left under the card.
+			await expect(page.getByTestId('page-meta')).toHaveCount(1);
+			await expect(slot.getByTestId('page-meta')).toHaveCount(1);
+			await expect(page.getByTestId('zen-toggle')).toHaveAttribute('aria-pressed', 'false');
+
+			// Page 1 is front matter: no chapter, rather than chapter one.
+			await expect(page.getByTestId('header-chapter')).toHaveCount(0);
+
+			// Crossing into chapter one, and then into chapter two, renames it — with no
+			// navigation and no request, since the whole chapter list came with the load.
+			await page.getByTestId('page-nav-next').click();
+			await expect(page.getByTestId('header-chapter')).toHaveText('Probe Chapter One');
+			await page.getByTestId('page-nav-next').click();
+			await expect(page.getByTestId('header-chapter')).toHaveText('Probe Chapter One');
+			await page.getByTestId('page-nav-next').click();
+			await expect(page.getByTestId('header-chapter')).toHaveText('Probe Chapter Two');
+			await expect(meta(page)).toContainText(`Page 4 of ${book.chunkCount}`);
+
+			// And the typing input still holds focus through all of it.
+			await expect(page.getByTestId('typing-input')).toBeFocused();
+		});
+
+		test('the book line above the card is gone, but the h1 still names the book', async ({
+			page
+		}) => {
+			await page.goto(`/type/${book.slug}`);
+			const heading = page.getByTestId('book-line');
+			await expect(heading).toHaveCount(1);
+			await expect(heading).toHaveText('Page model probe · probe');
+			// Visually hidden, never removed: heading structure is unchanged for assistive tech.
+			await expect(heading).not.toBeInViewport();
+			expect(await heading.evaluate((node) => node.tagName)).toBe('H1');
+		});
+
+		test('paragraphs render as blocks separated by exactly one blank line', async ({ page }) => {
+			// The tortoise fixture's third page carries two real paragraph breaks (spec #32 R9).
+			const chunk = tortoiseAndHare.chunks[2];
+			const breaks = [...chunk.content].filter((char) => char === '\n').length;
+			expect(breaks, 'this fixture must still carry paragraph breaks').toBeGreaterThan(0);
+
+			await page.goto(`/type/${tortoiseAndHare.id}?page=3`);
+			await expect(page.getByTestId('typing-surface')).toBeVisible();
+
+			const paragraphs = page.locator('[data-testid="typing-measure"] p');
+			await expect(paragraphs).toHaveCount(breaks + 1);
+
+			// The newline slot still EXISTS — it holds the caret and the error tint — but renders
+			// no glyph, so `white-space: pre-wrap` cannot emit a second break for it.
+			const newlineText = await page
+				.locator('[data-testid="typing-measure"] .newline')
+				.first()
+				.textContent();
+			expect(newlineText).toBe('');
+
+			// One blank line between blocks: the gap is one rendered line-height, within a
+			// tolerance that allows for sub-pixel line boxes but not for a second break.
+			const lineHeight = await paragraphs
+				.first()
+				.evaluate((node) => Number.parseFloat(getComputedStyle(node).lineHeight));
+			const first = (await paragraphs.nth(0).boundingBox())!;
+			const second = (await paragraphs.nth(1).boundingBox())!;
+			const gap = second.y - (first.y + first.height);
+			expect(gap).toBeGreaterThan(lineHeight * 0.75);
+			expect(gap).toBeLessThan(lineHeight * 1.25);
 		});
 	});
 });

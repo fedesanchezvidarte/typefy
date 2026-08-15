@@ -2,7 +2,7 @@
 	import { m } from '$lib/paraglide/messages';
 	import type { CharacterState } from '$lib/engine/types';
 	import { CHARS_PER_LINE } from '$lib/chunking/measure';
-	import { computeTranslateY } from './teleprompter';
+	import { computeTranslateY, LOOKAHEAD_LINES } from './teleprompter';
 
 	interface Props {
 		text: string;
@@ -22,13 +22,24 @@
 		passageKey: number;
 		onChar: (char: string, timestamp: number) => void;
 		onBackspace: (timestamp: number) => void;
-		onRestartChunk: () => void;
 		/**
-		 * The teleprompter viewport's height, in rendered lines (spec #32 §7). Defaults to a
-		 * screenful-ish band for the typing screen; the landing hero passes a smaller number
-		 * to bound its own height now that its one page carries paragraph breaks and can run
-		 * to ~1,600 characters (brief §3.4, R11) — the viewport is a prop rather than a
-		 * hardcoded height for exactly that reuse.
+		 * How the surface is sized and set (spec #45).
+		 *
+		 * - `page` — the typing screen. The card is **pinned**: it fills the height its parent
+		 *   gives it, the text scrolls inside it, and the type is set denser (17px / 1.6) so
+		 *   most of a page is on screen at once.
+		 * - `hero` — the landing page. Keeps its own larger display type and a fixed
+		 *   `visibleLines` band, because a hero should be big and a page should be dense.
+		 *
+		 * Both render identically in every other respect — one caret, one input, one character
+		 * state model — which is the whole reason this is a variant rather than a second
+		 * component.
+		 */
+		variant?: 'page' | 'hero';
+		/**
+		 * The viewport's height in rendered lines. **`hero` only** — under `page` the viewport
+		 * takes the height its container has, which is what makes the card fill the screen at
+		 * any font size the future size setting picks.
 		 */
 		visibleLines?: number;
 	}
@@ -41,12 +52,41 @@
 		passageKey,
 		onChar,
 		onBackspace,
-		onRestartChunk,
-		visibleLines = 10
+		variant = 'page',
+		visibleLines = 5
 	}: Props = $props();
 
 	/* Code-point-safe split, mirroring the engine (á, ñ, ¿ occupy one position each). */
 	const chars = $derived(Array.from(text));
+
+	/**
+	 * The page's **paragraph blocks** (spec #45), and the one structural rule that governs them:
+	 * **position indices stay global.** A block carries the index its first character has in the
+	 * whole page, and every slot renders at `start + offset` — so the engine, the caret, the
+	 * character states and `measured_chars` see exactly the stream they saw when the page was
+	 * one span. The split is presentational and nothing downstream may learn about it.
+	 *
+	 * A `\n` **terminates** the block it ends rather than starting the next one, so its slot
+	 * still exists, still holds the caret and still shows the incorrect tint. The line break
+	 * itself now comes from the block boundary; see `shownChar`, which renders that slot as
+	 * empty precisely so `white-space: pre-wrap` does not emit a SECOND break for the same
+	 * character.
+	 *
+	 * The final block is pushed unconditionally, even when the page ends on a `\n` and it is
+	 * therefore empty: it is where the end-of-page caret slot lives.
+	 */
+	const paragraphs = $derived.by(() => {
+		const blocks: { start: number; length: number }[] = [];
+		let start = 0;
+		for (let i = 0; i < chars.length; i++) {
+			if (chars[i] === '\n') {
+				blocks.push({ start, length: i - start + 1 });
+				start = i + 1;
+			}
+		}
+		blocks.push({ start, length: chars.length - start });
+		return blocks;
+	});
 
 	/*
 	 * What a slot SHOWS, which is not always what it expects: on an incorrect position the
@@ -62,12 +102,19 @@
 	 * - a slot whose EXPECTED character is `\n` must keep breaking the line, or every wrong
 	 *   keystroke at a paragraph break would reflow the page under the typist's eyes.
 	 *
-	 * In both cases the expected character stands and the tint alone reports the error, which
-	 * is exactly the pre-existing behaviour.
+	 * In both cases the tint alone reports the error, which is exactly the pre-existing
+	 * behaviour.
+	 *
+	 * A `\n` slot renders as the EMPTY string rather than as the character itself (spec #45):
+	 * since paragraphs became blocks, the break comes from the block boundary, and emitting the
+	 * newline under `white-space: pre-wrap` as well would break the line twice.
 	 */
 	function shownChar(index: number): string {
 		const expected = chars[index];
-		if (display[index] !== 'incorrect' || expected === '\n') {
+		if (expected === '\n') {
+			return '';
+		}
+		if (display[index] !== 'incorrect') {
 			return expected;
 		}
 		const attempt = typed[index];
@@ -136,14 +183,18 @@
 		}
 	}
 
-	/* Control keys only — never text (dead keys arrive as 'Dead' here and are useless). */
+	/*
+	 * Control keys only — never text (dead keys arrive as 'Dead' here and are useless).
+	 *
+	 * `Escape` used to restart the page here. Spec #45 removed restarting a page as an action
+	 * entirely — there is no button and no shortcut, and a page is un-typed by backspacing like
+	 * any other text. Deliberately not left as an undocumented shortcut: a behaviour no UI
+	 * announces is one only its author can find.
+	 */
 	function handleKeydown(event: KeyboardEvent) {
 		if (event.key === 'Backspace') {
 			event.preventDefault();
 			onBackspace(Date.now());
-		} else if (event.key === 'Escape') {
-			event.preventDefault();
-			onRestartChunk();
 		} else if (event.key === 'Enter') {
 			// The real hardware/desktop path (spec #32 §7, acceptance criterion #8): no
 			// scroll, no implicit submit, no browser default — and a `\n` is an ordinary
@@ -175,11 +226,15 @@
 			activeLineTop: caretEl.offsetTop,
 			lineHeight,
 			containerHeight,
-			// The middle third of the viewport, matching "held within a middle band" (spec
-			// #32 §7) without hardcoding pixel offsets that would drift from the viewport
-			// height prop.
-			bandTop: containerHeight / 3,
-			bandBottom: (containerHeight * 2) / 3
+			// `page` (spec #45): the band is the whole card bar a bottom margin of
+			// `LOOKAHEAD_LINES`, so the page is still until the caret nears the bottom edge.
+			// `hero` keeps spec #32's middle third — in a five-line band a bottom-margin band
+			// would leave almost no room above the caret.
+			bandTop: variant === 'page' ? 0 : containerHeight / 3,
+			bandBottom:
+				variant === 'page'
+					? containerHeight - LOOKAHEAD_LINES * lineHeight
+					: (containerHeight * 2) / 3
 		});
 	}
 
@@ -197,7 +252,11 @@
 </script>
 
 <!-- A label wrapping the hidden input: clicking anywhere on the sheet natively refocuses it. -->
-<label class="surface block w-full cursor-text" data-testid="typing-surface" for="typing-input">
+<label
+	class={['surface', variant, 'w-full', 'cursor-text']}
+	data-testid="typing-surface"
+	for="typing-input"
+>
 	<div
 		class="viewport"
 		bind:this={viewportEl}
@@ -207,20 +266,30 @@
 		<div class="track" bind:this={trackEl} style="transform: translateY({translateY}px)">
 			<div class="measure" style="--measure: {CHARS_PER_LINE}ch" data-testid="typing-measure">
 				{#key passageKey}
-					<span class="passage">
-						<!-- The position index IS the identity of a character slot (fixed-length, never reordered). -->
-						{#each chars as char, i (i)}
-							<span
-								class={['char', char === '\n' && 'newline', i === cursor && 'caret']}
-								data-state={display[i]}>{shownChar(i)}</span
-							>
+					<div class="passage">
+						<!-- One block per paragraph, separated by a real blank line (spec #45). The
+						     index rendered is ALWAYS `block.start + offset` — the character's position
+						     in the whole page — never the offset within the block. -->
+						{#each paragraphs as block, p (p)}
+							<p class="para">
+								<!-- The position index IS the identity of a character slot (fixed-length, never reordered). -->
+								{#each { length: block.length }, offset (offset)}
+									{@const i = block.start + offset}
+									<span
+										class={['char', chars[i] === '\n' && 'newline', i === cursor && 'caret']}
+										data-state={display[i]}>{shownChar(i)}</span
+									>
+								{/each}
+								{#if p === paragraphs.length - 1}
+									<span
+										class={['char', 'chunk-end', cursor === chars.length && 'caret']}
+										aria-hidden="true"
+									>
+									</span>
+								{/if}
+							</p>
 						{/each}
-						<span
-							class={['char', 'chunk-end', cursor === chars.length && 'caret']}
-							aria-hidden="true"
-						>
-						</span>
-					</span>
+					</div>
 				{/key}
 			</div>
 		</div>
@@ -260,34 +329,81 @@
 	 */
 	.surface {
 		position: relative;
-		max-width: 720px;
+		display: block;
 		background: var(--sheet);
 		border: 1px solid var(--border);
 		border-radius: 12px;
-		padding: 24px 26px;
 		font-family: var(--reading-font-stack);
-		font-size: 18px;
-		line-height: 1.85;
+		line-height: var(--lh);
 		color: var(--fg);
 		transition: background-color 0.25s ease;
 	}
 
+	/*
+	 * The `hero` variant: spec #32's sheet, unchanged — its own display type, its own
+	 * `line-height`, and a fixed `visibleLines` band.
+	 */
+	.surface.hero {
+		--lh: 1.85;
+		max-width: 720px;
+		padding: 24px 26px;
+		font-size: 18px;
+	}
+
+	/*
+	 * The `page` variant (spec #45): a book page, not a box drawn round a text column.
+	 *
+	 * It is **pinned** — `height: 100%` of whatever the typing screen gives it, with the
+	 * viewport as the flex child that absorbs the remainder — so the card never changes height
+	 * mid-session and the text scrolls inside it rather than the document scrolling under it.
+	 *
+	 * Wider than the measure ON PURPOSE. The 66ch column (ADR-0015) may not widen — it is the
+	 * chunking contract — so the card grows through margins instead, which is also what a real
+	 * page does. `.measure` is centred inside the padding by `margin-inline: auto`.
+	 *
+	 * 17px / 1.6 is denser than the hero's 21px / 1.85 for one reason: at ~635px of text
+	 * height it puts ~23 rendered lines on screen, so a 24-line page is very nearly whole
+	 * before its paragraph gaps.
+	 */
+	.surface.page {
+		--lh: 1.6;
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		max-width: 860px;
+		padding: 28px 20px;
+		font-size: 17px;
+	}
+
 	@media (min-width: 640px) {
-		.surface {
+		.surface.hero {
 			padding: 34px 38px;
 			font-size: 21px;
+		}
+
+		.surface.page {
+			padding: 44px 56px;
 		}
 	}
 
 	/*
-	 * The teleprompter viewport (spec #32 §7): a fixed-height, `overflow: hidden` window.
-	 * Height is in `em`, so it scales with the surface's own `font-size` breakpoint and
-	 * always equals `visibleLines` real rendered lines at `line-height: 1.85` — one
-	 * definition, not a px number that would drift from the font-size media query above.
+	 * The teleprompter viewport (spec #32 §7, spec #45): an `overflow: hidden` window onto the
+	 * track.
+	 *
+	 * `hero` sizes it in `em` so it always equals `visibleLines` real rendered lines whatever
+	 * the font-size breakpoint says. `page` takes the height its pinned card has left over —
+	 * `min-height: 0` because a flex child's default `min-height: auto` would let the track's
+	 * full height push the card past the viewport and reintroduce document scrolling.
 	 */
 	.viewport {
 		overflow: hidden;
-		height: calc(var(--visible-lines) * 1.85em);
+		height: calc(var(--visible-lines) * var(--lh) * 1em);
+	}
+
+	.surface.page .viewport {
+		flex: 1;
+		min-height: 0;
+		height: auto;
 	}
 
 	.track {
@@ -303,14 +419,32 @@
 	 */
 	.measure {
 		max-width: var(--measure);
+		margin-inline: auto;
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
 	}
 
 	/* A brief settle as one page crossfades into the next; nothing else moves. */
 	.passage {
-		display: inline;
 		animation: settle 0.22s ease;
+	}
+
+	/*
+	 * One paragraph of the page (spec #45). The blank line between paragraphs is exactly one
+	 * rendered line — `--lh` in `em` rather than the `1lh` unit, so it holds on the browsers
+	 * the E2E suite and the catalog's readers actually run.
+	 *
+	 * This gap is **display-only**. It makes a page render taller than `MAX_LINES` estimates,
+	 * which is fine and expected: the line budget is an input to chunking, never a promise
+	 * about rendering, and nothing here may feed back into `src/lib/chunking/` (ADR-0005,
+	 * ADR-0015).
+	 */
+	.para {
+		margin: 0;
+	}
+
+	.para + .para {
+		margin-top: calc(var(--lh) * 1em);
 	}
 
 	@keyframes settle {

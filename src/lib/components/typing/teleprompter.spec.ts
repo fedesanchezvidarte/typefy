@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeTranslateY } from './teleprompter';
+import { computeTranslateY, LOOKAHEAD_LINES } from './teleprompter';
 
 /**
  * Pure math only (spec #32 §7, §11 R7) — see the module comment for why no DOM appears here.
@@ -51,5 +51,54 @@ describe('computeTranslateY', () => {
 			bandBottom: 500 // past containerHeight — must be clamped to 300
 		});
 		expect(translateY).toBe(300 - (400 + 30));
+	});
+});
+
+/**
+ * The typing screen's band since spec #45: the whole card, less a bottom margin of
+ * `LOOKAHEAD_LINES`. These are the same three cases above, parameterised the way
+ * `TypingSurface` actually calls the function under `variant: 'page'` — the band moved, the
+ * math did not.
+ */
+describe('computeTranslateY — the page band (bottom margin, spec #45)', () => {
+	const lineHeight = 30;
+	const containerHeight = 600; // 20 rendered lines
+	const band = {
+		bandTop: 0,
+		bandBottom: containerHeight - LOOKAHEAD_LINES * lineHeight // 510 → 17 lines
+	};
+
+	it('holds the page completely still while the caret is above the lookahead margin', () => {
+		// Every line from the very first to the last one wholly inside the band.
+		for (let line = 0; line < 17; line++) {
+			expect(
+				computeTranslateY({
+					activeLineTop: line * lineHeight,
+					lineHeight,
+					containerHeight,
+					...band
+				})
+			).toBe(0);
+		}
+	});
+
+	it('follows one line at a time once the caret reaches the margin', () => {
+		expect(
+			computeTranslateY({ activeLineTop: 17 * lineHeight, lineHeight, containerHeight, ...band })
+		).toBe(-lineHeight);
+		expect(
+			computeTranslateY({ activeLineTop: 18 * lineHeight, lineHeight, containerHeight, ...band })
+		).toBe(-2 * lineHeight);
+	});
+
+	it('always leaves LOOKAHEAD_LINES of text visible below the caret', () => {
+		const activeLineTop = 40 * lineHeight; // deep into a long page
+		const translateY = computeTranslateY({ activeLineTop, lineHeight, containerHeight, ...band });
+		const renderedBottom = activeLineTop + lineHeight + translateY;
+		expect(containerHeight - renderedBottom).toBe(LOOKAHEAD_LINES * lineHeight);
+	});
+
+	it('never scrolls back down past where the text naturally sits, after backspacing up', () => {
+		expect(computeTranslateY({ activeLineTop: 0, lineHeight, containerHeight, ...band })).toBe(0);
 	});
 });

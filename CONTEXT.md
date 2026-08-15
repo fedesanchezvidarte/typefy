@@ -59,6 +59,16 @@ library sub-copy are trimmed, and a `/profile` stub route lands. Implementation 
 update are done; **QA sign-off for spec #30 had not yet landed in the issue as of this writing** —
 treat this Phase 5a entry as pending confirmation until that lands.
 
+**5e** (spec #45) is in progress and is **rendering only** — no re-chunk, no migration, no progress
+touched. It turns the typing screen into a book page: the **sheet** becomes a **page card** pinned to
+the viewport, paragraphs render as blocks separated by a real blank line (position indices staying
+global across the split), the **teleprompter** band widens to a three-line bottom margin so the page
+sits still while it is typed, and the meta line moves into a route-fed **header slot** — which is
+where the card's height comes from. The typing load starts reading a light **chapter** list so the
+header can name the chapter the active page falls in. Restarting a page, picking another book and
+the **summary**'s two actions are removed outright; resetting a book's progress is deferred to the
+**book detail screen**, behind a confirmation.
+
 **5b** (spec #32) is now complete and replaces the **passage** with the **page** — a screenful
 sized by a dual character/line budget, carrying the source's paragraph breaks as newlines the user
 actually types, with a **teleprompter** scroll, a **page navigator** and **in-page restore**
@@ -118,10 +128,16 @@ Phased roadmap:
   ([ADR-0018](docs/adr/0018-per-locale-book-summaries.md),
   [ADR-0019](docs/adr/0019-ingest-time-open-library-metadata.md),
   [ADR-0020](docs/adr/0020-chapter-progress-pure-module.md)) — the layer that actually surfaces
-  5c's structure to a reader).
+  5c's structure to a reader), and **5e** (🚧 spec #45 — **the book page**: the sheet becomes a
+  **page card** pinned to the viewport, paragraphs render as blocks separated by a real blank line,
+  the **teleprompter** band widens so the page sits still until the caret nears the bottom, and the
+  chrome moves into the app header's route-fed center slot, which is what frees the height the card
+  needs; restarting a page, picking another and the summary's two actions are removed outright).
   The order is load-bearing the way Phases 3 and 4 were, and more strictly: a chapter's start position
   **is** a chunk index, and 5b re-chunks every book, so recording structure before 5b landed would
-  have recorded it against indices that were about to change.
+  have recorded it against indices that were about to change. 5e is rendering only and re-chunks
+  nothing — it spends 5b's page model rather than changing it, and 5c's chapters rather than
+  deriving them.
 
 ## Glossary
 
@@ -155,6 +171,11 @@ Use these terms as defined here; do not drift to synonyms.
   never overflows it; a px-based measure would have risked the dangerous direction (fewer than 66) in
   the mono face, and `ch` rules that out by construction. See
   [ADR-0015](docs/adr/0015-ch-measure-chunking-contract.md).
+
+  Phase 5e's paragraph gaps do **not** enter this budget. A page with five paragraph breaks renders
+  five line-heights taller than its 24-line estimate, and that is fine: the budget decides where a
+  chunk closes, and the **page card** scrolls. Nothing in rendering may feed back into
+  `src/lib/chunking/`.
 - **Passage** — The user-facing name for a chunk (`pasaje` in the ES UI) before Phase 5b. `chunk` stays
   the term in code, schema, engine and tests. Superseded by **page** as of Phase 5b (spec #32): the
   "never say page" rule this glossary carried since Phase 0 was written when a chunk was
@@ -166,6 +187,16 @@ Use these terms as defined here; do not drift to synonyms.
   the product never displays a print page count anywhere, so there is never a second, contradicting
   number for the same book. Paraglide keys are `page_*`; the canonical query parameter is `?page=N`,
   with `?passage=N` still accepted so pre-5b links work.
+
+  Phase 5e (spec #45) is where a page finally **looks** like one: paragraphs render as blocks
+  separated by a full blank line rather than as a single wrapped span, on a **page card** pinned to
+  the viewport. Character position indices stay **global** across that split — a block carries the
+  index its first character has in the whole page — so the engine, the caret, the character states
+  and `measured_chars` see exactly the stream they saw before. The `\n` slot still renders (it hosts
+  the caret and the incorrect tint) but shows no glyph, since the line break is now the block
+  boundary. Paragraph gaps are display-only: they make a page render taller than **MAX_LINES**
+  estimates, which is expected — the **line budget** is an input to chunking, never a promise about
+  rendering.
 
   Phase 5d is where that rule is stated most strongly: the **book detail screen** shows a "Pages"
   fact taken straight from `books.chunk_count`, and shows **no print edition's page count beside
@@ -465,14 +496,31 @@ Use these terms as defined here; do not drift to synonyms.
   and starting from an arbitrary **chapter** need no new resume logic: typing chapter 4 first
   leaves the computed index inside chapter 1. The override parameter is `?page=N`, with
   `?passage=N` still accepted.
-- **Page navigator** — Previous / next arrows plus a "page N of M" jump box in the typing screen's
-  meta line, 1-based. Free movement anywhere in the book, forward to read ahead or back to review
-  what was typed. No keyboard shortcuts, deliberately. Shipped in Phase 5b (spec #32).
+- **Page navigator** — Previous / next arrows plus a "page N of M" jump box, 1-based. Free movement
+  anywhere in the book, forward to read ahead or back to review what was typed. No keyboard
+  shortcuts, deliberately. Shipped in Phase 5b (spec #32); since 5e (spec #45) it is the **only**
+  chrome left below the page card, the meta line having moved into the header.
 - **Teleprompter** — The typing surface's scroll model once a page is a screenful: the line holding
-  the cursor is held inside a fixed middle band and the text moves under it. Needs DOM measurement,
-  which is **display-only** and never feeds back into chunking. Shipped in Phase 5b (spec #32) as
-  originally designed — the spec's own documented fallback (natural page scroll with
-  `scrollIntoView`) was never exercised. See [ADR-0016](docs/adr/0016-teleprompter-scroll.md).
+  the cursor is held inside a band and the text moves under it. Needs DOM measurement, which is
+  **display-only** and never feeds back into chunking. Shipped in Phase 5b (spec #32) as originally
+  designed — the spec's own documented fallback (natural page scroll with `scrollIntoView`) was
+  never exercised.
+
+  Phase 5e (spec #45) **re-parameterised the band rather than replacing the model**: on the typing
+  screen it now runs from the card's top edge to `LOOKAHEAD_LINES` (3) short of its bottom, so the
+  page is **completely still** until the caret reaches the last three lines and then follows one
+  line at a time, always leaving three lines of what comes next in view. The middle-third band
+  survives on the landing hero, where a bottom-margin band in five lines would leave nothing above
+  the caret. `computeTranslateY` is unchanged — its "already inside the band → no scroll" case is
+  what makes the stillness fall out of the new numbers. See
+  [ADR-0016](docs/adr/0016-teleprompter-scroll.md).
+- **Header slot** — The route-fed centre region of the shared `AppHeader` (spec #45). On
+  `/type/[slug]` it carries book title · **chapter** · page N of M · pct · WPM · accuracy · the Zen
+  toggle, and it is empty on every other route. It exists because the ~130px of chrome that used to
+  stack below the sheet is the height the **page card** now has. Two sources in one order: the load's
+  `typingHeader` seed paints it on the server, and a context store the root layout provides carries
+  live values from mount on — which is what keeps spec #24 §10's "no metrics, not even for one
+  frame" promise true after the move. Under 640px the slot trims to page, pct, WPM and the toggle.
 - **In-page restore** — A page left half-typed is persisted locally (the **attempt buffer**'s
   machinery, never the server) and restored on return, which is what
   makes free navigation safe at ~1600 characters a page. The restored prefix replays as
@@ -552,6 +600,14 @@ Use these terms as defined here; do not drift to synonyms.
 - **Sheet** — The typing surface's own page region: `sheet` background one step off `bg`, minimal
   border, generous padding. The passage renders on it **tonally**: pending = dim, correct/corrected =
   full foreground, incorrect = the only chromatic event (error + tint + wavy underline). No green.
+
+  Since Phase 5e (spec #45) the typing screen's sheet is the **page card**: pinned to the viewport's
+  height (`100svh` minus the header, minus the **page navigator** row), ~860px wide, set at 17px/1.6,
+  with the 66ch measure centred inside wide margins — the card grows through margins because the
+  measure **may not** widen (ADR-0015). The visual treatment is unchanged: no shadow, no paper
+  texture, no warm tint. The landing hero keeps the pre-5e sheet — its own larger display type and a
+  fixed five-line band — through the surface's `hero` variant, since a hero should be big and a page
+  should be dense.
 - **Guest** — A visitor who is not signed in. Types fully (content is world-readable), holds no
   session, and has no anonymous account: nothing is written to Supabase for them and nothing is read
   back, so they still resume at the first passage and still see a session-relative completion figure

@@ -7,7 +7,10 @@ import { ATTEMPT_BUFFER_KEY, type BufferedChunkAttempt } from '$lib/progress/buf
 import { PAGE_STATE_KEY, savePageState, type PageState } from '$lib/progress/page-state';
 import { getAttemptStorage } from '$lib/progress/storage';
 import { PREFETCH_THRESHOLD, seekWindow, WINDOW_SIZE } from '$lib/reading/window';
-import TypingSession from './TypingSession.svelte';
+// The session under test is mounted through its harness: the chrome these tests assert on
+// lives in the app header since spec #45, and the harness supplies the context store and the
+// slot the root layout would. See `TypingSession.harness.svelte`.
+import TypingSessionHarness from './TypingSession.harness.svelte';
 
 /**
  * Component tests for spec #12 §4 (Display) and §6 (Save failures).
@@ -243,7 +246,7 @@ afterEach(() => {
 describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)', () => {
 	it('shows the persisted book-lifetime percentage when resuming mid-book, not 0%', async () => {
 		// Resuming at passage 7 of 11 with 6 passages already persisted: 6/11 = 55%.
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(11)),
 			startIndex: 6,
 			chunksCompleted: 6,
@@ -255,7 +258,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 	});
 
 	it('advances the displayed figure when a not-previously-completed passage is completed, with no reload', async () => {
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(4)),
 			startIndex: 1,
 			chunksCompleted: 1,
@@ -273,7 +276,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 	it('does not advance the displayed figure when an already-completed passage is re-completed, and never exceeds 100%', async () => {
 		// Every passage of this book is already persisted as complete: the figure starts at
 		// 100% and re-typing must leave it there, not push it past.
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(3)),
 			startIndex: 0,
 			chunksCompleted: 3,
@@ -293,7 +296,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 	it('clamps the figure at 100% when the persisted count exceeds the book chunk count', async () => {
 		// A stale or inconsistent rollup must not render 167%: the figure is clamped, and a
 		// completion inside the session cannot push it past the clamp either.
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(3)),
 			startIndex: 0,
 			chunksCompleted: 5,
@@ -309,7 +312,7 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 	});
 
 	it('degrades a guest to the session-relative figure and attempts no write at all', async () => {
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(4)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -339,7 +342,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		// opposite path from the one it names.
 		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'permanent' });
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -369,7 +372,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 	});
 
 	it('shows no notice on the summary when every insert saved', async () => {
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -396,7 +399,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'transient' });
 		const hrefBefore = window.location.href;
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(3)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -436,7 +439,7 @@ describe('TypingSession.svelte — the in-session drain trigger (spec #15 §4, �
 	it('flushes a backlog after a successful write, stamping the draining user onto a guest-authored entry', async () => {
 		const buffered = seedBufferEntry();
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -467,7 +470,7 @@ describe('TypingSession.svelte — the in-session drain trigger (spec #15 §4, �
 		// already advanced optimistically. The mount and `online` triggers own that call.
 		seedBufferEntry();
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -486,7 +489,7 @@ describe('TypingSession.svelte — the in-session drain trigger (spec #15 §4, �
 	it('does not reach the drain at all when the buffer is empty', async () => {
 		// The synchronous `readAll` gate inside `drainOnce` is what keeps the overwhelmingly
 		// common case — an empty buffer — from costing a dynamic import of the Supabase chunk.
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -508,7 +511,7 @@ describe('TypingSession.svelte — the in-session drain trigger (spec #15 §4, �
 		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'transient' });
 		seedBufferEntry();
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -534,7 +537,7 @@ describe('TypingSession.svelte — enqueue at the drop points (spec #15 §3)', (
 	it('buffers a guest completion as guest-authored, with the genuine first-keystroke timestamp', async () => {
 		const before = Date.now();
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -566,7 +569,7 @@ describe('TypingSession.svelte — enqueue at the drop points (spec #15 §3)', (
 	it('buffers a signed-in transient failure under that user, never as guest-authored', async () => {
 		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'transient' });
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -583,7 +586,7 @@ describe('TypingSession.svelte — enqueue at the drop points (spec #15 §3)', (
 	it('buffers nothing on a permanent failure — a refused row can never succeed', async () => {
 		recordChunkAttempt.mockResolvedValue({ saved: false, reason: 'permanent' });
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -599,7 +602,7 @@ describe('TypingSession.svelte — enqueue at the drop points (spec #15 §3)', (
 	});
 
 	it('buffers nothing on a successful write', async () => {
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(2)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -661,7 +664,7 @@ describe('TypingSession.svelte — a write path that cannot be loaded (spec #15 
 		const network = failModuleLoads();
 
 		try {
-			render(TypingSession, {
+			render(TypingSessionHarness, {
 				...loaded(passages(2)),
 				startIndex: 0,
 				chunksCompleted: 0,
@@ -715,7 +718,7 @@ describe('TypingSession.svelte — a write path that cannot be loaded (spec #15 
  */
 describe('TypingSession.svelte — focus and announcement at the completion boundary', () => {
 	it('hands focus from the typing surface to the summary when the session finishes', async () => {
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(1)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -734,8 +737,11 @@ describe('TypingSession.svelte — focus and announcement at the completion boun
 		await settleSaves();
 	});
 
-	it('returns focus to the typing surface when the summary restarts the session', async () => {
-		render(TypingSession, {
+	it('leaves the finished session with the summary focused and no action to press', async () => {
+		// Spec #45 removed the summary's two actions. What replaced the old "restart returns
+		// focus to the surface" behaviour is simply that there is nothing to return focus FROM:
+		// the summary holds it, and the header is the way onward.
+		render(TypingSessionHarness, {
 			...loaded(passages(1)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -744,20 +750,15 @@ describe('TypingSession.svelte — focus and announcement at the completion boun
 		});
 
 		await typeText('a b');
-		await expect.element(page.getByTestId('session-summary')).toBeInTheDocument();
+		const summary = page.getByTestId('session-summary');
+		await expect.element(summary).toBeInTheDocument();
 		await settleSaves();
 
-		// Driven from the keyboard, the way the user this test is about would reach it.
-		await userEvent.tab();
-		expect(document.activeElement).toBe(page.getByTestId('summary-restart-session').element());
-		await userEvent.keyboard('{Enter}');
-
-		// The surface remounts and focuses itself from its own attachment; `surface` is still
-		// null at the moment `restartSession` runs, so nothing else could have done it.
-		await expect.element(page.getByTestId('typing-surface')).toBeInTheDocument();
-		await expect
-			.poll(() => document.activeElement?.getAttribute('data-testid'))
-			.toBe('typing-input');
+		expect(document.activeElement).toBe(summary.element());
+		// The sign-in prompt's own button is a different thing and still belongs here; what is
+		// gone is the pair of session actions.
+		expect(summary.element().querySelector('[data-testid="summary-restart-session"]')).toBeNull();
+		expect(summary.element().querySelector('[data-testid="summary-pick-another"]')).toBeNull();
 	});
 
 	it('mounts the summary — focused, with the status region already in place — BEFORE the final save resolves', async () => {
@@ -772,7 +773,7 @@ describe('TypingSession.svelte — focus and announcement at the completion boun
 				})
 		);
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(1)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -805,7 +806,7 @@ describe('TypingSession.svelte — focus and announcement at the completion boun
 
 describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', () => {
 	it("keeps showing a WPM figure across a passage boundary and at the second passage's first word boundary", async () => {
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(3)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -853,7 +854,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 	it('fires when PREFETCH_THRESHOLD passages remain loaded, and not before', async () => {
 		fetchMock.mockImplementation(async () => secondWindow());
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -883,7 +884,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		// the typing path, never in front of it.
 		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -910,7 +911,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 	it('is single-flight: overlapping triggers join one request', async () => {
 		fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -947,7 +948,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 			});
 		});
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -976,7 +977,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 	it('issues no progress request at all for a guest', async () => {
 		fetchMock.mockImplementation(async () => secondWindow());
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1001,7 +1002,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		// component state, and nothing else.
 		fetchMock.mockImplementation(async () => secondWindow());
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...windowed(all.slice(0, loadedCount), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1023,7 +1024,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 	it('asks for nothing when the whole book is already loaded', async () => {
 		// The 3-chunk fixture book is shorter than one window (spec §9): it must open, complete
 		// end to end, and never reach for a window that does not exist.
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(passages(3)),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1071,7 +1072,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 				})
 		);
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...oneLoaded(),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1101,7 +1102,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 
 	it('says so when it has typed to the end of what it holds, distinctly from finishing the book', async () => {
 		// `fetchMock` rejects by default: offline, from before the first keystroke.
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...oneLoaded(),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1143,7 +1144,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 	});
 
 	it('clears itself when connectivity returns', async () => {
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...oneLoaded(),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1171,7 +1172,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 		// Two loaded passages, offline. The first completion's prefetch fails; the second
 		// completion is the retry point (spec §6) — and both passages are buffered, because 2c's
 		// guarantee about completions is untouched by running out of text.
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...windowed(all.slice(0, 2), 8),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1218,7 +1219,7 @@ describe('TypingSession.svelte — the page navigator, A′ seek (spec #32 §10 
 		// so "next" is a jump the session can serve entirely from what it already has: nothing
 		// outside the loaded map, and therefore nothing for `seekWindow` to go and fetch.
 		const all = passages(WINDOW_SIZE);
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(all),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1261,7 +1262,7 @@ describe('TypingSession.svelte — the page navigator, A′ seek (spec #32 §10 
 			})
 		);
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...windowed(all.slice(0, loadedCount), chunkCount),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1299,7 +1300,7 @@ describe('TypingSession.svelte — the page navigator, A′ seek (spec #32 §10 
 		// the flush actually happens rather than trusting the comment: `beforeNavigate`'s
 		// registered handler must exist and must not throw when the seek path calls it directly.
 		const all = passages(WINDOW_SIZE);
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			...loaded(all),
 			startIndex: 0,
 			chunksCompleted: 0,
@@ -1340,7 +1341,7 @@ describe('TypingSession.svelte — in-page restore (spec #32 §8)', () => {
 			Date.now()
 		);
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			book,
 			window: makeWindow([content], 1),
 			startIndex: 0,
@@ -1387,7 +1388,7 @@ describe('TypingSession.svelte — in-page restore (spec #32 §8)', () => {
 			Date.now()
 		);
 
-		render(TypingSession, {
+		render(TypingSessionHarness, {
 			book,
 			window: makeWindow([content], 1),
 			startIndex: 0,

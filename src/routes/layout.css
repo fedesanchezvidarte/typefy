@@ -33,7 +33,14 @@
  *   - data-palette set (cookie): that palette wins outright.
  * The font axis is independent: data-font picks the stack, defaulting to sans.
  */
+/*
+ * The app header's rendered height: 12px of padding either side of a 36px control row, plus
+ * its 1px bottom border (`AppHeader.svelte`). It is a token because the typing screen's page
+ * card is pinned to `100svh` MINUS this (spec #45) — a hardcoded 61px there would silently
+ * mis-size the card the day the header's padding changes.
+ */
 :root {
+	--header-h: 61px;
 	--bg: #f3ede2;
 	--sheet: #fbf7ef;
 	--fg: #2a251e;

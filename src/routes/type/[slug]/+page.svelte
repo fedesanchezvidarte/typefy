@@ -41,6 +41,7 @@
 		chunksCompleted={data.chunksCompleted}
 		completedChunkIds={data.completedChunkIds}
 		mode={data.mode}
+		chapters={data.chapters}
 		{userId}
 	/>
 {/key}

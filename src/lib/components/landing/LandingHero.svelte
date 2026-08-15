@@ -9,7 +9,7 @@
 		book: TypeableText;
 		/**
 		 * Fired the instant the hero surface sees a real typing event (`char` or
-		 * `backspace`) — never on chunk restarts. The landing page uses this to
+		 * `backspace`). The landing page uses this to
 		 * freeze its headline animation permanently for the page view (spec #30):
 		 * the moment someone actually engages with the demo, the tail stops moving.
 		 */
@@ -58,7 +58,7 @@
 			passageKey={session.activeIndex}
 			onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}
 			onBackspace={(timestamp) => dispatch({ type: 'backspace', timestamp })}
-			onRestartChunk={() => dispatch({ type: 'restart-chunk' })}
+			variant="hero"
 			visibleLines={5}
 		/>
 	{/if}

@@ -10,6 +10,9 @@
 	import type { PaletteId } from '$lib/theme/palettes';
 	import AccountMenu from './AccountMenu.svelte';
 	import PencilPanel from './theme/PencilPanel.svelte';
+	import TypingHeaderSlot from './typing/TypingHeaderSlot.svelte';
+	import { useTypingHeader, type TypingHeaderView } from './typing/typing-header.svelte';
+	import type { TypingHeaderSeed } from '../../routes/type/[slug]/+page.server';
 
 	interface Props {
 		user: User | null;
@@ -21,13 +24,42 @@
 
 	// Same "return to where they were" pattern the old AuthControl guest branch used.
 	const next = $derived(page.url.pathname + page.url.search);
+
+	/*
+	 * The route-fed center slot (spec #45). Two sources, read in this order and for this
+	 * reason:
+	 *
+	 * 1. `page.data.typingHeader` — the SSR seed. It exists only on `/type/[slug]`, which is
+	 *    what makes this slot render there and nowhere else, with no route matching here.
+	 * 2. The context store — live values, from `TypingSession`'s effect, once hydrated.
+	 *
+	 * The seed comes first in time and the store wins once it exists. Both carry the same
+	 * opening values, so nothing visibly changes at the swap — which is the whole point:
+	 * mode's "no metrics, not even for one frame" rule (spec #24 §10) is a promise about this
+	 * line, and it now paints from the server exactly as it did when it lived under the sheet.
+	 */
+	const store = useTypingHeader();
+	const seed = $derived(page.data.typingHeader as TypingHeaderSeed | undefined);
+	const typingView = $derived.by<TypingHeaderView | null>(() => {
+		if (store?.view) {
+			return store.view;
+		}
+		if (!seed) {
+			return null;
+		}
+		return { ...seed, live: null, onToggleZen: null };
+	});
 </script>
 
 <!-- Sticky, blurred over the page background (spec #9). Phase 5a (spec #30 §2) narrows the
      bar to exactly three controls: the wordmark, and a trailing cluster of the library link,
      the pencil (theme/language) trigger, and the avatar/account menu — or, signed out, a
      single Sign-in button in the avatar's position. Theme axis switchers now live inside
-     PencilPanel, not in this row. -->
+     PencilPanel, not in this row.
+
+     Spec #45 adds a CENTER SLOT between them, filled by the route rather than by this
+     component. It is content, not a fourth control, so 5a's three-control rule survives
+     intact — and it is empty on every route but `/type/[slug]`. -->
 <header
 	class="sticky top-0 z-20 flex items-center justify-between border-b border-border px-4 py-[var(--header-pad-y)] backdrop-blur-[10px] sm:px-6"
 	style="--header-pad-y: 12px; background: color-mix(in srgb, var(--bg) 86%, transparent);"
@@ -45,6 +77,10 @@
 			aria-hidden="true"
 		></span>
 	</a>
+
+	{#if typingView}
+		<TypingHeaderSlot view={typingView} />
+	{/if}
 
 	<div class="flex items-center gap-1 px-1">
 		<a

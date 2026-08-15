@@ -23,8 +23,7 @@ describe('TypingSurface — incorrect positions show the character actually type
 			cursor: typed.filter((t) => t !== null).length,
 			passageKey: 0,
 			onChar: () => {},
-			onBackspace: () => {},
-			onRestartChunk: () => {}
+			onBackspace: () => {}
 		});
 		return page.getByTestId('typing-measure').element() as HTMLElement;
 	}
@@ -61,7 +60,29 @@ describe('TypingSurface — incorrect positions show the character actually type
 
 	it('never substitutes into a newline slot, so a wrong keystroke cannot reflow the page', () => {
 		const measureEl = renderSurface('a\nb', ['correct', 'incorrect', 'pending'], ['a', 'x', null]);
-		expect(rendered(measureEl, 3)).toBe('a\nb');
+
+		// The slot renders NO glyph since spec #45 — the line break is the paragraph block
+		// boundary, and emitting the newline as text as well would break the line twice. What
+		// matters here is unchanged: the typed `x` is not substituted in.
+		const spans = [...measureEl.querySelectorAll<HTMLElement>('.char')];
+		expect(spans[1].textContent).toBe('');
+		expect(spans[1].dataset.state).toBe('incorrect');
+		expect(spans[1].classList.contains('newline')).toBe(true);
+		expect(rendered(measureEl, 3)).toBe('ab');
+	});
+
+	it('splits the page into paragraph blocks while keeping position indices global', () => {
+		// Two paragraphs, and the `\n` terminating the first belongs to the first block. The
+		// engine's view of the stream is untouched: index 2 is still `b`, in block two.
+		const measureEl = renderSurface('a\nb', ['correct', 'correct', 'incorrect'], ['a', '\n', 'x']);
+
+		const blocks = [...measureEl.querySelectorAll<HTMLElement>('p.para')];
+		expect(blocks).toHaveLength(2);
+		expect(blocks[0].querySelectorAll('.char')).toHaveLength(2); // 'a' and the newline slot
+		const secondBlockChars = [...blocks[1].querySelectorAll<HTMLElement>('.char')];
+		// The last slot of the last block is the chunk-end caret slot, which carries no state.
+		expect(secondBlockChars[0].textContent).toBe('x');
+		expect(secondBlockChars[0].dataset.state).toBe('incorrect');
 	});
 
 	it('shows the expected text when no typed array is supplied at all', () => {
@@ -72,8 +93,7 @@ describe('TypingSurface — incorrect positions show the character actually type
 			cursor: 0,
 			passageKey: 0,
 			onChar: () => {},
-			onBackspace: () => {},
-			onRestartChunk: () => {}
+			onBackspace: () => {}
 		});
 		const measureEl = page.getByTestId('typing-measure').element() as HTMLElement;
 		expect(rendered(measureEl, 6)).toBe('Normal');
@@ -114,8 +134,7 @@ describe('TypingSurface — the ch measure', () => {
 			cursor: 0,
 			passageKey: 0,
 			onChar: () => {},
-			onBackspace: () => {},
-			onRestartChunk: () => {}
+			onBackspace: () => {}
 		});
 
 		const measureEl = page.getByTestId('typing-measure').element() as HTMLElement;
@@ -175,8 +194,7 @@ describe('TypingSurface — the ch measure', () => {
 					cursor: 0,
 					passageKey: 0,
 					onChar: () => {},
-					onBackspace: () => {},
-					onRestartChunk: () => {}
+					onBackspace: () => {}
 				});
 
 				const measureEl = page.getByTestId('typing-measure').element() as HTMLElement;

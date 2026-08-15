@@ -202,7 +202,8 @@ export async function getBookSummaryBySlug(
  * `null` exactly as an unknown slug does, and the route 404s on both — which is the point.
  *
  * This is deliberately NOT what the typing path calls. `getBookSummaryBySlug` stays narrower
- * so that hot route never pays for a jsonb column and an embedded chapter list.
+ * so that hot route never pays for a jsonb column — nor for chapters it does not need, which
+ * since spec #45 it reads separately through {@link getBookChapters}.
  */
 export async function getBookDetailBySlug(
 	client: Client,
@@ -220,6 +221,37 @@ export async function getBookDetailBySlug(
 		return null;
 	}
 	return toDetail(data as unknown as BookDetailRow);
+}
+
+/**
+ * One book's chapter list — index, title and start index, nothing else (spec #45). Empty for a
+ * book with no derivable structure, which is a legal state (ADR-0017).
+ *
+ * Keyed by `books.id`, so the typing route calls it with the uuid it already has from
+ * {@link getBookSummaryBySlug} rather than paying for a second slug lookup. It is a **separate
+ * query** rather than an embed on that function on purpose: `getBookSummaryBySlug` is also the
+ * chunks endpoint's and the progress endpoint's read, and neither of those has any use for
+ * chapters. Embedding there would have made every window fetch carry a chapter list.
+ *
+ * `title` and `index` are what the header renders; `start_chunk_index` is what
+ * `activeChapter` folds over. No `published_at` predicate, on the same reasoning as everywhere
+ * else in this file: the `chapters` policy gates on the parent book, so an unpublished book's
+ * chapters simply do not exist for `anon` and `authenticated`.
+ */
+export async function getBookChapters(client: Client, bookId: string): Promise<ChapterSummary[]> {
+	const { data, error } = await client
+		.from('chapters')
+		.select(CHAPTER_COLUMNS)
+		.eq('book_id', bookId)
+		.order('index');
+	if (error) {
+		throw error;
+	}
+	// Sorted again in JS, defensively: an embedded or ordered result's row order is not a
+	// contract, the same posture `toDetail` and `toTypeableText` already take.
+	return [...((data ?? []) as ChapterContentRow[])]
+		.sort((a, b) => a.index - b.index)
+		.map(toChapter);
 }
 
 /**

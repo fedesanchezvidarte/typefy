@@ -1,6 +1,29 @@
 # ADR-0016 — The teleprompter
 
-**Status:** Accepted (Phase 5b — spec #32)
+**Status:** Accepted (Phase 5b — spec #32), amended in Phase 5e (spec #45)
+
+## Phase 5e amendment — the band moved, the model did not
+
+Spec #45 pins the typing surface to the viewport's height and asks the page to **sit still** while
+it is typed. That is a change of band, not of mechanism:
+
+- **The band.** Under the surface's `page` variant it runs `bandTop = 0` to
+  `bandBottom = containerHeight − LOOKAHEAD_LINES × lineHeight`, with `LOOKAHEAD_LINES = 3`
+  (exported from `teleprompter.ts`). `computeTranslateY`'s first case — the line already sits
+  inside the band, so return 0 — is what turns that into "no scroll at all until the caret reaches
+  the last three lines, then one line at a time, always with three lines of lookahead below." The
+  middle-third band of the original decision survives on the **landing hero** (`hero` variant),
+  where a bottom-margin band inside a five-line viewport would leave nothing above the caret.
+- **The viewport.** `hero` keeps the `em`-sized, `visibleLines`-driven height this ADR described.
+  `page` instead takes the height its pinned card has left over (`flex: 1; min-height: 0`), so the
+  card fills the screen at whatever font size is set — which is what keeps a future user
+  font-size control from breaking the layout.
+- **Unchanged:** the pure/DOM split, `computeTranslateY` itself (not one line), the display-only
+  guarantee that nothing here can reach `src/lib/chunking/`, and the `prefers-reduced-motion`
+  rule (the scroll still happens; only the transition is dropped).
+
+The documented fallback below — natural page scroll with `scrollIntoView` — remains the fallback of
+record and remains unexercised.
 
 ## Context
 

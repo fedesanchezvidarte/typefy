@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildChapterProgress } from './chapter-progress.js';
+import { activeChapter, buildChapterProgress } from './chapter-progress.js';
 import type { ChapterSummary } from '$lib/types';
 
 function chapter(index: number, startChunkIndex: number): ChapterSummary {
@@ -185,5 +185,40 @@ describe('buildChapterProgress', () => {
 			buildChapterProgress(chapters, 12, []);
 			expect(chapters.map((c) => c.index)).toEqual(before);
 		});
+	});
+});
+
+describe('activeChapter', () => {
+	const chapters = [chapter(0, 2), chapter(1, 6), chapter(2, 11)];
+
+	it('names the chapter a page falls in', () => {
+		expect(activeChapter(chapters, 2)?.index).toBe(0);
+		expect(activeChapter(chapters, 5)?.index).toBe(0);
+		expect(activeChapter(chapters, 6)?.index).toBe(1);
+		expect(activeChapter(chapters, 40)?.index).toBe(2);
+	});
+
+	it('names a page that SPANS a boundary by the chapter it starts in', () => {
+		// Page 6 begins inside chapter 1 and may run into chapter 2's first characters. The
+		// header must agree with the detail screen's ranges, which attribute it to chapter 1.
+		expect(activeChapter(chapters, 5)?.index).toBe(0);
+	});
+
+	it('returns null for front matter preceding the first chapter', () => {
+		expect(activeChapter(chapters, 0)).toBeNull();
+		expect(activeChapter(chapters, 1)).toBeNull();
+	});
+
+	it('returns null for a book with no chapters, and for a nonsensical index', () => {
+		expect(activeChapter([], 3)).toBeNull();
+		expect(activeChapter(chapters, -1)).toBeNull();
+		expect(activeChapter(chapters, 1.5)).toBeNull();
+	});
+
+	it('orders defensively and does not mutate its input', () => {
+		const unordered = [chapter(2, 11), chapter(0, 2), chapter(1, 6)];
+		const before = unordered.map((c) => c.index);
+		expect(activeChapter(unordered, 7)?.index).toBe(1);
+		expect(unordered.map((c) => c.index)).toEqual(before);
 	});
 });

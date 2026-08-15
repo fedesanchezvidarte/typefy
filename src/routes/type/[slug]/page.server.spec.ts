@@ -51,6 +51,8 @@ interface MockOptions {
 	chunksError?: unknown;
 	chunkProgress?: Result;
 	bookProgress?: Result;
+	/** The book's chapter rows (spec #45). Absent means a book with no derivable structure. */
+	chapters?: Result;
 	rpc?: Result;
 }
 
@@ -125,7 +127,8 @@ function mockSupabase(options: MockOptions) {
 			const results: Record<string, Result> = {
 				books: options.book ?? { data: bookRow(chunkCount), error: null },
 				chunk_progress: options.chunkProgress ?? { data: [], error: null },
-				book_progress: options.bookProgress ?? { data: null, error: null }
+				book_progress: options.bookProgress ?? { data: null, error: null },
+				chapters: options.chapters ?? { data: [], error: null }
 			};
 			return staticBuilder(results[table] ?? { data: [], error: null });
 		},
@@ -247,7 +250,9 @@ describe('/type/[slug] load — guest', () => {
 
 		// Asserted positively against the recorded calls: an empty result is not proof.
 		const tables = supabase.tablesQueried();
-		expect(tables).toEqual(['books', 'chunks']);
+		// `chapters` joined the guest path in spec #45: it is world-readable through its parent
+		// book's policy, so naming the chapter costs a guest a content read, never a progress one.
+		expect(tables.sort()).toEqual(['books', 'chapters', 'chunks']);
 		expect(tables).not.toContain('chunk_progress');
 		expect(tables).not.toContain('book_progress');
 		// The RPC is granted to `authenticated` only — a guest calling it gets an error, not 0.
@@ -272,7 +277,7 @@ describe('/type/[slug] load — guest', () => {
 
 		expect(data.startIndex).toBe(3);
 		expect(data.window.from).toBe(3);
-		expect(supabase.tablesQueried()).toEqual(['books', 'chunks']);
+		expect(supabase.tablesQueried().sort()).toEqual(['books', 'chapters', 'chunks']);
 	});
 
 	it('returns the book as metadata only — the chunks live in the window', async () => {
@@ -335,6 +340,7 @@ describe('/type/[slug] load — resume for a signed-in user', () => {
 
 		expect(supabase.tablesQueried().slice(1).sort()).toEqual([
 			'book_progress',
+			'chapters',
 			'chunk_progress',
 			'chunks'
 		]);
@@ -538,7 +544,7 @@ describe('/type/[slug] load — the mode cookie', () => {
 		const data = await runLoad(event);
 
 		expect(data.mode).toBe('zen');
-		expect(supabase.tablesQueried()).toEqual(['books', 'chunks']);
+		expect(supabase.tablesQueried().sort()).toEqual(['books', 'chapters', 'chunks']);
 	});
 });
 
@@ -583,5 +589,74 @@ describe('/type/[slug] load — errors', () => {
 		});
 
 		await expect(load(event)).rejects.toEqual({ message: 'permission denied for function' });
+	});
+});
+
+describe('/type/[slug] load — chapters and the header seed (spec #45)', () => {
+	const chapters = {
+		data: [
+			{ index: 0, title: 'Chapter One', start_chunk_index: 0 },
+			{ index: 1, title: 'Chapter Two', start_chunk_index: 3 }
+		],
+		error: null
+	};
+
+	it('returns the chapter list, index/title/start only', async () => {
+		const { event } = loadEvent({ user: null, chapters });
+
+		const data = await runLoad(event);
+
+		expect(data.chapters).toEqual([
+			{ index: 0, title: 'Chapter One', startChunkIndex: 0 },
+			{ index: 1, title: 'Chapter Two', startChunkIndex: 3 }
+		]);
+	});
+
+	it('seeds the header with the chapter the opening page falls in', async () => {
+		const { event } = loadEvent({ user: null, chapters, passage: '4' }); // 0-based index 3
+
+		const data = await runLoad(event);
+
+		expect(data.typingHeader).toEqual({
+			title: 'Pride and Prejudice',
+			author: 'Jane Austen',
+			chapter: 'Chapter Two',
+			current: 4,
+			total: DEFAULT_CHUNK_COUNT,
+			pct: 60, // guest: the opening index IS the figure — 3 of 5
+			zen: false
+		});
+	});
+
+	it('seeds no chapter for front matter, and none for a book with no chapters', async () => {
+		const frontMatter = {
+			data: [{ index: 0, title: 'Chapter One', start_chunk_index: 2 }],
+			error: null
+		};
+		const { event } = loadEvent({ user: null, chapters: frontMatter });
+		expect((await runLoad(event)).typingHeader.chapter).toBeNull();
+
+		const { event: structureless } = loadEvent({ user: null });
+		expect((await runLoad(structureless)).typingHeader.chapter).toBeNull();
+	});
+
+	it('seeds the signed-in percentage from the rollup, clamped to 100%', async () => {
+		const { event } = loadEvent({
+			user: USER,
+			chapters,
+			bookProgress: { data: { chunks_completed: 99 }, error: null }
+		});
+
+		const data = await runLoad(event);
+
+		expect(data.typingHeader.pct).toBe(100);
+	});
+
+	it('seeds zen from the mode cookie, so aria-pressed is right at first paint', async () => {
+		const { event } = loadEvent({ user: null, modeCookie: 'zen' });
+		expect((await runLoad(event)).typingHeader.zen).toBe(true);
+
+		const { event: normal } = loadEvent({ user: null });
+		expect((await runLoad(normal)).typingHeader.zen).toBe(false);
 	});
 });

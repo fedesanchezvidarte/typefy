@@ -1,4 +1,4 @@
-import { page, userEvent } from 'vitest/browser';
+import { page } from 'vitest/browser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 import { getLocale, overwriteGetLocale } from '$lib/paraglide/runtime';
@@ -20,14 +20,11 @@ const summary: SessionSummary = {
 /** The same summary at a single completed passage — the `one` arm of every count message. */
 const oneChunkSummary: SessionSummary = { ...summary, chunksCompleted: 1 };
 
-const noop = () => {};
 // `pendingSaves: 0` is the spec #12 baseline these tests describe: every failure permanent,
 // so `failedSaves - pendingSaves` is still the whole count and the wording is unchanged.
 // The pending/lost split itself is Phase 7's to cover.
 const baseProps = {
 	summary,
-	onRestartSession: noop,
-	onPickAnother: noop,
 	pendingSaves: 0,
 	signedIn: true,
 	next: '/type/test-book'
@@ -254,19 +251,19 @@ describe('SessionSummary.svelte — the save notices are an announced status reg
 		expect(region?.getAttribute('aria-live')).toBeNull(); // implicit from the role, not duplicated
 	});
 
-	it('places the notices between the figures and the buttons, so reading order is unchanged', async () => {
+	it('places the notices after the figures, so reading order is unchanged', async () => {
 		render(SessionSummaryView, { ...baseProps, failedSaves: 2, pendingSaves: 1 });
 
 		const section = page.getByTestId('session-summary').element();
 		const order = [...section.querySelectorAll('h1, dl, [role="status"], button')].map(
 			(node) => node.getAttribute('data-testid') ?? node.tagName.toLowerCase()
 		);
+		// Spec #45 removed both actions: the summary reports and offers nothing to press, so
+		// the notices are the last thing in reading order.
 		expect(order).toEqual([
 			'h1',
 			'dl',
-			'div', // the status region — no test id of its own
-			'summary-restart-session',
-			'summary-pick-another'
+			'div' // the status region — no test id of its own
 		]);
 	});
 
@@ -295,20 +292,13 @@ describe('SessionSummary.svelte — focus on mount', () => {
 		expect(section.querySelector(`#${labelledBy}`)?.tagName).toBe('H1');
 	});
 
-	it('reaches both actions by keyboard from where focus lands', async () => {
-		const restarted: string[] = [];
-		render(SessionSummaryView, {
-			...baseProps,
-			failedSaves: 0,
-			onRestartSession: () => restarted.push('restart')
-		});
+	it('offers no actions at all — the summary reports and nothing more (spec #45)', async () => {
+		render(SessionSummaryView, { ...baseProps, failedSaves: 0 });
 
-		// Tab from the focused section: the first stop is the primary action.
-		await userEvent.tab();
-		expect(document.activeElement).toBe(page.getByTestId('summary-restart-session').element());
-
-		await userEvent.keyboard('{Enter}');
-		expect(restarted).toEqual(['restart']);
+		const section = page.getByTestId('session-summary').element();
+		expect(section.querySelectorAll('button')).toHaveLength(0);
+		expect(page.getByTestId('summary-restart-session').query()).toBeNull();
+		expect(page.getByTestId('summary-pick-another').query()).toBeNull();
 	});
 });
 
