@@ -58,6 +58,16 @@ export interface ChunkEngineState {
 	readonly text: string;
 	readonly cursor: number;
 	readonly display: readonly CharacterState[]; // what the UI renders
+	/**
+	 * The character actually typed at each position, or null where nothing stands (never
+	 * typed, or backspaced away). Display-only: metrics read the log, never this array.
+	 *
+	 * It exists so the surface can render what the typist REALLY produced — "Nprmal", not
+	 * "Normal" with a mark under the `o`. The log already contains every attempt, but the
+	 * surface needs the CURRENT one per position at render time, and scanning the log
+	 * backwards per character on every keystroke is the wrong shape for that.
+	 */
+	readonly typed: readonly (string | null)[];
 	readonly firstAttempts: readonly ('hit' | 'miss' | null)[]; // immutable once set; drives Accuracy (raw)
 	readonly log: readonly Keystroke[];
 	readonly startedAt: number | null; // timestamp of first keystroke

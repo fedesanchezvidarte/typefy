@@ -991,6 +991,7 @@
 				bind:this={surface}
 				text={heldView?.chunk.text ?? ''}
 				display={heldView?.chunk.display ?? []}
+				typed={heldView?.chunk.typed ?? []}
 				cursor={session.status === 'active' ? (heldView?.chunk.cursor ?? -1) : -1}
 				passageKey={heldView?.index ?? session.activeIndex}
 				onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}

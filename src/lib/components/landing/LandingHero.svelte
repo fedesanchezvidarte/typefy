@@ -53,6 +53,7 @@
 		<TypingSurface
 			text={session.activeChunk.text}
 			display={session.activeChunk.display}
+			typed={session.activeChunk.typed}
 			cursor={session.activeChunk.cursor}
 			passageKey={session.activeIndex}
 			onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}

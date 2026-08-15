@@ -5,6 +5,82 @@ import { CHARS_PER_LINE } from '$lib/chunking/measure';
 import TypingSurface from './TypingSurface.svelte';
 
 /**
+ * The typo is rendered as itself: expecting "Normal" and typing `p` for the `o` shows
+ * "Nprmal", not "Normal" with a mark under a character the typist never produced. The wavy
+ * underline and the error tint are unchanged — this ADDS a signal rather than replacing one,
+ * so the assertions below check the substituted glyph AND that the slot is still `incorrect`.
+ */
+describe('TypingSurface — incorrect positions show the character actually typed', () => {
+	function renderSurface(
+		text: string,
+		display: readonly ('pending' | 'correct' | 'corrected' | 'incorrect')[],
+		typed: readonly (string | null)[]
+	) {
+		render(TypingSurface, {
+			text,
+			display,
+			typed,
+			cursor: typed.filter((t) => t !== null).length,
+			passageKey: 0,
+			onChar: () => {},
+			onBackspace: () => {},
+			onRestartChunk: () => {}
+		});
+		return page.getByTestId('typing-measure').element() as HTMLElement;
+	}
+
+	/** The rendered glyphs of the real character slots, excluding the chunk-end caret slot. */
+	function rendered(measureEl: HTMLElement, length: number): string {
+		return [...measureEl.querySelectorAll<HTMLElement>('.char')]
+			.slice(0, length)
+			.map((span) => span.textContent)
+			.join('');
+	}
+
+	it('renders the typo instead of the expected character', () => {
+		const measureEl = renderSurface(
+			'Normal',
+			['correct', 'incorrect', 'pending', 'pending', 'pending', 'pending'],
+			['N', 'p', null, null, null, null]
+		);
+		expect(rendered(measureEl, 6)).toBe('Nprmal');
+		const spans = measureEl.querySelectorAll<HTMLElement>('.char');
+		expect(spans[1].dataset.state).toBe('incorrect');
+	});
+
+	it('keeps the expected character when the typed one has no visible glyph', () => {
+		// A space typed for the `o` would render as a blank slot, hiding the error the tint
+		// is drawn on — so the expected character stands and the tint alone reports it.
+		const measureEl = renderSurface(
+			'Normal',
+			['correct', 'incorrect', 'pending', 'pending', 'pending', 'pending'],
+			['N', ' ', null, null, null, null]
+		);
+		expect(rendered(measureEl, 6)).toBe('Normal');
+	});
+
+	it('never substitutes into a newline slot, so a wrong keystroke cannot reflow the page', () => {
+		const measureEl = renderSurface('a\nb', ['correct', 'incorrect', 'pending'], ['a', 'x', null]);
+		expect(rendered(measureEl, 3)).toBe('a\nb');
+	});
+
+	it('shows the expected text when no typed array is supplied at all', () => {
+		const text = 'Normal';
+		render(TypingSurface, {
+			text,
+			display: Array.from(text, () => 'pending' as const),
+			cursor: 0,
+			passageKey: 0,
+			onChar: () => {},
+			onBackspace: () => {},
+			onRestartChunk: () => {}
+		});
+		const measureEl = page.getByTestId('typing-measure').element() as HTMLElement;
+		expect(rendered(measureEl, 6)).toBe('Normal');
+	});
+});
+
+/**
  * The `ch` measure (spec #32 §5, ADR-0015), acceptance criterion #9 part 1: "the surface's
  * measure resolves to exactly `CHARS_PER_LINE` `ch` in every reading font" —
  * `computedWidth / widthOf('0') === CHARS_PER_LINE`. Deliberately NOT literal equality of
