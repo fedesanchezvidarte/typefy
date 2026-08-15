@@ -19,6 +19,7 @@
 		"test": "npm run test:unit -- --run && npm run test:e2e",
 		"test:e2e": "playwright install && playwright test",
 		"check:i18n": "node scripts/check-i18n-parity.js",
+		"check:migrations": "node scripts/check-migrations-append-only.js",
 		"db:start": "supabase start",
 		"db:stop": "supabase stop",
 		"db:status": "supabase status",

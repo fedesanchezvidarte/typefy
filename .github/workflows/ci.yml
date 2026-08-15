@@ -19,6 +19,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # Full history (not the default shallow clone) so the append-only
+          # migrations check can compute a merge-base with origin/main.
+          fetch-depth: 0
 
       - name: Setup Node 22
         uses: actions/setup-node@v5
@@ -40,6 +44,9 @@ jobs:
         env:
           SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID: ci-dummy-client-id
           SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET: ci-dummy-secret
+
+      - name: Migrations are append-only
+        run: npm run check:migrations
 
       - name: i18n key parity (EN/ES)
         run: npm run check:i18n
