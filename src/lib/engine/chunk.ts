@@ -26,6 +26,7 @@ export function createChunk(text: string): ChunkEngineState {
 		text,
 		cursor: 0,
 		display: Array.from({ length }, (): CharacterState => 'pending'),
+		typed: Array.from({ length }, (): string | null => null),
 		firstAttempts: Array.from({ length }, () => null),
 		log: [],
 		startedAt: null,
@@ -67,6 +68,9 @@ export function restoreChunk(text: string, prefixLength: number): ChunkEngineSta
 		text,
 		cursor: prefix,
 		display: characters.map((_, i): CharacterState => (i < prefix ? 'correct' : 'pending')),
+		// The restored prefix is correct by construction, so the expected character IS what was
+		// typed there. Filling it keeps `typed` and `display` consistent for the whole array.
+		typed: characters.map((char, i): string | null => (i < prefix ? char : null)),
 		firstAttempts: characters.map(() => null),
 		log: [],
 		startedAt: null,
@@ -131,6 +135,9 @@ function applyChar(
 			: 'correct'
 		: 'incorrect';
 
+	const typed = state.typed.slice();
+	typed[position] = char;
+
 	const firstAttempts = isFirstAttempt
 		? state.firstAttempts.map((record, i) => (i === position ? stroke.judgment! : record))
 		: state.firstAttempts;
@@ -143,6 +150,7 @@ function applyChar(
 		...state,
 		cursor,
 		display,
+		typed,
 		firstAttempts,
 		log: [...state.log, stroke],
 		startedAt: state.startedAt ?? timestamp,
@@ -172,10 +180,16 @@ function applyBackspace(
 	const display = state.display.slice();
 	display[position] = 'pending';
 
+	// Backspace erases the glyph as well as the judgement: a pending position shows the
+	// expected character again, never the attempt that was just deleted.
+	const typed = state.typed.slice();
+	typed[position] = null;
+
 	return {
 		...state,
 		cursor: position,
 		display,
+		typed,
 		log: [...state.log, stroke]
 	};
 }

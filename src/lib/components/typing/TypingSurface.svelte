@@ -7,6 +7,12 @@
 	interface Props {
 		text: string;
 		display: readonly CharacterState[];
+		/**
+		 * What the typist actually produced at each position (engine `typed`). Drives the
+		 * substitution below: a wrong keystroke shows the wrong character, not the expected one
+		 * with a mark under it. Optional so callers that only render pending text can omit it.
+		 */
+		typed?: readonly (string | null)[];
 		cursor: number;
 		/**
 		 * Identity of the page being typed (the active chunk index). When it
@@ -30,6 +36,7 @@
 	let {
 		text,
 		display,
+		typed = [],
 		cursor,
 		passageKey,
 		onChar,
@@ -40,6 +47,35 @@
 
 	/* Code-point-safe split, mirroring the engine (á, ñ, ¿ occupy one position each). */
 	const chars = $derived(Array.from(text));
+
+	/*
+	 * What a slot SHOWS, which is not always what it expects: on an incorrect position the
+	 * surface renders the character the typist actually produced ("Nprmal", not "Normal" with a
+	 * mark under the `o`), so the mistake is legible as itself. The wavy underline and the error
+	 * tint stay — the substitution adds a signal, it does not replace one.
+	 *
+	 * Two positions are deliberately NOT substituted, because in both the substitution would
+	 * destroy more information than it adds:
+	 *
+	 * - a typed character with no visible glyph (space, tab, newline) would render as a blank
+	 *   slot, hiding the error the tint is drawn on;
+	 * - a slot whose EXPECTED character is `\n` must keep breaking the line, or every wrong
+	 *   keystroke at a paragraph break would reflow the page under the typist's eyes.
+	 *
+	 * In both cases the expected character stands and the tint alone reports the error, which
+	 * is exactly the pre-existing behaviour.
+	 */
+	function shownChar(index: number): string {
+		const expected = chars[index];
+		if (display[index] !== 'incorrect' || expected === '\n') {
+			return expected;
+		}
+		const attempt = typed[index];
+		if (!attempt || /\s/.test(attempt)) {
+			return expected;
+		}
+		return attempt;
+	}
 
 	let input = $state<HTMLInputElement | null>(null);
 	let viewportEl = $state<HTMLDivElement | null>(null);
@@ -176,7 +212,7 @@
 						{#each chars as char, i (i)}
 							<span
 								class={['char', char === '\n' && 'newline', i === cursor && 'caret']}
-								data-state={display[i]}>{char}</span
+								data-state={display[i]}>{shownChar(i)}</span
 							>
 						{/each}
 						<span

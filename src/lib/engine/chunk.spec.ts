@@ -414,6 +414,55 @@ describe('restoreChunk', () => {
 	});
 });
 
+/*
+ * `typed` — what the surface renders in a slot. Display-only: no metric reads it, which is
+ * why these assertions never touch the log, the first-attempt records or the timer.
+ */
+describe('applyChunkEvent — the typed character per position', () => {
+	it('starts null everywhere, one entry per code point', () => {
+		expect(createChunk('ñá¿').typed).toEqual([null, null, null]);
+	});
+
+	it('records the WRONG character actually typed, so the surface can show the typo itself', () => {
+		const state = run(createChunk('Normal'), chars('Np'));
+		expect(state.typed.slice(0, 2)).toEqual(['N', 'p']);
+		expect(state.display[1]).toBe('incorrect');
+	});
+
+	it('records correct characters too, so `typed` and `display` agree at every position', () => {
+		const state = run(createChunk('abc'), chars('ab'));
+		expect(state.typed).toEqual(['a', 'b', null]);
+	});
+
+	it('clears the position on backspace — a pending slot shows the expected character again', () => {
+		const state = run(createChunk('Normal'), [
+			...chars('Np'),
+			{ type: 'backspace', timestamp: 1200 }
+		]);
+		expect(state.typed).toEqual(['N', null, null, null, null, null]);
+		expect(state.display[1]).toBe('pending');
+	});
+
+	it('overwrites on a retype, keeping only the CURRENT attempt', () => {
+		const state = run(createChunk('Normal'), [
+			...chars('Np'),
+			{ type: 'backspace', timestamp: 1200 },
+			{ type: 'char', char: 'o', timestamp: 1300 }
+		]);
+		expect(state.typed[1]).toBe('o');
+		expect(state.display[1]).toBe('corrected');
+	});
+
+	it('holds a composed character as one entry', () => {
+		const state = run(createChunk('ñandú'), chars('ñ'));
+		expect(state.typed[0]).toBe('ñ');
+	});
+
+	it('fills the restored prefix with the expected characters and leaves the rest null', () => {
+		expect(restoreChunk('abcd', 2).typed).toEqual(['a', 'b', null, null]);
+	});
+});
+
 describe('applyChunkEvent — restart', () => {
 	it('resets display, cursor, log, first-attempt records, and timer', () => {
 		const typed = run(createChunk('abc'), chars('axc'));
