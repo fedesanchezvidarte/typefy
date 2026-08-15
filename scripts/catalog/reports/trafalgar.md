@@ -7,25 +7,25 @@
 
 ## Chunks
 
-| Measure                                 | Value  |
-| --------------------------------------- | ------ |
-| Chunks                                  | 246    |
-| Total characters                        | 296311 |
-| Shortest                                | 284    |
-| Median                                  | 1241   |
-| Longest                                 | 1558   |
-| Median lines                            | 20     |
-| Longest (lines)                         | 24     |
-| Over the budget (1600 chars / 24 lines) | 0      |
+| Measure | Value |
+|---|---|
+| Chunks | 246 |
+| Total characters | 296311 |
+| Shortest | 284 |
+| Median | 1241 |
+| Longest | 1558 |
+| Median lines | 20 |
+| Longest (lines) | 24 |
+| Over the budget (1600 chars / 24 lines) | 0 |
 
 ## Metadata
 
-| Field                  | Value           |
-| ---------------------- | --------------- |
-| Open Library work      | None declared   |
+| Field | Value |
+|---|---|
+| Open Library work | None declared |
 | First publication year | 1873 (manifest) |
-| Description            | None            |
-| Summary overrides      | None            |
+| Description | None |
+| Summary overrides | None |
 
 ## Chapters
 

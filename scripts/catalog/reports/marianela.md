@@ -7,25 +7,25 @@
 
 ## Chunks
 
-| Measure                                 | Value  |
-| --------------------------------------- | ------ |
-| Chunks                                  | 245    |
-| Total characters                        | 292167 |
-| Shortest                                | 267    |
-| Median                                  | 1266   |
-| Longest                                 | 1579   |
-| Median lines                            | 22     |
-| Longest (lines)                         | 24     |
-| Over the budget (1600 chars / 24 lines) | 0      |
+| Measure | Value |
+|---|---|
+| Chunks | 245 |
+| Total characters | 292167 |
+| Shortest | 267 |
+| Median | 1266 |
+| Longest | 1579 |
+| Median lines | 22 |
+| Longest (lines) | 24 |
+| Over the budget (1600 chars / 24 lines) | 0 |
 
 ## Metadata
 
-| Field                  | Value                                            |
-| ---------------------- | ------------------------------------------------ |
-| Open Library work      | `/works/OL815453W`                               |
+| Field | Value |
+|---|---|
+| Open Library work | `/works/OL815453W` |
 | First publication year | 1878 (manifest override; Open Library says 1883) |
-| Description            | 854 characters, from Open Library                |
-| Summary overrides      | None                                             |
+| Description | 854 characters, from Open Library |
+| Summary overrides | None |
 
 > The sources disagree: the manifest declares 1878, Open Library reports 1883.
 > The manifest wins, so 1878 is what gets written. Open Library reports the

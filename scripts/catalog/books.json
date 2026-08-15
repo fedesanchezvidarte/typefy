@@ -94,6 +94,89 @@
 			}
 		},
 		{
+			"slug": "moby-dick",
+			"title": "Moby Dick; or, The Whale",
+			"author": "Herman Melville",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/2701/pg2701.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"openLibraryWork": "/works/OL102749W",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Call me Ishmael."
+			},
+			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/2701/pg2701-images.html",
+			"chapters": {
+				"excludeTitles": [
+					"By Herman Melville",
+					"ETYMOLOGY.",
+					"EXTRACTS. (Supplied by a Sub-Sub-Librarian)."
+				],
+				"firstHeadingImplicit": true
+			}
+		},
+		{
+			"slug": "the-odyssey",
+			"title": "The Odyssey",
+			"author": "Homer",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/1727/pg1727.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"openLibraryWork": "/works/OL61982W",
+			"year": -700,
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Tell me, O Muse, of that ingenious hero",
+				"endMarker": "FOOTNOTES:"
+			},
+			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/1727/pg1727-images.html",
+			"chapters": {
+				"excludeTitles": [
+					"by Homer",
+					"PREFACE TO FIRST EDITION",
+					"PREFACE TO SECOND EDITION",
+					"THE ODYSSEY",
+					"FOOTNOTES:"
+				],
+				"firstHeadingImplicit": true
+			}
+		},
+		{
+			"slug": "romeo-and-juliet",
+			"title": "Romeo and Juliet",
+			"author": "William Shakespeare",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/1513/pg1513.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"openLibraryWork": "/works/OL362427W",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Two households, both alike in dignity,"
+			},
+			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/1513/pg1513-images.html",
+			"chapters": {
+				"excludeTitles": ["by William Shakespeare"]
+			}
+		},
+		{
+			"slug": "the-adventures-of-sherlock-holmes",
+			"title": "The Adventures of Sherlock Holmes",
+			"author": "Arthur Conan Doyle",
+			"language": "en",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/1661/pg1661.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"openLibraryWork": "/works/OL262421W",
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "To Sherlock Holmes she is always"
+			},
+			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/1661/pg1661-images.html",
+			"chapters": {
+				"excludeTitles": ["by Arthur Conan Doyle", "Contents"],
+				"firstHeadingImplicit": true
+			}
+		},
+		{
 			"slug": "don-quijote",
 			"title": "Don Quijote",
 			"author": "Miguel de Cervantes Saavedra",
