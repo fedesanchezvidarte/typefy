@@ -31,6 +31,16 @@ describe('normalizeCharacters — typographic folding', () => {
 		expect(normalizeCharacters('wait… now')).toBe('wait... now');
 	});
 
+	it('expands the vulgar fraction one half to a spaced ASCII fraction', () => {
+		// The space matters: "4½ per cent" without it becomes "41/2 per cent", a different
+		// number. The cleaner collapses the resulting double space, so a standalone ½ is safe.
+		expect(normalizeCharacters('paying 4½ per cent')).toBe('paying 4 1/2 per cent');
+	});
+
+	it('folds the pound sign to the L it descends from', () => {
+		expect(normalizeCharacters('£1,000,000')).toBe('L1,000,000');
+	});
+
 	it('folds non-breaking, thin, figure and ideographic spaces to a plain space', () => {
 		const exotic = 'a b c d e　f';
 		expect(exotic).not.toBe('a b c d e f'); // guard: the literals are still exotic

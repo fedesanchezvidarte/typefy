@@ -42,7 +42,17 @@ const FOLDINGS = new Map<string, string>([
 	['‒', '-'],
 	['―', '-'],
 	// Ellipsis expands rather than folds — three periods is what a typist writes.
-	['…', '...']
+	['…', '...'],
+	// Vulgar fraction, expanded with a LEADING space on purpose: it follows a whole number
+	// ("4½ per cent"), and folding it to a bare "1/2" would silently rewrite the number as
+	// 41/2. The cleaner collapses runs of whitespace afterwards, so a ½ that stands alone or
+	// opens a paragraph does not gain a stray space.
+	['½', ' 1/2'],
+	// Pound sign. Not on a US or Spanish layout, and no keyboard-reachable symbol means the
+	// same thing — so it becomes the letter it is a struck-through form of (libra), which is
+	// how the amount reads aloud anyway. Chosen over widening the allowed set, which would
+	// leave "bounties upwards of £1,000,000" impossible to finish on most keyboards.
+	['£', 'L']
 ]);
 
 /**
