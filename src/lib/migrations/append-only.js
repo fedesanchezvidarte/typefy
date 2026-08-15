@@ -1,5 +1,5 @@
 /**
- * Pure classification of a `git diff --name-status` listing for
+ * Pure classification of a `git diff --name-status -z` listing for
  * `supabase/migrations/`, used to enforce that a migration file already
  * merged to `main` is never modified or deleted — only appended to.
  *
@@ -23,44 +23,67 @@
  */
 
 /**
- * Classifies each line of a `git diff --name-status <base> -- <pathspec>`
- * listing. Only `A` (added) is allowed — every other status means a file
- * that existed at the base ref was touched.
+ * Classifies the records of a `git diff --name-status -z <base> -- <pathspec>`
+ * listing. Only additions are allowed — every other status means a file that
+ * existed at the base ref was touched.
  *
- * Renames and copies (`R###` / `C###`, two path columns) are reported
- * against their *source* path: from the base ref's point of view, that
- * source file has disappeared, which is exactly the "an applied migration
- * is gone" case this check exists to catch.
+ * `-z` (NUL-separated) rather than the default line/tab format: git quotes
+ * paths containing tabs, newlines or non-ASCII bytes (`core.quotePath`), which
+ * silently corrupts tab-splitting. NUL separators have no escaping at all, so
+ * the parse is exact for any path git can produce.
  *
- * @param {string} nameStatusOutput - raw stdout of `git diff --name-status`
+ * The output is a flat token stream — `status NUL path NUL` per record, except
+ * `R###`/`C###`, which carry both a source and a destination path
+ * (`status NUL src NUL dst NUL`). Statuses are consumed sequentially, taking
+ * one or two paths depending on the status.
+ *
+ * Per status:
+ * - `A` — new file at/after the base. Allowed.
+ * - `C` — a copy: the destination is new and the *source is left intact*, so
+ *   nothing that already reached the base ref changed. Allowed. (Copy
+ *   detection is off unless `diff.renames=copies` is configured, so this is
+ *   rare — but treating it as a deletion would be a false positive.)
+ * - `R` — a rename: the source path is gone from the base ref's point of view,
+ *   which is exactly the "an applied migration disappeared" case. Reported
+ *   against the *source* path.
+ * - `D` / `M` — reported as-is.
+ * - anything else (`T` type change, `U` unmerged, `X`) — reported
+ *   conservatively as a violation rather than ignored.
+ *
+ * @param {string} nameStatusOutput - raw stdout of `git diff --name-status -z`
  * @returns {MigrationOffense[]}
  */
 export function classifyMigrationDiff(nameStatusOutput) {
 	/** @type {MigrationOffense[]} */
 	const offenses = [];
 
-	for (const rawLine of nameStatusOutput.split('\n')) {
-		const line = rawLine.trim();
-		if (!line) continue;
+	// A trailing NUL leaves an empty final token; blank tokens are dropped
+	// rather than treated as records.
+	const tokens = nameStatusOutput.split('\0').filter((token) => token !== '');
 
-		const [status, ...paths] = line.split('\t');
-		if (!status || paths.length === 0) continue;
+	let index = 0;
+	while (index < tokens.length) {
+		const status = tokens[index++];
+		const takesTwoPaths = status.startsWith('R') || status.startsWith('C');
 
-		if (status.startsWith('A')) continue; // new file at/after the base — always fine
+		const source = tokens[index++];
+		const destination = takesTwoPaths ? tokens[index++] : undefined;
 
-		if (status.startsWith('R') || status.startsWith('C')) {
-			offenses.push({ kind: 'renamed', path: paths[0] });
-			continue;
-		}
+		// Truncated trailing record (interrupted git, hand-built input): nothing
+		// to classify against, so there is no path to report.
+		if (source === undefined) break;
+		if (takesTwoPaths && destination === undefined) break;
 
-		const path = paths[0];
-		if (status.startsWith('D')) {
-			offenses.push({ kind: 'deleted', path });
+		if (status.startsWith('A') || status.startsWith('C')) continue;
+
+		if (status.startsWith('R')) {
+			offenses.push({ kind: 'renamed', path: source });
+		} else if (status.startsWith('D')) {
+			offenses.push({ kind: 'deleted', path: source });
 		} else if (status.startsWith('M')) {
-			offenses.push({ kind: 'modified', path });
+			offenses.push({ kind: 'modified', path: source });
 		} else {
-			// T (type change), U (unmerged), etc. — treat conservatively as a violation.
-			offenses.push({ kind: 'changed', path });
+			offenses.push({ kind: 'changed', path: source });
 		}
 	}
 
