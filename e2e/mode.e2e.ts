@@ -236,7 +236,11 @@ test.describe('the choice is durable', () => {
 			await openBook(page, EN_ID);
 			await zenToggle(page).click();
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
-			const guestMeta = await meta(page).textContent();
+			// Wait for the figures to actually be GONE before reading the line. `aria-pressed`
+			// flips on the click, but since spec #50 the figures leave on a 180ms fade — reading
+			// `textContent` on the next tick captures a frame of the outro, not the settled state.
+			await expect(meta(page)).not.toContainText('wpm');
+			const guestMeta = (await meta(page).textContent())?.replace(/\s+/g, ' ').trim();
 			const guestServerMeta = metaFromHtml(await serverHtml(page, `/type/${EN_ID}`));
 
 			// ── the same browser, now signed in ───────────────────────────────────────────
@@ -249,8 +253,8 @@ test.describe('the choice is durable', () => {
 
 			expect(metaFromHtml(await serverHtml(page, `/type/${EN_ID}`))).toBe(guestServerMeta);
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
-			expect(await meta(page).textContent()).toBe(guestMeta);
 			await expect(meta(page)).not.toContainText('wpm');
+			expect((await meta(page).textContent())?.replace(/\s+/g, ' ').trim()).toBe(guestMeta);
 
 			// And the toggle still owns the axis for a signed-in user.
 			await zenToggle(page).click();

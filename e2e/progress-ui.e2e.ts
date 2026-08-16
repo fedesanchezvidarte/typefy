@@ -242,6 +242,9 @@ test.describe('completed pages come back settled', () => {
 
 		// `?page=1` overrides resume, which would otherwise open at the first INCOMPLETE page.
 		await page.goto(`/type/${BOOK_SLUG}?page=1`);
+		// Hydration, before anything is clicked: `Type again` below is inert until the session
+		// is live, and a click that lands early does nothing at all.
+		await expect(page.getByTestId('typing-input')).toBeFocused();
 		await expectPageIs(page, 1, book.chunkCount);
 		await expect(page.getByTestId('page-completed')).toBeVisible();
 
@@ -281,6 +284,9 @@ test.describe('completed pages come back settled', () => {
 		const book = await authUser.completePassages(BOOK_SLUG, [0]);
 
 		await page.goto(`/type/${BOOK_SLUG}?page=2`);
+		// Hydration first: asserting the ABSENCE of the mark is exactly the assertion that passes
+		// vacuously against a half-rendered page, so it must wait for a session that exists.
+		await expect(page.getByTestId('typing-input')).toBeFocused();
 		await expectPageIs(page, 2, book.chunkCount);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
 		await expect(page.getByTestId('page-completed')).toHaveCount(0);
@@ -293,6 +299,11 @@ test.describe('completed pages come back settled', () => {
 		const book = await authUser.completePassages(BOOK_SLUG, [0]);
 
 		await page.goto(`/type/${BOOK_SLUG}?page=2`);
+		// The hydration gate, and it is load-bearing: the navigator's buttons are inert until the
+		// surface has focused its own input on mount, so a click before that silently does
+		// nothing and the session never moves. (Same wait, same reason, as the navigator specs in
+		// `page-model.e2e.ts`.)
+		await expect(page.getByTestId('typing-input')).toBeFocused();
 		await expectPageIs(page, 2, book.chunkCount);
 		await expect(page.getByTestId('page-completed')).toHaveCount(0);
 

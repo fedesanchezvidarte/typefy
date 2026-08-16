@@ -37,7 +37,7 @@ test.describe('a guest', () => {
 		for (const slug of [BOOK_SLUG, OTHER_BOOK_SLUG]) {
 			await page.goto(`/type/${slug}`);
 			await expect(page.getByTestId('typing-surface')).toBeVisible();
-			await expect(page.getByTestId('page-meta')).toContainText('Page 1 of');
+			await expectPageIs(page, 1);
 			await expect(page.getByTestId('page-meta')).toContainText('0%');
 		}
 	});

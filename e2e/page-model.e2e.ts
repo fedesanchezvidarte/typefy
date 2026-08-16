@@ -470,8 +470,15 @@ test.describe('the page model (spec #32)', () => {
 			// Disabled at the start edge — never a focus stop, and never announced as actionable.
 			await expect(page.getByTestId('page-nav-previous')).toBeDisabled();
 
-			// Previous is disabled on page 1, so the first Tab from the input lands on the jump
-			// box, a native input skipping disabled controls exactly as it would skip any other.
+			// Spec #50 put the Zen toggle in the bottom row's LEFT column, ahead of the navigator
+			// in DOM order — so it is now the first Tab stop from the input, and the tab order
+			// follows the reading order of the row: toggle, then navigator, then the figures
+			// (which are text and take no focus).
+			await page.keyboard.press('Tab');
+			await expect(page.getByTestId('zen-toggle')).toBeFocused();
+
+			// Previous is disabled on page 1, so the next Tab lands on the jump box, a native
+			// input skipping disabled controls exactly as it would skip any other.
 			await page.keyboard.press('Tab');
 			await expect(page.getByTestId('page-nav-jump')).toBeFocused();
 			await page.keyboard.press('Tab');
@@ -486,9 +493,11 @@ test.describe('the page model (spec #32)', () => {
 			await expectPageIs(page, `2`, `${book.chunkCount}`);
 			await expect(page.getByTestId('typing-input')).toBeFocused();
 
-			// Now that page 1 is behind it, previous is enabled and is the first stop from the
-			// input again — Tab reaches it directly, and Space activates it exactly as Enter did
-			// the next button.
+			// Now that page 1 is behind it, previous is enabled and is the first navigator stop —
+			// reached on the second Tab, past the Zen toggle. Space activates it exactly as Enter
+			// did the next button.
+			await page.keyboard.press('Tab');
+			await expect(page.getByTestId('zen-toggle')).toBeFocused();
 			await page.keyboard.press('Tab');
 			await expect(page.getByTestId('page-nav-previous')).toBeFocused();
 			await page.keyboard.press(' ');
@@ -556,7 +565,9 @@ test.describe('the page model (spec #32)', () => {
 			// of every navigation — click or keyboard — so focus never lingers on the button that
 			// triggered it; it lands back on the typing input, which is the actual boundary this
 			// test is proving.
-			await page.keyboard.press('Tab'); // previous, now enabled (page 2 of 2), is the first stop
+			await page.keyboard.press('Tab'); // the Zen toggle leads the bottom row (spec #50)
+			await expect(page.getByTestId('zen-toggle')).toBeFocused();
+			await page.keyboard.press('Tab'); // previous, now enabled (page 2 of 2)
 			await expect(page.getByTestId('page-nav-previous')).toBeFocused();
 			await page.keyboard.press('Enter');
 			await expectPageIs(page, `1`, `${a11yBook.chunkCount}`);

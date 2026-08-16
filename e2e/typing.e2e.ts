@@ -417,8 +417,13 @@ test.describe('UI locale vs content language', () => {
 		// would hide the EN book — so the EN language is picked explicitly. That override is
 		// itself the point of this test: content language and UI locale stay independent.
 		await pickText(page, EN_ID, '/es/type?lang=en');
-		// Spanish UI chrome around English content: locale and text are independent.
-		await expect(meta(page)).toContainText('Página 1 de 6');
+		// Spanish UI chrome around English content: locale and text are independent. Read off
+		// both halves of the chrome the page number used to carry alone — the navigator's total
+		// ("de 6", not "of 6") and the figures line's units ("ppm", not "wpm").
+		await expectPageIs(page, 1);
+		await expect(page.getByTestId('page-nav-total')).toContainText('de 6');
+		await expect(meta(page)).toContainText('ppm');
+		await expect(meta(page)).toContainText('de precisión');
 		await type(page, 'It is');
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
 		await expect(chars(page).nth(4)).toHaveAttribute('data-state', 'correct');

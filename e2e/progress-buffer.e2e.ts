@@ -227,7 +227,8 @@ test.describe('a reconnect drain must not disturb a typist mid-passage', () => {
 			page.locator('[data-testid="typing-surface"] .char[data-state="correct"]');
 
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expectPageIs(page, `1`, `${book.chunkCount} · 0%`);
+		await expectPageIs(page, 1, book.chunkCount);
+		await expect(page.getByTestId('page-meta')).toContainText('0%');
 		await typePassage(page, prefix);
 		await expect(typedCorrect()).toHaveCount(prefix.length);
 

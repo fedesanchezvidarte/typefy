@@ -67,9 +67,17 @@
 			screen that is meant to have none.
 		-->
 		<span transition:figureFade>{m.page_meta_wpm({ wpm })}</span>
-		<span class="accuracy" transition:figureFade>
-			<span aria-hidden="true"> · </span>{m.page_meta_accuracy({ acc })}
-		</span>
+		<!--
+			Each separator is its OWN sibling span carrying ` · ` — never nested inside the figure it
+			precedes. Svelte strips whitespace BETWEEN elements but trims it at an element's inner
+			boundaries, so a nested separator renders `— wpm ·—% accuracy`: the space it was carrying
+			on its trailing side is gone and nothing between the siblings replaces it.
+
+			The accuracy separator carries `.accuracy` too, so the narrow-viewport rule below hides
+			the separator and the figure together rather than leaving a dangling middot on a phone.
+		-->
+		<span class="accuracy" aria-hidden="true" transition:figureFade> · </span>
+		<span class="accuracy" transition:figureFade>{m.page_meta_accuracy({ acc })}</span>
 		<span aria-hidden="true" transition:figureFade> · </span>
 	{/if}
 	<span>{m.page_meta_percent({ pct })}</span>

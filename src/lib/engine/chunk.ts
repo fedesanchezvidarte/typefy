@@ -91,9 +91,16 @@ export function restoreChunk(text: string, prefixLength: number): ChunkEngineSta
  * - an empty log alone is true of every freshly-opened page, where the cursor is at 0.
  *
  * Together they describe exactly "fully rendered as typed, with no keystrokes behind it".
+ *
+ * **Measured against `display.length`, never `toCharacters(state.text).length`.** The two are
+ * always equal — `display` is built by mapping over the characters — but one is a field read and
+ * the other splits the whole ~1600-character page into a fresh array. This predicate sits on the
+ * hot path: `applySessionEvent` consults it on EVERY keystroke, so the naive version added a
+ * per-stroke O(n) allocation on top of the one `applyChar` already makes, and fast typing began
+ * dropping characters.
  */
 export function isSettledChunk(state: ChunkEngineState): boolean {
-	return state.log.length === 0 && state.cursor >= toCharacters(state.text).length;
+	return state.log.length === 0 && state.cursor >= state.display.length;
 }
 
 /** Derived from the log: a position is ever-incorrect iff any char stroke missed it. */
