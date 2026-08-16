@@ -1,5 +1,6 @@
 import { expect, guestTest, test } from './fixtures/auth';
 import { isLocalStack, readSeededBook, SUPABASE_URL, type AnyClient } from './support/supabase';
+import { expectPageIs } from './support/typing-screen';
 import { gridCard } from './support/library';
 import type { Page } from '@playwright/test';
 // Imported, never duplicated: the tests type the exact strings the app renders, and address
@@ -119,9 +120,7 @@ test.describe('offline → online: a completed passage is pending, then lands', 
 		// The LAST passage, so completing it finishes the session and the summary — the one
 		// surface that states a pending save — actually renders.
 		await page.goto(`/type/${BOOK_SLUG}?passage=${PASSAGE_COUNT}`);
-		await expect(page.getByTestId(META)).toContainText(
-			`Page ${PASSAGE_COUNT} of ${book.chunkCount}`
-		);
+		await expectPageIs(page, PASSAGE_COUNT, book.chunkCount);
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 
 		// Deliberately NOT a single keystroke before this line: the lazy write path is still
@@ -228,7 +227,8 @@ test.describe('a reconnect drain must not disturb a typist mid-passage', () => {
 			page.locator('[data-testid="typing-surface"] .char[data-state="correct"]');
 
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount} · 0%`);
+		await expectPageIs(page, 1, book.chunkCount);
+		await expect(page.getByTestId('page-meta')).toContainText('0%');
 		await typePassage(page, prefix);
 		await expect(typedCorrect()).toHaveCount(prefix.length);
 
@@ -276,7 +276,7 @@ test.describe('a reconnect drain must not disturb a typist mid-passage', () => {
 		// Focus never left the hidden input, so the next keystroke still reaches the engine.
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 		// The session was not yanked to the new resume index, and no keystroke was lost.
-		await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount}`);
+		await expectPageIs(page, `1`, `${book.chunkCount}`);
 		await expect(typedCorrect()).toHaveCount(prefix.length);
 		// Nothing was announced: the sr-only announcer is a pure function of the passage number
 		// and the book length, neither of which a drain can move. The visible percentage that
@@ -305,9 +305,9 @@ guestTest.describe('guest → sign-in: the completed passages backfill', () => {
 
 			// ── As a guest ────────────────────────────────────────────────────────────────
 			await page.goto(`/type/${BOOK_SLUG}`);
-			await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount}`);
+			await expectPageIs(page, `1`, `${book.chunkCount}`);
 			await typePassage(page, CHUNK_FIRST);
-			await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
+			await expectPageIs(page, `2`, `${book.chunkCount}`);
 			await expect.poll(() => readBuffer(page)).toHaveLength(1);
 
 			// The last passage too, in a second session, so the summary and its sign-in prompt —
@@ -367,7 +367,7 @@ guestTest.describe('guest → sign-in: the completed passages backfill', () => {
 			// The typing screen agrees, and resume has advanced past the passage the guest typed:
 			// passage 1 is complete, so the lowest incomplete index is passage 2.
 			await page.goto(`/type/${BOOK_SLUG}`);
-			await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
+			await expectPageIs(page, `2`, `${book.chunkCount}`);
 			await expect(page.getByTestId(META)).toContainText(`${percent}%`);
 		}
 	);
@@ -405,7 +405,7 @@ guestTest.describe('A → B: one browser, two users', () => {
 
 			await session.signInAs(userA);
 			await page.goto(`/type/${BOOK_SLUG}?passage=2`);
-			await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
+			await expectPageIs(page, `2`, `${book.chunkCount}`);
 			// A's mount drain fired on the guest entry and failed transiently, so that entry is
 			// still standing — nothing was lost by trying.
 			await expect.poll(() => readBuffer(page)).toHaveLength(1);

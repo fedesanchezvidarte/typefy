@@ -6,7 +6,6 @@ import { error } from '@sveltejs/kit';
 import { getBookChapters, getBookSummaryBySlug, getChunkWindow } from '$lib/server/books';
 import { getBookCompletionCount, getCompletedChunkIds } from '$lib/server/progress';
 import { activeChapter } from '$lib/library/chapter-progress';
-import { completionPercent } from '$lib/library/completion';
 import { resolveStartIndex } from '$lib/progress/resume';
 import { clampWindow, WINDOW_SIZE } from '$lib/reading/window';
 import { MODE_COOKIE, parseMode } from '$lib/mode/mode';
@@ -85,17 +84,16 @@ export interface TypingPageData {
 	typingHeader: TypingHeaderSeed;
 }
 
-/** The values the header slot renders before the session is mounted. */
+/**
+ * The values the header slot renders before the session is mounted. Identity only since spec
+ * #50 — see `seedHeader` for what left and why.
+ */
 export interface TypingHeaderSeed {
 	title: string;
-	author: string;
 	/** `null` for front matter and for a book with no chapters — both legal (ADR-0017). */
 	chapter: string | null;
-	/** 1-based, matching the page navigator and `?page=N`. */
-	current: number;
-	total: number;
-	pct: number;
-	zen: boolean;
+	/** The book's slug, for the title's link back to the book detail screen. */
+	slug: string;
 }
 
 /**
@@ -140,15 +138,7 @@ export const load = (async ({ params, locals, url, cookies }): Promise<TypingPag
 			chunksCompleted: 0,
 			mode,
 			chapters,
-			// A guest's percentage is session-relative (spec #12 §4), and at first paint the
-			// session has typed nothing — so the opening page index IS the figure.
-			typingHeader: seedHeader(
-				book,
-				chapters,
-				startIndex,
-				completionPercent(book, startIndex),
-				mode
-			)
+			typingHeader: seedHeader(book, chapters, startIndex)
 		};
 	}
 
@@ -184,20 +174,7 @@ export const load = (async ({ params, locals, url, cookies }): Promise<TypingPag
 		chunksCompleted,
 		mode,
 		chapters,
-		// The same figure `TypingSession`'s `pct` opens on for a signed-in user: the larger of
-		// the two completion sources, clamped to 100%. Mirrored here rather than derived there
-		// because the header paints before the session exists — the two must agree at first
-		// paint or the number visibly changes on hydration.
-		typingHeader: seedHeader(
-			book,
-			chapters,
-			startIndex,
-			completionPercent(
-				book,
-				Math.min(Math.max(completedChunkIds.length, chunksCompleted), book.chunkCount)
-			),
-			mode
-		)
+		typingHeader: seedHeader(book, chapters, startIndex)
 	};
 }) satisfies PageServerLoad;
 
@@ -205,22 +182,22 @@ export const load = (async ({ params, locals, url, cookies }): Promise<TypingPag
  * The header slot's opening values. Pure assembly over what the load already has — the chapter
  * comes from the same `activeChapter` fold the client re-runs on every page navigation, so the
  * server's answer and the client's first answer are the same answer.
+ *
+ * **Identity only since spec #50.** It used to carry the page number, the percentage and the mode
+ * axis as well, because the figures lived in the header and had to paint correctly on the server.
+ * They live under the page card now, inside `TypingSession`, which is itself server-rendered with
+ * `mode` straight off this load — so spec #24 §10's "no metrics, not even for one frame" is kept
+ * by the component that owns them rather than mirrored up here.
  */
 function seedHeader(
 	book: TypeableTextSummary,
 	chapters: readonly ChapterSummary[],
-	startIndex: number,
-	pct: number,
-	mode: Mode
+	startIndex: number
 ): TypingHeaderSeed {
 	return {
 		title: book.title,
-		author: book.author,
 		chapter: activeChapter(chapters, startIndex)?.title ?? null,
-		current: startIndex + 1,
-		total: book.chunkCount,
-		pct,
-		zen: mode === 'zen'
+		slug: book.id
 	};
 }
 

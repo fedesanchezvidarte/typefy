@@ -1,5 +1,4 @@
 import { getContext, setContext } from 'svelte';
-import type { MetricsSnapshot } from '$lib/engine/metrics';
 
 /**
  * The typing screen's **header center slot** (spec #45), and the seam that lets a route fill a
@@ -12,25 +11,28 @@ import type { MetricsSnapshot } from '$lib/engine/metrics';
  * never leak between two concurrently-rendering requests the way a module-level `$state` would.
  *
  * **It is deliberately NOT the first paint.** During SSR the header renders before
- * `TypingSession`'s effect has run, so the slot would be empty exactly when the mode axis and
- * the page number must already be right (spec #24 §10). The load supplies those opening values
- * as `page.data.typingHeader`, and this store overlays live ones from mount on — see
- * `AppHeader.svelte`, which reads the seed and the store in that order.
+ * `TypingSession`'s effect has run, so the slot would be empty on the server. The load supplies
+ * the opening values as `page.data.typingHeader`, and this store overlays live ones from mount
+ * on — see `AppHeader.svelte`, which reads the seed and the store in that order.
+ *
+ * **Spec #50 narrowed this to identity.** It used to carry the page number, the percentage, live
+ * metrics, the mode axis and the toggle's callback, because the whole of the typing screen's
+ * chrome lived up here. All of that moved into `TypingSession`'s own bottom row, and three things
+ * fell out with it:
+ *
+ * - `onToggleZen: (() => void) | null` is gone. The toggle lives beside the function that drives
+ *   it now, so there is no longer a state where the control is painted but inert.
+ * - Spec #24 §10's "no metrics, not even for one frame" no longer depends on this seed at all.
+ *   `TypingSession` is server-rendered with the `mode` prop straight from the load, so the bottom
+ *   row paints in the right state on the server by construction.
+ * - The store's writer no longer re-fires on every keystroke to push a percentage upward.
  */
 export interface TypingHeaderView {
 	title: string;
-	author: string;
 	/** `null` for front matter, and for a book with no chapters — both legal (ADR-0017). */
 	chapter: string | null;
-	/** 1-based, matching the page navigator and `?page=N`. */
-	current: number;
-	total: number;
-	pct: number;
-	/** Live metrics, refreshed at word boundaries only; `null` until the first boundary. */
-	live: MetricsSnapshot | null;
-	zen: boolean;
-	/** `null` before hydration — the seed renders the toggle, the session makes it work. */
-	onToggleZen: (() => void) | null;
+	/** The book's slug — the title renders as a link back to `/books/[slug]`. */
+	slug: string;
 }
 
 const KEY = Symbol('typing-header');

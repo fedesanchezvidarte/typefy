@@ -79,6 +79,30 @@ export function restoreChunk(text: string, prefixLength: number): ChunkEngineSta
 	};
 }
 
+/**
+ * A **settled** page (spec #50 §6): one built by `restoreChunk` at full length because the user
+ * had already completed it, and not touched since.
+ *
+ * Derived rather than flagged, so it cannot drift out of step with the state it describes. The
+ * two conditions are both load-bearing and neither is sufficient alone:
+ *
+ * - `cursor` at the end alone is ALSO true of a page typed right to the end with errors still
+ *   outstanding, where backspace is the only recovery and must keep working;
+ * - an empty log alone is true of every freshly-opened page, where the cursor is at 0.
+ *
+ * Together they describe exactly "fully rendered as typed, with no keystrokes behind it".
+ *
+ * **Measured against `display.length`, never `toCharacters(state.text).length`.** The two are
+ * always equal — `display` is built by mapping over the characters — but one is a field read and
+ * the other splits the whole ~1600-character page into a fresh array. This predicate sits on the
+ * hot path: `applySessionEvent` consults it on EVERY keystroke, so the naive version added a
+ * per-stroke O(n) allocation on top of the one `applyChar` already makes, and fast typing began
+ * dropping characters.
+ */
+export function isSettledChunk(state: ChunkEngineState): boolean {
+	return state.log.length === 0 && state.cursor >= state.display.length;
+}
+
 /** Derived from the log: a position is ever-incorrect iff any char stroke missed it. */
 function wasEverIncorrect(log: readonly Keystroke[], position: number): boolean {
 	return log.some((k) => k.kind === 'char' && k.position === position && k.judgment === 'miss');

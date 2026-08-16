@@ -1,5 +1,6 @@
 import { expect, test } from './fixtures/auth';
 import { isLocalStack, readSeededBook, SUPABASE_URL } from './support/supabase';
+import { expectPageIs } from './support/typing-screen';
 import { gridCard } from './support/library';
 // Fixture contents are imported (not duplicated) so the tests type the exact strings the
 // app renders and address the exact slug the seed holds. The fixture id IS the `books.slug`.
@@ -23,7 +24,7 @@ const BOOK_SLUG = prideAndPrejudiceExcerpt.id;
 const OTHER_BOOK_SLUG = donQuijoteExcerpt.id;
 const CHUNK_0 = prideAndPrejudiceExcerpt.chunks[0].content;
 
-/** The single meta line under the sheet: "Page N of M · pct% · wpm · accuracy". */
+/** The figures line under the page card: "[wpm · accuracy ·] pct%" (spec #50). */
 const META = 'page-meta';
 
 test.describe('resume', () => {
@@ -38,7 +39,7 @@ test.describe('resume', () => {
 
 		await page.goto(`/type/${BOOK_SLUG}`);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
-		await expect(page.getByTestId(META)).toContainText(`Page 4 of ${book.chunkCount}`);
+		await expectPageIs(page, `4`, `${book.chunkCount}`);
 	});
 
 	test('with a gap — passages 1 and 3 complete, 2 not — the book opens at passage 2', async ({
@@ -51,7 +52,7 @@ test.describe('resume', () => {
 
 		await page.goto(`/type/${BOOK_SLUG}`);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
-		await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
+		await expectPageIs(page, `2`, `${book.chunkCount}`);
 	});
 
 	test('a fully completed book opens at passage 1, showing 100%', async ({ page, authUser }) => {
@@ -65,7 +66,7 @@ test.describe('resume', () => {
 		// and the percentage is what tells the user the book is done.
 		await page.goto(`/type/${BOOK_SLUG}`);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
-		await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount}`);
+		await expectPageIs(page, `1`, `${book.chunkCount}`);
 		await expect(page.getByTestId(META)).toContainText('100%');
 	});
 
@@ -74,12 +75,11 @@ test.describe('resume', () => {
 		authUser
 	}) => {
 		const book = await authUser.completePassages(BOOK_SLUG, [0, 1, 2]);
-		const computed = `Page 4 of ${book.chunkCount}`;
 
-		// 1-based, matching what the meta line displays, and it wins even though passage 3
+		// 1-based, matching what the navigator displays, and it wins even though passage 3
 		// is already complete.
 		await page.goto(`/type/${BOOK_SLUG}?passage=3`);
-		await expect(page.getByTestId(META)).toContainText(`Page 3 of ${book.chunkCount}`);
+		await expectPageIs(page, `3`, `${book.chunkCount}`);
 
 		// Zero, out of range, non-numeric, and empty: each falls back to the computed index
 		// and renders the book normally. Never a 400, never a 404 — a stale or hand-edited
@@ -90,9 +90,10 @@ test.describe('resume', () => {
 				page.getByTestId('typing-surface'),
 				`?passage=${value} should still render the book`
 			).toBeVisible();
-			await expect(page.getByTestId(META), `?passage=${value} should fall back`).toContainText(
-				computed
-			);
+			await expect(
+				page.getByTestId('page-nav-jump'),
+				`?passage=${value} should fall back to the computed index`
+			).toHaveValue('4');
 		}
 	});
 });
@@ -127,7 +128,7 @@ test.describe('display — book-lifetime completion', () => {
 		// The meta line shows the SAME figure, not how far into today's session the user is:
 		// resuming at passage 4 of 6 shows the persisted 50%, never 0%.
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId(META)).toContainText(`Page 4 of ${book.chunkCount}`);
+		await expectPageIs(page, `4`, `${book.chunkCount}`);
 		await expect(page.getByTestId(META)).toContainText('50%');
 	});
 });
@@ -149,14 +150,14 @@ test.describe('the write path, end to end', () => {
 		const expectedPercent = Math.round((100 * 1) / book.chunkCount);
 
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId(META)).toContainText(`Page 1 of ${book.chunkCount}`);
+		await expectPageIs(page, `1`, `${book.chunkCount}`);
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 
 		await page.keyboard.type(CHUNK_0, { delay: 0 });
 
 		// The session advances immediately, without waiting for the insert, and the
 		// percentage advances optimistically with it.
-		await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
+		await expectPageIs(page, `2`, `${book.chunkCount}`);
 		await expect(page.getByTestId(META)).toContainText(`${expectedPercent}%`);
 
 		// The insert is fire-and-forget, so the row is polled for rather than assumed
@@ -210,11 +211,105 @@ test.describe('the write path, end to end', () => {
 		// The loop closes: come back and the book opens where the typing left off, with the
 		// persisted percentage — nothing here depends on the in-memory session any more.
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId(META)).toContainText(`Page 2 of ${book.chunkCount}`);
+		await expectPageIs(page, `2`, `${book.chunkCount}`);
 		await expect(page.getByTestId(META)).toContainText(`${expectedPercent}%`);
 		await page.goto('/type');
 		// BOOK_SLUG now has progress, so it also renders in continue-reading — scope through
 		// the grid container to avoid the strict-mode collision (spec #19 §5/§6).
 		await expect(gridCard(page, BOOK_SLUG)).toContainText(`${expectedPercent}%`);
+	});
+});
+
+/**
+ * Settled pages, end to end (spec #50 §6/§7).
+ *
+ * The engine suite proves the reducer settles on every arrival, and the component suite proves
+ * the surface renders it. This proves the thing only a real browser can: that the page a user
+ * genuinely completed on a previous visit — persisted in `chunk_progress`, read back through the
+ * load — comes back settled, and that reopening it is per-visit and survives no reload.
+ */
+test.describe('completed pages come back settled', () => {
+	test.skip(
+		!isLocalStack,
+		`refusing to create throwaway users against a non-local Supabase (${SUPABASE_URL})`
+	);
+
+	test('a page completed on a previous visit reads as typed, refuses keystrokes, and reopens', async ({
+		page,
+		authUser
+	}) => {
+		const book = await authUser.completePassages(BOOK_SLUG, [0, 1, 2]);
+
+		// `?page=1` overrides resume, which would otherwise open at the first INCOMPLETE page.
+		await page.goto(`/type/${BOOK_SLUG}?page=1`);
+		// Hydration, before anything is clicked: `Type again` below is inert until the session
+		// is live, and a click that lands early does nothing at all.
+		await expect(page.getByTestId('typing-input')).toBeFocused();
+		await expectPageIs(page, 1, book.chunkCount);
+		await expect(page.getByTestId('page-completed')).toBeVisible();
+
+		// Every character reads as typed, and there is no caret to type at.
+		const chars = page.locator('[data-testid="typing-surface"] .char[data-state]');
+		await expect(chars.first()).toHaveAttribute('data-state', 'correct');
+		await expect(page.locator('[data-testid="typing-surface"] .caret')).toHaveCount(0);
+
+		// Keystrokes do nothing — backspace included, which is the one that could otherwise walk
+		// back through text this visit never typed.
+		await expect(page.getByTestId('typing-input')).toBeFocused();
+		await page.keyboard.type('zzz', { delay: 0 });
+		await page.keyboard.press('Backspace');
+		await expect(chars.first()).toHaveAttribute('data-state', 'correct');
+		await expectPageIs(page, 1, book.chunkCount);
+
+		// A settled page fabricates no WPM: it looks fully typed and measured nothing.
+		await expect(page.getByTestId(META)).toContainText('— wpm');
+
+		// `Type again` reopens it for a fresh traversal, and hands focus back.
+		await page.getByTestId('page-retype').click();
+		await expect(chars.first()).toHaveAttribute('data-state', 'pending');
+		await expect(page.getByTestId('typing-input')).toBeFocused();
+		// The mark stays: it states history, not live status.
+		await expect(page.getByTestId('page-completed')).toBeVisible();
+
+		await page.keyboard.type(CHUNK_0.slice(0, 5), { delay: 0 });
+		await expect(chars.first()).toHaveAttribute('data-state', 'correct');
+
+		// Reopening is PER-VISIT. Nothing un-completes a page, so a reload settles it again.
+		await page.reload();
+		await expect(page.getByTestId('page-completed')).toBeVisible();
+		await expect(page.getByTestId('page-retype')).toBeVisible();
+	});
+
+	test('an uncompleted page carries no mark', async ({ page, authUser }) => {
+		const book = await authUser.completePassages(BOOK_SLUG, [0]);
+
+		await page.goto(`/type/${BOOK_SLUG}?page=2`);
+		// Hydration first: asserting the ABSENCE of the mark is exactly the assertion that passes
+		// vacuously against a half-rendered page, so it must wait for a session that exists.
+		await expect(page.getByTestId('typing-input')).toBeFocused();
+		await expectPageIs(page, 2, book.chunkCount);
+		await expect(page.getByTestId('typing-surface')).toBeVisible();
+		await expect(page.getByTestId('page-completed')).toHaveCount(0);
+	});
+
+	test('jumping back to a completed page settles it without a navigation', async ({
+		page,
+		authUser
+	}) => {
+		const book = await authUser.completePassages(BOOK_SLUG, [0]);
+
+		await page.goto(`/type/${BOOK_SLUG}?page=2`);
+		// The hydration gate, and it is load-bearing: the navigator's buttons are inert until the
+		// surface has focused its own input on mount, so a click before that silently does
+		// nothing and the session never moves. (Same wait, same reason, as the navigator specs in
+		// `page-model.e2e.ts`.)
+		await expect(page.getByTestId('typing-input')).toBeFocused();
+		await expectPageIs(page, 2, book.chunkCount);
+		await expect(page.getByTestId('page-completed')).toHaveCount(0);
+
+		await page.getByTestId('page-nav-previous').click();
+
+		await expectPageIs(page, 1, book.chunkCount);
+		await expect(page.getByTestId('page-completed')).toBeVisible();
 	});
 });

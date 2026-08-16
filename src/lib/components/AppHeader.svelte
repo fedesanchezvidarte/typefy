@@ -33,22 +33,14 @@
 	 *    what makes this slot render there and nowhere else, with no route matching here.
 	 * 2. The context store — live values, from `TypingSession`'s effect, once hydrated.
 	 *
-	 * The seed comes first in time and the store wins once it exists. Both carry the same
-	 * opening values, so nothing visibly changes at the swap — which is the whole point:
-	 * mode's "no metrics, not even for one frame" rule (spec #24 §10) is a promise about this
-	 * line, and it now paints from the server exactly as it did when it lived under the sheet.
+	 * The seed comes first in time and the store wins once it exists. Both carry the same opening
+	 * values, so nothing visibly changes at the swap. Since spec #50 both carry the same SHAPE
+	 * too — `{ title, chapter, slug }` — so the seed no longer has to be widened with nulls to
+	 * stand in for a view it could not fully supply.
 	 */
 	const store = useTypingHeader();
 	const seed = $derived(page.data.typingHeader as TypingHeaderSeed | undefined);
-	const typingView = $derived.by<TypingHeaderView | null>(() => {
-		if (store?.view) {
-			return store.view;
-		}
-		if (!seed) {
-			return null;
-		}
-		return { ...seed, live: null, onToggleZen: null };
-	});
+	const typingView = $derived.by<TypingHeaderView | null>(() => store?.view ?? seed ?? null);
 </script>
 
 <!-- Sticky, blurred over the page background (spec #9). Phase 5a (spec #30 §2) narrows the

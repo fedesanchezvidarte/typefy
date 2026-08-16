@@ -7,6 +7,7 @@ import { donQuijoteExcerpt } from '../src/lib/fixtures/es';
 import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
 import { fixtureTexts } from '../src/lib/fixtures/index';
 import { openBookFromCard, startTypingByKeyboard } from './support/library';
+import { expectPageIs } from './support/typing-screen';
 
 const EN_ID = prideAndPrejudiceExcerpt.id;
 const ES_ID = donQuijoteExcerpt.id;
@@ -19,7 +20,7 @@ function chars(page: Page) {
 	return page.locator('[data-testid="typing-surface"] .char');
 }
 
-/** The single meta line under the sheet: "Page N of M · pct% [· wpm · accuracy]". */
+/** The figures line under the page card: "[wpm · accuracy ·] pct%" (spec #50). */
 function meta(page: Page) {
 	return page.getByTestId('page-meta');
 }
@@ -67,7 +68,7 @@ test.describe('library grid', () => {
 
 		await pickText(page, EN_ID);
 		await expect(page.getByTestId('typing-surface')).toBeVisible();
-		await expect(meta(page)).toContainText('Page 1 of 6');
+		await expectPageIs(page, `1`, `6`);
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 	});
 
@@ -78,7 +79,7 @@ test.describe('library grid', () => {
 	 */
 	test('the short book opens and reports its full length', async ({ page }) => {
 		await pickText(page, SHORT_ID);
-		await expect(meta(page)).toContainText(`Page 1 of ${tortoiseAndHare.chunkCount}`);
+		await expectPageIs(page, `1`, `${tortoiseAndHare.chunkCount}`);
 	});
 
 	test('cards are reachable keyboard-only (Tab, then Enter starts typing)', async ({ page }) => {
@@ -206,16 +207,19 @@ test.describe('the meta line', () => {
 		await expect(meta(page)).not.toContainText('100% accuracy');
 	});
 
-	test('Zen mode subtracts the metrics from the same line and Exit Zen restores them', async ({
+	test('Zen subtracts the metrics from the figures line and toggling back restores them', async ({
 		page
 	}) => {
 		await pickText(page, EN_ID);
 		await expect(meta(page)).toContainText('wpm');
 
 		await page.getByTestId('zen-toggle').click();
-		await expect(meta(page)).toContainText('Page 1 of 6');
+		await expect(page.getByTestId('zen-toggle')).toHaveAttribute('aria-pressed', 'true');
+		await expectPageIs(page, `1`, `6`);
+		// The percentage stays: Zen removes MEASUREMENT, not position (spec #50 §3).
 		await expect(meta(page)).not.toContainText('wpm');
 		await expect(meta(page)).not.toContainText('accuracy');
+		await expect(meta(page)).toContainText('%');
 
 		// Toggling chrome never strands focus — typing continues immediately.
 		await expect(page.getByTestId('typing-input')).toBeFocused();
@@ -223,7 +227,22 @@ test.describe('the meta line', () => {
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
 
 		await page.getByTestId('zen-toggle').click();
-		await expect(meta(page)).toContainText('wpm');
+		// Back in Normal the figures return, but as `—`: the reading from before the Zen stretch
+		// was dropped on the way in, because that stretch contributed nothing to it (spec #50 §3).
+		await expect(meta(page)).toContainText('— wpm');
+	});
+
+	test('the Zen toggle keeps one accessible name in both states', async ({ page }) => {
+		await pickText(page, EN_ID);
+		const toggle = page.getByTestId('zen-toggle');
+
+		// A toggle button names the THING, not the next action — `aria-pressed` carries the
+		// state. The old pair renamed the control under the cursor on every click.
+		await expect(toggle).toHaveAccessibleName('Zen');
+		await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+		await toggle.click();
+		await expect(toggle).toHaveAccessibleName('Zen');
+		await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 	});
 });
 
@@ -244,11 +263,11 @@ test.describe('chunk completion', () => {
 		await type(page, EN_CHUNK_0.slice(errorIndex + 1));
 
 		// Every position is judged but one is incorrect: the passage must not advance.
-		await expect(meta(page)).toContainText('Page 1 of 6');
+		await expectPageIs(page, `1`, `6`);
 
 		// Typing past the end is a no-op: the cursor stays parked on the end sentinel.
 		await type(page, 'z');
-		await expect(meta(page)).toContainText('Page 1 of 6');
+		await expectPageIs(page, `1`, `6`);
 		await expect(page.locator('[data-testid="typing-surface"] .chunk-end')).toHaveClass(/caret/);
 
 		// Backspace to the error, then retype the last word: completion is
@@ -258,7 +277,7 @@ test.describe('chunk completion', () => {
 		}
 		await expect(chars(page).nth(errorIndex)).toHaveAttribute('data-state', 'pending');
 		await type(page, lastWord);
-		await expect(meta(page)).toContainText('Page 2 of 6');
+		await expectPageIs(page, `2`, `6`);
 	});
 });
 
@@ -284,7 +303,7 @@ test.describe('restarting a page is gone (spec #45)', () => {
 		// backspacing, like any other text.
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
 		await expect(meta(page)).toContainText(/\d+ wpm/);
-		await expect(meta(page)).toContainText('Page 1 of 6');
+		await expectPageIs(page, `1`, `6`);
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 
 		await type(page, 'a'); // and typing carries straight on from where it stopped
@@ -363,7 +382,7 @@ test.describe('full session (ES text, 5 chunks)', () => {
 		// Default filter on '/type' resolves to 'en'; the ES fixture needs an explicit opt-in.
 		await pickText(page, ES_ID, '/type?lang=all');
 		for (const [index, chunk] of donQuijoteExcerpt.chunks.entries()) {
-			await expect(meta(page)).toContainText(`Page ${index + 1} of 5`);
+			await expectPageIs(page, `${index + 1}`, `5`);
 			await type(page, chunk.content);
 		}
 
@@ -398,8 +417,13 @@ test.describe('UI locale vs content language', () => {
 		// would hide the EN book — so the EN language is picked explicitly. That override is
 		// itself the point of this test: content language and UI locale stay independent.
 		await pickText(page, EN_ID, '/es/type?lang=en');
-		// Spanish UI chrome around English content: locale and text are independent.
-		await expect(meta(page)).toContainText('Página 1 de 6');
+		// Spanish UI chrome around English content: locale and text are independent. Read off
+		// both halves of the chrome the page number used to carry alone — the navigator's total
+		// ("de 6", not "of 6") and the figures line's units ("ppm", not "wpm").
+		await expectPageIs(page, 1);
+		await expect(page.getByTestId('page-nav-total')).toContainText('de 6');
+		await expect(meta(page)).toContainText('ppm');
+		await expect(meta(page)).toContainText('de precisión');
 		await type(page, 'It is');
 		await expect(chars(page).nth(0)).toHaveAttribute('data-state', 'correct');
 		await expect(chars(page).nth(4)).toHaveAttribute('data-state', 'correct');

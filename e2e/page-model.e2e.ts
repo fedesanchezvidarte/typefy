@@ -10,6 +10,7 @@ import {
 	type AnyClient
 } from './support/supabase';
 import { arrangeProbeBook, retireProbeBook, type ProbeBook } from './support/probe-books';
+import { expectPageIs } from './support/typing-screen';
 import { WINDOW_SIZE } from '../src/lib/reading/window';
 import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
 import { PALETTE_IDS } from '../src/lib/theme/palettes';
@@ -84,10 +85,6 @@ test.describe('the page model (spec #32)', () => {
 		await retireProbeBook(service, SLUG);
 	});
 
-	function meta(page: import('@playwright/test').Page) {
-		return page.getByTestId('page-meta');
-	}
-
 	test.describe('Enter as a typed character', () => {
 		test("a completed page's measured_chars includes its newline characters", async ({
 			page,
@@ -112,7 +109,7 @@ test.describe('the page model (spec #32)', () => {
 			await page.goto(`/type/${tortoiseAndHare.id}?page=3`);
 			await expect(page.getByTestId('typing-surface')).toBeVisible();
 			await expect(page.getByTestId('typing-input')).toBeFocused();
-			await expect(meta(page)).toContainText(`Page 3 of ${tortoiseAndHare.chunkCount}`);
+			await expectPageIs(page, `3`, `${tortoiseAndHare.chunkCount}`);
 
 			// Real typing through the OS-level keyboard path: Playwright's `keyboard.type` presses
 			// Enter for an embedded `\n`, which is exactly the desktop path `handleKeydown`'s
@@ -146,21 +143,21 @@ test.describe('the page model (spec #32)', () => {
 			await page.goto(`/type/${book.slug}`);
 			await expect(page.getByTestId('typing-surface')).toBeVisible();
 			await expect(page.getByTestId('typing-input')).toBeFocused();
-			await expect(meta(page)).toContainText(`Page 1 of ${book.chunkCount}`);
+			await expectPageIs(page, `1`, `${book.chunkCount}`);
 
 			await page.getByTestId('page-nav-next').click();
-			await expect(meta(page)).toContainText(`Page 2 of ${book.chunkCount}`);
+			await expectPageIs(page, `2`, `${book.chunkCount}`);
 			await expect(page.getByTestId('typing-surface')).toContainText(book.contents[1]);
 			await expect(page).toHaveURL(/[?&]page=2(&|$)/);
 
 			await page.getByTestId('page-nav-previous').click();
-			await expect(meta(page)).toContainText(`Page 1 of ${book.chunkCount}`);
+			await expectPageIs(page, `1`, `${book.chunkCount}`);
 			await expect(page).toHaveURL(/[?&]page=1(&|$)/);
 
 			const jump = page.getByTestId('page-nav-jump');
 			await jump.fill(String(CHUNK_COUNT));
 			await jump.press('Enter');
-			await expect(meta(page)).toContainText(`Page ${CHUNK_COUNT} of ${book.chunkCount}`);
+			await expectPageIs(page, `${CHUNK_COUNT}`, `${book.chunkCount}`);
 			await expect(page.getByTestId('typing-surface')).toContainText(
 				book.contents[CHUNK_COUNT - 1]
 			);
@@ -174,7 +171,7 @@ test.describe('the page model (spec #32)', () => {
 			for (let i = 0; i < CHUNK_COUNT - 1; i += 1) {
 				await page.getByTestId('page-nav-previous').click();
 			}
-			await expect(meta(page)).toContainText(`Page 1 of ${book.chunkCount}`);
+			await expectPageIs(page, `1`, `${book.chunkCount}`);
 			await expect(page.getByTestId('page-nav-previous')).toBeDisabled();
 		});
 	});
@@ -217,7 +214,7 @@ test.describe('the page model (spec #32)', () => {
 
 			// Page 2 is well inside the first WINDOW_SIZE-chunk window the load already served.
 			await page.getByTestId('page-nav-next').click();
-			await expect(meta(page)).toContainText(`Page 2 of ${book.chunkCount}`);
+			await expectPageIs(page, `2`, `${book.chunkCount}`);
 
 			expect(requests, 'an in-window jump must not ask the chunks endpoint for anything').toEqual(
 				[]
@@ -251,7 +248,7 @@ test.describe('the page model (spec #32)', () => {
 			await jump.fill(String(target));
 			await jump.press('Enter');
 
-			await expect(meta(page)).toContainText(`Page ${target} of ${book.chunkCount}`);
+			await expectPageIs(page, `${target}`, `${book.chunkCount}`);
 			await expect(page.getByTestId('typing-surface')).toContainText(book.contents[target - 1]);
 
 			expect(requests.length, 'an out-of-window jump must fetch the target window').toBeGreaterThan(
@@ -316,7 +313,7 @@ test.describe('the page model (spec #32)', () => {
 			// is the on-screen proof of completion here, and the database row is the proof of
 			// what was actually measured.
 			await page.keyboard.type(rest, { delay: 0 });
-			await expect(meta(page)).toContainText(`Page 2 of ${book.chunkCount}`);
+			await expectPageIs(page, `2`, `${book.chunkCount}`);
 
 			const chunkId = book.chunkIds[0];
 			const attempt = async () => {
@@ -473,8 +470,15 @@ test.describe('the page model (spec #32)', () => {
 			// Disabled at the start edge — never a focus stop, and never announced as actionable.
 			await expect(page.getByTestId('page-nav-previous')).toBeDisabled();
 
-			// Previous is disabled on page 1, so the first Tab from the input lands on the jump
-			// box, a native input skipping disabled controls exactly as it would skip any other.
+			// Spec #50 put the Zen toggle in the bottom row's LEFT column, ahead of the navigator
+			// in DOM order — so it is now the first Tab stop from the input, and the tab order
+			// follows the reading order of the row: toggle, then navigator, then the figures
+			// (which are text and take no focus).
+			await page.keyboard.press('Tab');
+			await expect(page.getByTestId('zen-toggle')).toBeFocused();
+
+			// Previous is disabled on page 1, so the next Tab lands on the jump box, a native
+			// input skipping disabled controls exactly as it would skip any other.
 			await page.keyboard.press('Tab');
 			await expect(page.getByTestId('page-nav-jump')).toBeFocused();
 			await page.keyboard.press('Tab');
@@ -486,16 +490,18 @@ test.describe('the page model (spec #32)', () => {
 			// strand a keyboard-only user" — focus never stays on the button that triggered it,
 			// it lands back on the typing input, which is the actual thing to prove here.
 			await page.keyboard.press('Enter');
-			await expect(page.getByTestId('page-meta')).toContainText(`Page 2 of ${book.chunkCount}`);
+			await expectPageIs(page, `2`, `${book.chunkCount}`);
 			await expect(page.getByTestId('typing-input')).toBeFocused();
 
-			// Now that page 1 is behind it, previous is enabled and is the first stop from the
-			// input again — Tab reaches it directly, and Space activates it exactly as Enter did
-			// the next button.
+			// Now that page 1 is behind it, previous is enabled and is the first navigator stop —
+			// reached on the second Tab, past the Zen toggle. Space activates it exactly as Enter
+			// did the next button.
+			await page.keyboard.press('Tab');
+			await expect(page.getByTestId('zen-toggle')).toBeFocused();
 			await page.keyboard.press('Tab');
 			await expect(page.getByTestId('page-nav-previous')).toBeFocused();
 			await page.keyboard.press(' ');
-			await expect(page.getByTestId('page-meta')).toContainText(`Page 1 of ${book.chunkCount}`);
+			await expectPageIs(page, `1`, `${book.chunkCount}`);
 			// Same "never stranded" guarantee on the way back.
 			await expect(page.getByTestId('typing-input')).toBeFocused();
 		});
@@ -522,7 +528,7 @@ test.describe('the page model (spec #32)', () => {
 
 			// No navigation happened, and the field is readable again as "the current page" —
 			// not left holding the rejected value.
-			await expect(page.getByTestId('page-meta')).toContainText(`Page 1 of ${book.chunkCount}`);
+			await expectPageIs(page, `1`, `${book.chunkCount}`);
 			await expect(jump).toHaveValue('1');
 			expect(await seriousViolations(page), 'axe: after a rejected jump').toEqual([]);
 		});
@@ -549,7 +555,7 @@ test.describe('the page model (spec #32)', () => {
 			await page.keyboard.press('Enter'); // right: the real newline keystroke
 			await expect(chars(page).nth(8)).toHaveAttribute('data-state', 'corrected');
 			await page.keyboard.type('line two', { delay: 0 });
-			await expect(page.getByTestId('page-meta')).toContainText(`Page 2 of ${a11yBook.chunkCount}`);
+			await expectPageIs(page, `2`, `${a11yBook.chunkCount}`);
 			await expect(page.getByTestId('typing-input')).toBeFocused();
 
 			// Tab out to the navigator and back, purely by keyboard, and confirm focus never gets
@@ -559,10 +565,12 @@ test.describe('the page model (spec #32)', () => {
 			// of every navigation — click or keyboard — so focus never lingers on the button that
 			// triggered it; it lands back on the typing input, which is the actual boundary this
 			// test is proving.
-			await page.keyboard.press('Tab'); // previous, now enabled (page 2 of 2), is the first stop
+			await page.keyboard.press('Tab'); // the Zen toggle leads the bottom row (spec #50)
+			await expect(page.getByTestId('zen-toggle')).toBeFocused();
+			await page.keyboard.press('Tab'); // previous, now enabled (page 2 of 2)
 			await expect(page.getByTestId('page-nav-previous')).toBeFocused();
 			await page.keyboard.press('Enter');
-			await expect(page.getByTestId('page-meta')).toContainText(`Page 1 of ${a11yBook.chunkCount}`);
+			await expectPageIs(page, `1`, `${a11yBook.chunkCount}`);
 			await expect(page.getByTestId('typing-input')).toBeFocused();
 		});
 	});
@@ -589,11 +597,19 @@ test.describe('the page model (spec #32)', () => {
 			const slot = page.getByTestId('typing-header-slot');
 			await expect(slot).toBeVisible();
 			await expect(page.getByTestId('header-book')).toHaveText('Page model probe');
-			await expect(meta(page)).toContainText(`Page 1 of ${book.chunkCount}`);
-			// The whole line lives in the header now — nothing of it is left under the card.
+			await expectPageIs(page, `1`, `${book.chunkCount}`);
+			// Spec #50 sends the figures and the toggle back DOWN, under the card: the header now
+			// carries identity only. Asserted from both directions so a regression either way fails
+			// here — one figures line on the page, and none of it inside the slot.
 			await expect(page.getByTestId('page-meta')).toHaveCount(1);
-			await expect(slot.getByTestId('page-meta')).toHaveCount(1);
+			await expect(slot.getByTestId('page-meta')).toHaveCount(0);
+			await expect(slot.getByTestId('zen-toggle')).toHaveCount(0);
 			await expect(page.getByTestId('zen-toggle')).toHaveAttribute('aria-pressed', 'false');
+			// The title is the way back to the book detail screen.
+			await expect(page.getByTestId('header-book')).toHaveAttribute(
+				'href',
+				new RegExp(`/books/${book.slug}$`)
+			);
 
 			// Page 1 is front matter: no chapter, rather than chapter one.
 			await expect(page.getByTestId('header-chapter')).toHaveCount(0);
@@ -606,7 +622,7 @@ test.describe('the page model (spec #32)', () => {
 			await expect(page.getByTestId('header-chapter')).toHaveText('Probe Chapter One');
 			await page.getByTestId('page-nav-next').click();
 			await expect(page.getByTestId('header-chapter')).toHaveText('Probe Chapter Two');
-			await expect(meta(page)).toContainText(`Page 4 of ${book.chunkCount}`);
+			await expectPageIs(page, `4`, `${book.chunkCount}`);
 
 			// And the typing input still holds focus through all of it.
 			await expect(page.getByTestId('typing-input')).toBeFocused();

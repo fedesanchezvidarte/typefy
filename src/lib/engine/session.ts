@@ -1,6 +1,6 @@
 import type { Chunk, Mode } from '../types.js';
 import type { ChunkEngineState, ChunkEvent, Keystroke, LoadedChunks } from './types.js';
-import { createChunk, applyChunkEvent } from './chunk.js';
+import { createChunk, applyChunkEvent, isSettledChunk, restoreChunk } from './chunk.js';
 import { computeMetrics, type MetricsSnapshot } from './metrics.js';
 
 /**
@@ -142,6 +142,24 @@ export interface SessionState {
 	 * double-discounted.
 	 */
 	readonly seekPending: boolean;
+	/**
+	 * Chunk ids the user has completed **at least once, ever** (spec #50 §6) — the persisted
+	 * `chunk_progress` set, not this session's `results`. A page completed yesterday, or
+	 * completed out of order earlier in this sitting, must read as completed when the session
+	 * arrives at it.
+	 *
+	 * It lives in the reducer rather than in the component for one reason: there are four
+	 * arrival paths into a chunk (`createSession`, `applySeek`, `applyWindowLoaded`, and the
+	 * auto-advance at the completion instant), and every one of them must settle a completed
+	 * page identically. Holding the set outside would mean four call sites remembering to ask,
+	 * and the far-jump path — where the chunk does not exist until a window lands — would have
+	 * to reach back into state the component had already moved past.
+	 *
+	 * It GROWS and never shrinks: nothing un-completes a page. `restart-chunk` reopens a page
+	 * for the current visit without touching this set, which is exactly why a reload settles
+	 * the page again.
+	 */
+	readonly completedIds: ReadonlySet<string>;
 }
 
 export type SessionEvent =
@@ -155,7 +173,17 @@ export type SessionEvent =
 	 * one event. `index` is the ABSOLUTE index to move to; a same-index seek is a documented
 	 * no-op (identity), matching `set-mode` re-asserting the current mode.
 	 */
-	| { type: 'seek'; index: number; timestamp: number };
+	| { type: 'seek'; index: number; timestamp: number }
+	/**
+	 * Completed chunk ids arriving from the progress endpoint (spec #50 §6). Merged, never
+	 * replacing: ids this session added optimistically at a completion instant are not in the
+	 * server's answer yet, and replacing would drop them.
+	 *
+	 * It exists because the progress response for a window lands AFTER the window itself. A
+	 * jump to a far completed page would otherwise resolve its chunk — and decide not to settle
+	 * it — a round trip before anyone knew the page was completed.
+	 */
+	| { type: 'progress-loaded'; chunkIds: readonly string[] };
 
 /**
  * Builds the engine's view of a typeable text from a window of chunks. `chunkCount` is
@@ -167,6 +195,30 @@ export function loadedChunks(chunks: readonly Chunk[], chunkCount: number): Load
 		chunkCount,
 		chunks: new Map(chunks.map((chunk) => [chunk.index, chunk]))
 	};
+}
+
+/**
+ * **The single arrival gate** (spec #50 §6): every path that puts a chunk on screen goes
+ * through here, so a completed page settles identically however the session reached it —
+ * mount, a navigator jump into the loaded window, a jump whose window had to be fetched, or an
+ * ordinary auto-advance into a page finished on an earlier visit.
+ *
+ * A settled page is `restoreChunk` at full length, which is precisely the right semantics and
+ * not a coincidence: **in-page restore** already needed "looks typed, scores nothing". Every
+ * character reads `correct`, `firstAttempts` is all `null`, the log is empty and `startedAt` is
+ * `null` — so a settled page contributes no characters to accuracy and **fabricates no WPM**
+ * for the sitting that produced it.
+ *
+ * `content.length` is UTF-16 length, which for astral characters exceeds the code-point count
+ * `restoreChunk` measures in. Deliberately not corrected here: `restoreChunk` clamps the prefix
+ * into `0..length`, and "too long" clamps to exactly the full page, which is what is wanted.
+ *
+ * `restart-chunk` does NOT come through here — that is the whole of `Type again`.
+ */
+function openChunk(chunk: Chunk, completedIds: ReadonlySet<string>): ChunkEngineState {
+	return completedIds.has(chunk.id)
+		? restoreChunk(chunk.content, chunk.content.length)
+		: createChunk(chunk.content);
 }
 
 /**
@@ -188,7 +240,11 @@ export function loadedChunks(chunks: readonly Chunk[], chunkCount: number): Load
 export function createSession(
 	text: LoadedChunks,
 	startIndex = 0,
-	mode: Mode = 'normal'
+	mode: Mode = 'normal',
+	// DEFAULTED for the same regression reason `mode` is: every pre-existing caller and test
+	// keeps compiling unedited, and an empty set settles nothing, which is exactly the old
+	// behaviour.
+	completedIds: ReadonlySet<string> = new Set()
 ): SessionState {
 	const lastIndex = Math.max(text.chunkCount - 1, 0);
 	const index = Number.isFinite(startIndex)
@@ -198,7 +254,7 @@ export function createSession(
 	return {
 		text,
 		activeIndex: index,
-		activeChunk: chunk ? createChunk(chunk.content) : null,
+		activeChunk: chunk ? openChunk(chunk, completedIds) : null,
 		status: chunk ? 'active' : 'awaiting',
 		results: new Map(),
 		completedLog: [],
@@ -215,7 +271,8 @@ export function createSession(
 		everUnmeasured: mode === 'zen',
 		seekSince: null,
 		seekMs: 0,
-		seekPending: false
+		seekPending: false,
+		completedIds
 	};
 }
 
@@ -312,7 +369,7 @@ function applyWindowLoaded(
 		return {
 			...state,
 			text,
-			activeChunk: createChunk(chunk.content),
+			activeChunk: openChunk(chunk, state.completedIds),
 			status: 'active',
 			awaitingSince: null,
 			awaitingMs: state.awaitingMs + closedWait,
@@ -395,7 +452,7 @@ function applySeek(
 	return {
 		...state,
 		activeIndex: event.index,
-		activeChunk: chunk ? createChunk(chunk.content) : null,
+		activeChunk: chunk ? openChunk(chunk, state.completedIds) : null,
 		status: chunk ? 'active' : 'awaiting',
 		completedLog,
 		// A fresh traversal begins, clean iff the user is in Normal — the same rule
@@ -412,6 +469,51 @@ function applySeek(
 		seekSince: chunk ? now : null,
 		seekPending: chunk === undefined
 	};
+}
+
+/**
+ * Completed ids arrived (spec #50 §6). Two jobs.
+ *
+ * 1. **Merge** them into `completedIds`, so every LATER arrival settles correctly.
+ * 2. **Settle the page already on screen**, retroactively — but only if it is untouched.
+ *
+ * (2) is the whole reason this event exists rather than the component just holding a set. The
+ * progress response for a window lands a round trip after the window itself, so a jump to a far
+ * completed page resolves its chunk BEFORE anyone knows the page was completed. Without the
+ * retroactive settle, a near jump would arrive settled and a far jump would not.
+ *
+ * **Untouched means `cursor === 0` and an empty log** — a page the user has not begun. A page
+ * mid-traversal is never yanked out from under them by a late network response, and a page
+ * already settled has `cursor === length`, so it is left alone rather than rebuilt identically.
+ */
+function applyProgressLoaded(
+	state: SessionState,
+	event: Extract<SessionEvent, { type: 'progress-loaded' }>
+): SessionState {
+	const completedIds = new Set(state.completedIds);
+	let added = false;
+	for (const id of event.chunkIds) {
+		if (!completedIds.has(id)) {
+			completedIds.add(id);
+			added = true;
+		}
+	}
+	if (!added) {
+		// Identity: the overwhelmingly common case, since the same window's progress is merged
+		// on every prefetch. Returning `state` itself keeps every downstream memo intact.
+		return state;
+	}
+
+	const chunk = state.text.chunks.get(state.activeIndex);
+	const untouched =
+		state.status === 'active' &&
+		state.activeChunk !== null &&
+		state.activeChunk.cursor === 0 &&
+		state.activeChunk.log.length === 0;
+	if (!chunk || !untouched || !completedIds.has(chunk.id)) {
+		return { ...state, completedIds };
+	}
+	return { ...state, completedIds, activeChunk: openChunk(chunk, completedIds) };
 }
 
 /**
@@ -464,6 +566,9 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 	if (event.type === 'seek') {
 		return applySeek(state, event);
 	}
+	if (event.type === 'progress-loaded') {
+		return applyProgressLoaded(state, event);
+	}
 	if (event.type === 'restart-session') {
 		// Back to the OPENING index, not to 0: with windows, index 0 is usually not loaded
 		// on a resumed session, so restarting a session opened at passage 900 there would
@@ -472,7 +577,9 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 		//
 		// The CURRENT mode carries over — it is a cookie-backed preference, not session
 		// state — while every accumulator, both chunk fields and `everUnmeasured` reset.
-		return createSession(state.text, state.openingIndex, state.mode);
+		// `completedIds` carries over for the same reason `mode` does: it is a fact about the
+		// user's history with this book, not an accumulator of this session's activity.
+		return createSession(state.text, state.openingIndex, state.mode, state.completedIds);
 	}
 	if (event.type === 'restart-chunk') {
 		const chunk = state.text.chunks.get(state.activeIndex);
@@ -497,6 +604,16 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 		// Typing events after the last chunk, or while waiting for a window, are ignored:
 		// the identical state object is returned, so nothing enters any log, no metric can
 		// move, and nothing is buffered into the chunk that eventually arrives.
+		return state;
+	}
+
+	// A SETTLED page ignores typing until `Type again` reopens it (spec #50 §6).
+	//
+	// `applyChar` is already inert at the end of a page, so this guard exists for BACKSPACE:
+	// without it, backspacing on a completed page would walk the cursor back through text the
+	// user never typed this visit, un-rendering it one character at a time — the exact
+	// accidental destruction the conscious-reopen design exists to prevent.
+	if (isSettledChunk(state.activeChunk)) {
 		return state;
 	}
 
@@ -549,6 +666,15 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 	};
 	const results = new Map(state.results).set(state.activeIndex, result);
 
+	// The page just completed joins the ever-completed set (spec #50 §6), so seeking BACK to it
+	// later this session settles it — without waiting for the insert, and without waiting for a
+	// progress response that will not be re-fetched for a window already loaded. Adding an id
+	// already present is a no-op, which is what makes re-completing a page cost nothing here.
+	const completedChunk = state.text.chunks.get(state.activeIndex);
+	const completedIds = completedChunk
+		? new Set(state.completedIds).add(completedChunk.id)
+		: state.completedIds;
+
 	// Still at the completion instant, before the boundary reset: the open Zen span closes
 	// for the CHUNK and reopens immediately for the SESSION. Chunk totals stay exact, session
 	// totals are unaffected, and nothing is counted twice.
@@ -565,7 +691,8 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 		// above, alongside `unmeasuredSince`, and simply carried through the boundary reset
 		// since it is session-scope already and nothing about completion touches it further.
 		seekSince,
-		seekMs
+		seekMs,
+		completedIds
 	};
 
 	const nextIndex = state.activeIndex + 1;
@@ -601,7 +728,11 @@ export function applySessionEvent(state: SessionState, event: SessionEvent): Ses
 	return {
 		...state,
 		activeIndex: nextIndex,
-		activeChunk: createChunk(nextChunk.content),
+		// Auto-advance is an arrival too (spec #50 §6): typing forward into a page finished on an
+		// earlier visit lands on a SETTLED page, not a fresh one. Deliberate, and the one case
+		// where settling interrupts a typist in flow — the alternative, silently skipping
+		// completed pages, would make the navigator's "Page 5 of 11" disagree with what was shown.
+		activeChunk: openChunk(nextChunk, completedIds),
 		status: 'active',
 		results,
 		completedLog,

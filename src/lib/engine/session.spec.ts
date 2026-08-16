@@ -594,14 +594,19 @@ describe('applySessionEvent — restart semantics', () => {
 		expect(state.text.chunks.size).toBe(2);
 	});
 
-	it('restart-session from a session opened at 0 is identical to a fresh session', () => {
+	/**
+	 * The completed set is the ONE thing a restart carries, for the reason `mode` is the other:
+	 * both are facts about the user rather than accumulators of this session's activity, and
+	 * nothing un-completes a page (spec #50 §6). Every other field resets.
+	 */
+	it('restart-session from a session opened at 0 is a fresh session that remembers what was completed', () => {
 		const text = makeFullText(['abcd', 'ef']);
 		const midSecondChunk = run(createSession(text), [
 			...CHUNK_ONE_EVENTS,
 			{ type: 'char', char: 'e', timestamp: 100_000 }
 		]);
 		expect(applySessionEvent(midSecondChunk, { type: 'restart-session' })).toEqual(
-			createSession(text)
+			createSession(text, 0, 'normal', new Set([text.chunks.get(0)!.id]))
 		);
 	});
 
@@ -1450,5 +1455,165 @@ describe('sessionSummary is all-or-nothing on Zen (spec #24 §11)', () => {
 		expect(summary.overallAccuracy).toBeCloseTo(5 / 6, 5);
 		expect(summary.chunksCompleted).toBe(2);
 		expect(summary.totalActiveMs).toBe(9000);
+	});
+});
+
+/**
+ * Settled pages (spec #50 §6).
+ *
+ * The rule under test is "a completed page settles on EVERY arrival", and the reason it needs
+ * this many tests is that there are four arrival paths — mount, a seek into a loaded chunk, a
+ * window landing for a seek that had to fetch, and the auto-advance at a completion instant —
+ * plus a fifth, retroactive one when the progress response lands after the window it describes.
+ * A rule enforced at three of the five is a rule that behaves differently depending on how far
+ * the user jumped, which is worse than not having it.
+ */
+describe('settled pages', () => {
+	const TEXT = makeFullText(['abcd', 'ef', 'ghij']);
+	const idAt = (index: number) => TEXT.chunks.get(index)!.id;
+
+	/** Every character reads as typed, the caret sits past the end, and nothing was judged. */
+	function expectSettled(state: SessionState, content: string) {
+		const chunk = state.activeChunk!;
+		expect(chunk.display).toEqual(Array.from(content).map(() => 'correct'));
+		expect(chunk.cursor).toBe(Array.from(content).length);
+		expect(chunk.log).toEqual([]);
+		// The whole point: it looks typed and scores nothing.
+		expect(chunk.firstAttempts.every((record) => record === null)).toBe(true);
+		expect(chunk.startedAt).toBeNull();
+	}
+
+	function expectFresh(state: SessionState, content: string) {
+		const chunk = state.activeChunk!;
+		expect(chunk.display).toEqual(Array.from(content).map(() => 'pending'));
+		expect(chunk.cursor).toBe(0);
+	}
+
+	it('settles the opening page on mount', () => {
+		expectSettled(createSession(TEXT, 0, 'normal', new Set([idAt(0)])), 'abcd');
+	});
+
+	it('leaves an uncompleted opening page fresh', () => {
+		expectFresh(createSession(TEXT, 0, 'normal', new Set([idAt(2)])), 'abcd');
+	});
+
+	it('settles on a seek into a loaded chunk', () => {
+		const session = createSession(TEXT, 0, 'normal', new Set([idAt(2)]));
+		expectSettled(applySessionEvent(session, { type: 'seek', index: 2, timestamp: 5000 }), 'ghij');
+	});
+
+	/**
+	 * The far-jump path. The chunk does not exist at the seek instant, so the decision cannot be
+	 * taken there — it has to be taken again when the window lands.
+	 */
+	it('settles when the window for a pending seek arrives', () => {
+		const windowed = makeText({ 0: 'abcd' }, 3);
+		const session = createSession(windowed, 0, 'normal', new Set([idAt(2)]));
+		const seeked = applySessionEvent(session, { type: 'seek', index: 2, timestamp: 5000 });
+		expect(seeked.status).toBe('awaiting');
+		expect(seeked.seekPending).toBe(true);
+		const landed = applySessionEvent(seeked, {
+			type: 'window-loaded',
+			chunks: [chunkAt(2, 'ghij')],
+			chunkCount: 3,
+			timestamp: 6000
+		});
+		expect(landed.status).toBe('active');
+		expectSettled(landed, 'ghij');
+	});
+
+	it('settles on auto-advance into a page completed on an earlier visit', () => {
+		const session = createSession(makeFullText(['ab', 'cd']), 0, 'normal', new Set(['chunk-1']));
+		const advanced = run(session, [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'char', char: 'b', timestamp: 1000 }
+		]);
+		expect(advanced.activeIndex).toBe(1);
+		expectSettled(advanced, 'cd');
+	});
+
+	it('records a page it completes, so seeking back to it settles', () => {
+		const session = run(createSession(makeFullText(['ab', 'cd'])), [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'char', char: 'b', timestamp: 1000 }
+		]);
+		expect(session.completedIds.has('chunk-0')).toBe(true);
+		expectSettled(applySessionEvent(session, { type: 'seek', index: 0, timestamp: 2000 }), 'ab');
+	});
+
+	it('ignores char and backspace on a settled page', () => {
+		const settled = createSession(TEXT, 0, 'normal', new Set([idAt(0)]));
+		// Backspace is the one that matters: `applyChar` is already inert past the end, but
+		// without the settled guard a backspace would walk back through untyped text.
+		expect(applySessionEvent(settled, { type: 'backspace', timestamp: 1000 })).toBe(settled);
+		expect(applySessionEvent(settled, { type: 'char', char: 'a', timestamp: 1000 })).toBe(settled);
+	});
+
+	it('reopens a settled page with restart-chunk, without un-completing it', () => {
+		const settled = createSession(TEXT, 0, 'normal', new Set([idAt(0)]));
+		const reopened = applySessionEvent(settled, { type: 'restart-chunk' });
+		expectFresh(reopened, 'abcd');
+		// `Type again` is per-visit: the historical fact survives, which is what makes a reload
+		// settle the page again.
+		expect(reopened.completedIds.has(idAt(0))).toBe(true);
+	});
+
+	it('a reopened page can be typed and completed again', () => {
+		const reopened = applySessionEvent(
+			createSession(makeFullText(['ab', 'cd']), 0, 'normal', new Set(['chunk-0'])),
+			{ type: 'restart-chunk' }
+		);
+		const done = run(reopened, [
+			{ type: 'char', char: 'a', timestamp: 0 },
+			{ type: 'char', char: 'b', timestamp: 1000 }
+		]);
+		expect(done.results.get(0)).toBeDefined();
+		expect(done.activeIndex).toBe(1);
+	});
+
+	it('a settled page contributes no characters and no time to cumulative metrics', () => {
+		const settled = createSession(TEXT, 0, 'normal', new Set([idAt(0)]));
+		const metrics = runningMetrics(settled, 60_000);
+		expect(metrics.grossWpm).toBe(0);
+		expect(runningLog(settled)).toEqual([]);
+	});
+
+	describe('progress-loaded', () => {
+		it('settles the page on screen when its completion arrives late', () => {
+			const session = createSession(TEXT, 0);
+			expectFresh(session, 'abcd');
+			const merged = applySessionEvent(session, {
+				type: 'progress-loaded',
+				chunkIds: [idAt(0)]
+			});
+			expectSettled(merged, 'abcd');
+		});
+
+		it('does not disturb a page the user has already started typing', () => {
+			const typing = applySessionEvent(createSession(TEXT, 0), {
+				type: 'char',
+				char: 'a',
+				timestamp: 0
+			});
+			const merged = applySessionEvent(typing, { type: 'progress-loaded', chunkIds: [idAt(0)] });
+			expect(merged.activeChunk).toBe(typing.activeChunk);
+			expect(merged.completedIds.has(idAt(0))).toBe(true);
+		});
+
+		it('merges rather than replaces, keeping ids added optimistically this session', () => {
+			const session = run(createSession(makeFullText(['ab', 'cd'])), [
+				{ type: 'char', char: 'a', timestamp: 0 },
+				{ type: 'char', char: 'b', timestamp: 1000 }
+			]);
+			const merged = applySessionEvent(session, { type: 'progress-loaded', chunkIds: ['chunk-9'] });
+			expect([...merged.completedIds].sort()).toEqual(['chunk-0', 'chunk-9']);
+		});
+
+		it('is the identity when every id is already known', () => {
+			const session = createSession(TEXT, 0, 'normal', new Set([idAt(0)]));
+			expect(applySessionEvent(session, { type: 'progress-loaded', chunkIds: [idAt(0)] })).toBe(
+				session
+			);
+		});
 	});
 });

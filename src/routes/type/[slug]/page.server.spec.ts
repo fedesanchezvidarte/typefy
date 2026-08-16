@@ -617,14 +617,13 @@ describe('/type/[slug] load — chapters and the header seed (spec #45)', () => 
 
 		const data = await runLoad(event);
 
+		// Identity only since spec #50 — the page number, the percentage and the mode axis moved
+		// into `TypingSession`'s own bottom row, which is server-rendered with `mode` from this
+		// same load. An exact-shape assertion, so a field creeping back fails here.
 		expect(data.typingHeader).toEqual({
 			title: 'Pride and Prejudice',
-			author: 'Jane Austen',
 			chapter: 'Chapter Two',
-			current: 4,
-			total: DEFAULT_CHUNK_COUNT,
-			pct: 60, // guest: the opening index IS the figure — 3 of 5
-			zen: false
+			slug: 'pride-and-prejudice'
 		});
 	});
 
@@ -640,23 +639,23 @@ describe('/type/[slug] load — chapters and the header seed (spec #45)', () => 
 		expect((await runLoad(structureless)).typingHeader.chapter).toBeNull();
 	});
 
-	it('seeds the signed-in percentage from the rollup, clamped to 100%', async () => {
-		const { event } = loadEvent({
-			user: USER,
-			chapters,
-			bookProgress: { data: { chunks_completed: 99 }, error: null }
-		});
+	/**
+	 * The seed used to carry `pct` and `zen` so the header's figures and toggle painted correctly
+	 * on the server. Spec #50 moved both under the page card, into a component this same load
+	 * server-renders with `mode` — so the guarantee is kept by its owner rather than mirrored
+	 * here. What the seed still owes the client is the link target.
+	 */
+	it('seeds the slug, so the header title can link back to the book', async () => {
+		const { event } = loadEvent({ user: null, chapters });
 
-		const data = await runLoad(event);
-
-		expect(data.typingHeader.pct).toBe(100);
+		expect((await runLoad(event)).typingHeader.slug).toBe('pride-and-prejudice');
 	});
 
-	it('seeds zen from the mode cookie, so aria-pressed is right at first paint', async () => {
+	it('still hands the mode straight to the page, which is what renders the axis', async () => {
 		const { event } = loadEvent({ user: null, modeCookie: 'zen' });
-		expect((await runLoad(event)).typingHeader.zen).toBe(true);
+		expect((await runLoad(event)).mode).toBe('zen');
 
 		const { event: normal } = loadEvent({ user: null });
-		expect((await runLoad(normal)).typingHeader.zen).toBe(false);
+		expect((await runLoad(normal)).mode).toBe('normal');
 	});
 });
