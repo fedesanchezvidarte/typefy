@@ -1,9 +1,13 @@
-import type { PageServerLoad } from './$types';
+import type { Actions, PageServerLoad } from './$types';
 import type { ChapterProgress, TypeableTextDetail } from '$lib/types';
-import { error } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import { getLocale } from '$lib/paraglide/runtime';
 import { getBookDetailBySlug } from '$lib/server/books';
-import { getBookCompletionCount, getCompletedChunkIndexes } from '$lib/server/progress';
+import {
+	getBookCompletionCount,
+	getCompletedChunkIndexes,
+	resetBookProgress
+} from '$lib/server/progress';
 import { buildChapterProgress } from '$lib/library/chapter-progress';
 import { resolveSummary } from '$lib/library/summary';
 
@@ -93,3 +97,48 @@ export const load = (async ({ params, locals }): Promise<BookDetailPageData> => 
 		chunksCompleted
 	};
 }) satisfies PageServerLoad;
+
+/**
+ * The progress reset (spec #51) — **the only destructive action in the application**.
+ *
+ * A form action rather than a browser RPC call, and that is a bundle decision as much as a
+ * progressive-enhancement one. The typing screen goes to considerable lengths to keep
+ * `@supabase/*` out of the entry bundle — reached only through one dynamic import, with no
+ * static import permitted in any component — and doing this server-side means the book detail
+ * screen needs none of that machinery: no dynamic import, no `invalidateAll()`, and the
+ * refreshed progress falls out of the action's normal load re-run.
+ *
+ * It also degrades honestly: with JavaScript off, the confirmation's second step is a plain
+ * form submit and the reset still works. Only the local page-state clear (spec §8) needs the
+ * client, which is why it lives in `use:enhance` and not here.
+ *
+ * The slug is resolved to a book id HERE rather than trusted from the form body. A client
+ * that could post an arbitrary `book_id` would still only reach its own rows — the RPC reads
+ * `auth.uid()` internally — but the route should not accept an identifier it can derive, and
+ * the lookup is what makes an unknown or unpublished slug a 404 instead of a silent no-op.
+ */
+export const actions = {
+	reset: async ({ params, locals }) => {
+		const { user } = await locals.safeGetSession();
+		if (!user) {
+			// A guest has no progress to reset, and the control that posts here never renders
+			// signed out. This is the direct-POST path, refused rather than ignored.
+			return fail(401, { reset: 'unauthenticated' });
+		}
+
+		const book = await getBookDetailBySlug(locals.supabase, params.slug);
+		if (!book) {
+			error(404, 'Book not found');
+		}
+
+		// Throws on failure, exactly like the reads: a reset that silently failed would leave
+		// the user looking at a progress bar they just asked to clear.
+		await resetBookProgress(locals.supabase, book.bookId);
+
+		// No redirect: the action returns and SvelteKit re-runs the load, so the bar re-renders
+		// at zero and the control disappears with it. `bookId` rides back for `use:enhance`,
+		// which needs it to clear this book's in-page-restore drafts (spec §8) — the load's
+		// `book.id` is the SLUG, and page-state is keyed by the uuid.
+		return { reset: 'done' as const, bookId: book.bookId };
+	}
+} satisfies Actions;

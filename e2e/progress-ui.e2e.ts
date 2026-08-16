@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures/auth';
 import { isLocalStack, readSeededBook, SUPABASE_URL } from './support/supabase';
 import { expectPageIs } from './support/typing-screen';
@@ -311,5 +312,226 @@ test.describe('completed pages come back settled', () => {
 
 		await expectPageIs(page, 1, book.chunkCount);
 		await expect(page.getByTestId('page-completed')).toBeVisible();
+	});
+});
+
+/**
+ * Resetting a book's progress (spec #51) — the application's only destructive path, end to end.
+ *
+ * What only a real browser and a real database can prove, and therefore what lives here rather
+ * than in Vitest:
+ *
+ * - The RPC actually deletes both rollups and actually keeps `chunk_attempts`. A mocked client
+ *   proves which function was called, never what it did.
+ * - The **reset-aware trigger** fires. An attempt typed before a reset but inserted after it —
+ *   exactly what the attempt buffer replays on reconnect — must land in history without
+ *   re-marking the page. That is a trigger firing on an INSERT, which no unit test can observe.
+ * - RLS refuses a direct client delete on the rollups, which is the guarantee that lets the whole
+ *   feature be a `SECURITY DEFINER` function.
+ * - The flow across two screens: reset here, then the typing screen opens at page 1 with nothing
+ *   settled.
+ */
+test.describe('resetting a book (spec #51)', () => {
+	test.skip(
+		!isLocalStack,
+		`refusing to create throwaway users against a non-local Supabase (${SUPABASE_URL})`
+	);
+
+	const trigger = (page: Page) => page.getByTestId('book-detail-reset');
+	const confirmButton = (page: Page) => page.getByTestId('book-detail-reset-confirm');
+	const cancelButton = (page: Page) => page.getByTestId('book-detail-reset-cancel');
+	const progress = (page: Page) => page.getByTestId('book-detail-progress');
+
+	/**
+	 * Open the confirmation, retrying until it actually opens.
+	 *
+	 * The trigger is server-rendered and its handler only exists after hydration, so a click that
+	 * lands first silently does nothing — and there is no visible difference between "not
+	 * hydrated" and "clicked and ignored". Unlike the typing screen there is no focus signal to
+	 * wait on here (nothing on this route steals focus on mount), so the honest wait is to retry
+	 * the click until the second step appears.
+	 */
+	async function openConfirm(page: Page) {
+		await expect(async () => {
+			await trigger(page).click();
+			await expect(cancelButton(page)).toBeVisible({ timeout: 500 });
+		}).toPass({ timeout: 15_000 });
+	}
+
+	/**
+	 * Confirm, and wait for the reset to LAND.
+	 *
+	 * Deliberately NOT an assertion on the trigger being absent: the trigger is already gone while
+	 * the confirmation is open, so that check passes the instant the prompt appears and lets the
+	 * test race ahead of the in-flight POST — which is exactly how the first version of these
+	 * tests read the database before the reset had happened. The progress line dropping to zero is
+	 * the first thing that is only true once the action has returned and the load has re-run.
+	 */
+	async function confirmReset(page: Page, chunkCount: number) {
+		await confirmButton(page).click();
+		await expect(progress(page)).toContainText(`0 of ${chunkCount} pages`);
+		await expect(trigger(page)).toHaveCount(0);
+	}
+
+	test('two steps clear the progress, and the bar re-renders without a reload', async ({
+		page,
+		authUser
+	}) => {
+		const book = await authUser.completePassages(BOOK_SLUG, [0, 1, 2]);
+
+		await page.goto(`/books/${BOOK_SLUG}`);
+		await expect(progress(page)).toContainText(`3 of ${book.chunkCount} pages`);
+
+		// Step one writes nothing, and focus lands on Cancel rather than on the destructive
+		// control — a stray Enter must not complete the action it just opened.
+		await openConfirm(page);
+		await expect(cancelButton(page)).toBeFocused();
+		await expect(progress(page)).toContainText(`3 of ${book.chunkCount} pages`);
+
+		await confirmButton(page).click();
+
+		// The load re-runs, so the bar drops to zero and the control disappears with it — there is
+		// no longer progress to reset.
+		await expect(progress(page)).toContainText(`0 of ${book.chunkCount} pages`);
+		await expect(trigger(page)).toHaveCount(0);
+	});
+
+	test('Cancel leaves the progress exactly as it was', async ({ page, authUser }) => {
+		const book = await authUser.completePassages(BOOK_SLUG, [0, 1]);
+
+		await page.goto(`/books/${BOOK_SLUG}`);
+		await openConfirm(page);
+		await cancelButton(page).click();
+
+		await expect(trigger(page)).toBeFocused();
+		await expect(progress(page)).toContainText(`2 of ${book.chunkCount} pages`);
+	});
+
+	test('the control is absent for a book with no progress', async ({ page, authUser }) => {
+		await authUser.completePassages(OTHER_BOOK_SLUG, [0]);
+
+		await page.goto(`/books/${BOOK_SLUG}`);
+		await expect(progress(page)).toBeVisible();
+		await expect(trigger(page)).toHaveCount(0);
+	});
+
+	test('the typing history survives, and the rollups do not', async ({ page, authUser }) => {
+		const book = await authUser.completePassages(BOOK_SLUG, [0, 1, 2]);
+
+		await page.goto(`/books/${BOOK_SLUG}`);
+		await openConfirm(page);
+		await confirmReset(page, book.chunkCount);
+
+		// The whole point of the design: every traversal is still on record.
+		const attempts = await authUser.client
+			.from('chunk_attempts')
+			.select('id')
+			.eq('book_id', book.id);
+		expect(attempts.error).toBeNull();
+		expect(attempts.data, 'chunk_attempts is never touched by a reset').toHaveLength(3);
+
+		const rollup = await authUser.client
+			.from('chunk_progress')
+			.select('chunk_id')
+			.eq('book_id', book.id);
+		expect(rollup.data, 'every chunk_progress row for the book is gone').toEqual([]);
+
+		const bookRollup = await authUser.client
+			.from('book_progress')
+			.select('chunks_completed')
+			.eq('book_id', book.id);
+		expect(bookRollup.data, 'the book_progress row is deleted, not zeroed').toEqual([]);
+
+		// And the reset is recorded — the marker that keeps the rollups derivable from history.
+		const resets = await authUser.client
+			.from('progress_resets')
+			.select('id')
+			.eq('book_id', book.id);
+		expect(resets.data).toHaveLength(1);
+	});
+
+	/**
+	 * The reset-aware trigger (spec §4), and the case that would silently undo a reset without it.
+	 */
+	test('an attempt typed before the reset lands in history but does not re-mark the page', async ({
+		page,
+		authUser
+	}) => {
+		const book = await authUser.completePassages(BOOK_SLUG, [0]);
+
+		await page.goto(`/books/${BOOK_SLUG}`);
+		await openConfirm(page);
+		await confirmReset(page, book.chunkCount);
+
+		// Typed an hour ago, arriving now: the attempt buffer's shape exactly.
+		const { error } = await authUser.client.from('chunk_attempts').insert({
+			user_id: authUser.id,
+			chunk_id: book.chunkIds[1],
+			book_id: book.id,
+			completed: true,
+			started_at: new Date(Date.now() - 3_600_000).toISOString(),
+			gross_wpm: 60,
+			accuracy_raw: 0.98,
+			elapsed_ms: 30_000,
+			mode: 'normal',
+			measured_ms: 30_000,
+			measured_chars: 500
+		});
+		expect(error, `the late attempt must still be accepted: ${error?.message}`).toBeNull();
+
+		const attempts = await authUser.client
+			.from('chunk_attempts')
+			.select('id')
+			.eq('book_id', book.id);
+		expect(attempts.data, 'history keeps the late attempt').toHaveLength(2);
+
+		const rollup = await authUser.client
+			.from('chunk_progress')
+			.select('chunk_id')
+			.eq('book_id', book.id);
+		expect(rollup.data, 'but it must not re-mark the page').toEqual([]);
+
+		// The screen agrees: still nothing to reset.
+		await page.reload();
+		await expect(trigger(page)).toHaveCount(0);
+	});
+
+	/**
+	 * The guarantee that lets the rollups stay client-unwritable, and therefore the reason the
+	 * whole operation is a SECURITY DEFINER function rather than a delete grant.
+	 */
+	test('a client cannot delete the rollups directly, nor record a reset itself', async ({
+		authUser
+	}) => {
+		const book = await authUser.completePassages(BOOK_SLUG, [0]);
+
+		await authUser.client.from('chunk_progress').delete().eq('book_id', book.id);
+		const survived = await authUser.client
+			.from('chunk_progress')
+			.select('chunk_id')
+			.eq('book_id', book.id);
+		expect(survived.data, 'RLS must refuse a direct rollup delete').toHaveLength(1);
+
+		const forged = await authUser.client
+			.from('progress_resets')
+			.insert({ user_id: authUser.id, book_id: book.id });
+		expect(forged.error, 'a client must not be able to record a reset itself').not.toBeNull();
+	});
+
+	test('after a reset the book opens at page 1 with nothing settled', async ({
+		page,
+		authUser
+	}) => {
+		const book = await authUser.completePassages(BOOK_SLUG, [0, 1]);
+
+		await page.goto(`/books/${BOOK_SLUG}`);
+		await openConfirm(page);
+		await confirmReset(page, book.chunkCount);
+
+		await page.goto(`/type/${BOOK_SLUG}`);
+		await expect(page.getByTestId('typing-input')).toBeFocused();
+		await expectPageIs(page, 1, book.chunkCount);
+		// Spec #50's settled marker is gone with the progress that produced it.
+		await expect(page.getByTestId('page-completed')).toHaveCount(0);
 	});
 });

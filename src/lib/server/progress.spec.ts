@@ -5,7 +5,8 @@ import {
 	getBookActivity,
 	getBookCompletionCount,
 	getCompletedChunkIds,
-	getCompletedChunkIndexes
+	getCompletedChunkIndexes,
+	resetBookProgress
 } from './progress';
 
 /**
@@ -364,5 +365,59 @@ describe('getCompletedChunkIndexes', () => {
 			{ data: [{ chunks: { index: 4 } }, { chunks: null }, { chunks: { index: 9 } }], error: null }
 		]);
 		expect(await getCompletedChunkIndexes(client, USER, BOOK)).toEqual([4, 9]);
+	});
+});
+
+/**
+ * The reset (spec #51) — the module's only write, and the application's only destructive path.
+ *
+ * `rpc` is its own seam: `resetBookProgress` never touches the query builder, because every
+ * rule lives in the SQL function. What these prove is the contract the route depends on —
+ * which function, which argument, and that a failure is not swallowed.
+ */
+function mockRpc(result: { error: unknown }) {
+	const calls: QueryCall[] = [];
+	const client = {
+		rpc: (...args: unknown[]) => {
+			calls.push({ method: 'rpc', args });
+			return Promise.resolve({ data: null, ...result });
+		},
+		from: () => {
+			throw new Error('resetBookProgress must go through the RPC, never a table write');
+		}
+	};
+	return { client: client as unknown as SupabaseClient<Database>, calls };
+}
+
+describe('resetBookProgress', () => {
+	it('calls the reset RPC with the book id', async () => {
+		const { client, calls } = mockRpc({ error: null });
+
+		await resetBookProgress(client, BOOK);
+
+		expect(calls).toEqual([{ method: 'rpc', args: ['reset_book_progress', { p_book_id: BOOK }] }]);
+	});
+
+	/**
+	 * The guarantee that makes a destructive function safe to expose to `authenticated`: the
+	 * RPC reads `auth.uid()` internally, so there is no user id to pass and therefore no user
+	 * id to get wrong. A signature that accepted one would have to be reviewed for whether it
+	 * could reset somebody else's progress.
+	 */
+	it('sends no user id — the RPC resolves the caller itself', async () => {
+		const { client, calls } = mockRpc({ error: null });
+
+		await resetBookProgress(client, BOOK);
+
+		expect(JSON.stringify(calls)).not.toContain(USER);
+		expect(Object.keys(calls[0].args[1] as object)).toEqual(['p_book_id']);
+	});
+
+	it('throws rather than reporting a reset that did not happen', async () => {
+		const { client } = mockRpc({ error: { message: 'permission denied' } });
+
+		await expect(resetBookProgress(client, BOOK)).rejects.toMatchObject({
+			message: 'permission denied'
+		});
 	});
 });

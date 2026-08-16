@@ -9,6 +9,7 @@
 	import BookCover from '$lib/components/books/BookCover.svelte';
 	import BookFacts from '$lib/components/books/BookFacts.svelte';
 	import ChapterList from '$lib/components/books/ChapterList.svelte';
+	import ResetProgress from '$lib/components/books/ResetProgress.svelte';
 
 	let { data }: { data: PageData } = $props();
 
@@ -85,6 +86,15 @@
 					})} · {percent}%
 				</span>
 			</div>
+			<!--
+				Only when there IS progress to reset (spec #51 §5). The section itself already sets
+				this pattern — absent entirely for a guest, because "a 0% bar reads as a lost
+				streak" — and a destructive control that can only no-op is noise on the screen of
+				every user who has just found a book.
+			-->
+			{#if data.chunksCompleted > 0}
+				<ResetProgress bookId={data.book.bookId} />
+			{/if}
 		</section>
 	{/if}
 
