@@ -23,7 +23,7 @@ const { getLocale } = vi.hoisted(() => ({ getLocale: vi.fn(() => 'en') }));
 vi.mock('$lib/paraglide/runtime', () => ({ getLocale }));
 
 // `vi.mock` is hoisted above this import, so the load sees the stubbed runtime.
-import { load, type BookDetailPageData } from './+page.server';
+import { actions, load, type BookDetailPageData } from './+page.server';
 
 interface QueryCall {
 	method: string;
@@ -371,5 +371,67 @@ describe('/books/[slug] load — a book with no chapter structure', () => {
 		expect(data.chapters).toEqual([]);
 		// Progress still exists for the book as a whole — only its attribution is unavailable.
 		expect(data.book.chapters).toEqual([]);
+	});
+});
+
+/**
+ * The reset action (spec #51 §7) — the application's only destructive route.
+ *
+ * These prove the ROUTE's contract: who is refused, what identifier reaches the RPC, and what
+ * comes back for `use:enhance`. The RPC's own rules (delete both rollups, keep the history,
+ * record the marker) are the migration's, and the reset-aware trigger's are exercised against
+ * a real database in the E2E suite — a mock cannot prove a trigger fired.
+ */
+describe('/books/[slug] reset action', () => {
+	function actionEvent(
+		options: MockOptions & { user?: { id: string } | null; slug?: string } = {}
+	) {
+		const { event, supabase } = loadEvent(options);
+		return { event: event as unknown as Parameters<typeof actions.reset>[0], supabase };
+	}
+
+	it('resets through the RPC and reports the book id back for the local clear', async () => {
+		const { event, supabase } = actionEvent({ user: USER });
+
+		const result = await actions.reset(event);
+
+		expect(supabase.rpcCalls()).toEqual([
+			{ method: 'rpc', args: ['reset_book_progress', { p_book_id: BOOK_UUID }] }
+		]);
+		// `bookId` is the UUID, not the slug: page-state is keyed by the uuid, and `book.id` on
+		// this route's payload is the slug. Getting these the wrong way round would clear nothing
+		// and look like it worked.
+		expect(result).toEqual({ reset: 'done', bookId: BOOK_UUID });
+	});
+
+	/**
+	 * The identifier reaching the RPC is DERIVED from the slug, never taken from the request.
+	 * A posted `book_id` would still only reach the caller's own rows — the function reads
+	 * `auth.uid()` — but a route that accepts an identifier it can derive is one more thing a
+	 * reviewer has to reason about.
+	 */
+	it('derives the book id from the slug and sends no user id', async () => {
+		const { event, supabase } = actionEvent({ user: USER });
+
+		await actions.reset(event);
+
+		expect(supabase.tablesQueried()).toContain('books');
+		expect(JSON.stringify(supabase.rpcCalls())).not.toContain(USER.id);
+	});
+
+	it('refuses a guest with 401 and calls no RPC', async () => {
+		const { event, supabase } = actionEvent({ user: null });
+
+		const result = await actions.reset(event);
+
+		expect(result).toMatchObject({ status: 401 });
+		expect(supabase.rpcCalls()).toEqual([]);
+	});
+
+	it('404s an unknown or unpublished book, and calls no RPC', async () => {
+		const { event, supabase } = actionEvent({ user: USER, book: { data: null, error: null } });
+
+		await expect(actions.reset(event)).rejects.toMatchObject({ status: 404 });
+		expect(supabase.rpcCalls()).toEqual([]);
 	});
 });

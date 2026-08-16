@@ -231,3 +231,28 @@ export function clearPageState(storage: AttemptStorage | null, ref: PageRef, now
 	if (kept.length === entries.length) return;
 	persist(storage, kept);
 }
+
+/**
+ * Forgets every remembered page of one BOOK (spec #51 §8) — the local half of a progress
+ * reset.
+ *
+ * "Start this book over" and "here is the paragraph you were halfway through last week"
+ * contradict each other, and the server-side reset cannot reach `localStorage`. So the acting
+ * browser drops this book's drafts while leaving every other book's alone, which is why this
+ * filters on `bookId` rather than clearing the store.
+ *
+ * **Best-effort and per-browser**, exactly like the attempt buffer: a reset performed on a
+ * phone cannot clear a laptop's drafts. That is tolerable because it is only a draft — the
+ * *counting* is made correct everywhere by the reset-aware rollup trigger, not by this.
+ */
+export function clearBookPageState(
+	storage: AttemptStorage | null,
+	bookId: string,
+	now: number
+): void {
+	if (!storage) return;
+	const entries = load(storage, now);
+	const kept = entries.filter((entry) => entry.bookId !== bookId);
+	if (kept.length === entries.length) return;
+	persist(storage, kept);
+}

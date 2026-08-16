@@ -316,6 +316,35 @@ export type Database = {
 				};
 				Relationships: [];
 			};
+			progress_resets: {
+				Row: {
+					book_id: string;
+					id: string;
+					reset_at: string;
+					user_id: string;
+				};
+				Insert: {
+					book_id: string;
+					id?: string;
+					reset_at?: string;
+					user_id: string;
+				};
+				Update: {
+					book_id?: string;
+					id?: string;
+					reset_at?: string;
+					user_id?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: 'progress_resets_book_id_fkey';
+						columns: ['book_id'];
+						isOneToOne: false;
+						referencedRelation: 'books';
+						referencedColumns: ['id'];
+					}
+				];
+			};
 		};
 		Views: {
 			[_ in never]: never;
@@ -325,6 +354,7 @@ export type Database = {
 				Args: { p_book_id: string };
 				Returns: number;
 			};
+			reset_book_progress: { Args: { p_book_id: string }; Returns: undefined };
 		};
 		Enums: {
 			[_ in never]: never;

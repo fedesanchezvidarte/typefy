@@ -6,6 +6,7 @@ import {
 	PAGE_STATE_CAP,
 	PAGE_STATE_KEY,
 	PAGE_STATE_TTL_MS,
+	clearBookPageState,
 	clearPageState,
 	readPageState,
 	resolvedPrefixLength,
@@ -292,5 +293,40 @@ describe('module purity (lib-patterns tier 1, asserted rather than conventional)
 
 	it('reads no ambient clock — `now` is injected on every operation', () => {
 		expect(code).not.toMatch(/Date\.now\(\)/);
+	});
+});
+/**
+ * The local half of a progress reset (spec #51 §8). The server cannot reach `localStorage`,
+ * so the acting browser drops this book's drafts — and only this book's.
+ */
+describe('clearBookPageState', () => {
+	it('drops every remembered page of one book and keeps the others', () => {
+		const storage = fakeStorage();
+		savePageState(storage, entry({ index: 0, chunkId: 'chunk-0' }), NOW);
+		savePageState(storage, entry({ index: 4, chunkId: 'chunk-4' }), NOW);
+		savePageState(storage, entry({ bookId: 'book-2', index: 2, chunkId: 'chunk-2' }), NOW);
+
+		clearBookPageState(storage, 'book-1', NOW);
+
+		expect(readPageState(storage, query({ index: 0, chunkId: 'chunk-0' }), NOW)).toBeNull();
+		expect(readPageState(storage, query({ index: 4, chunkId: 'chunk-4' }), NOW)).toBeNull();
+		// The other book is untouched — a reset is per book, never a wipe.
+		expect(
+			readPageState(storage, query({ bookId: 'book-2', index: 2, chunkId: 'chunk-2' }), NOW)
+		).not.toBeNull();
+	});
+
+	it('is a no-op for a book with nothing remembered, and does not rewrite the store', () => {
+		const storage = fakeStorage();
+		savePageState(storage, entry({ bookId: 'book-2' }), NOW);
+		const before = storage.stored;
+
+		clearBookPageState(storage, 'book-1', NOW);
+
+		expect(storage.stored).toBe(before);
+	});
+
+	it('tolerates an absent storage binding, like every other writer here', () => {
+		expect(() => clearBookPageState(null, 'book-1', NOW)).not.toThrow();
 	});
 });

@@ -174,3 +174,28 @@ export async function getBookCompletionCount(
 	}
 	return data?.chunks_completed ?? 0;
 }
+
+/**
+ * Reset one book's progress for one user (spec #51) — the **only write** in this module, and
+ * the only destructive path in the application.
+ *
+ * A thin wrapper over the `reset_book_progress` RPC, and thin on purpose: every rule lives in
+ * the SQL function, which deletes both rollup rows for the book and records the reset in
+ * `progress_resets`, all in one transaction. `chunk_attempts` is never touched — the typing
+ * history survives, and the rollups stay derivable from the attempts whose `started_at`
+ * follows the reset.
+ *
+ * **No `userId` parameter, unlike every read above.** The RPC reads `auth.uid()` internally,
+ * so the caller cannot name a user — which is what makes a destructive function safe to expose
+ * to `authenticated`. Passing a user id here would create the illusion that this function
+ * could reset somebody else's progress, and a reviewer would have to check that it does not.
+ *
+ * Errors are thrown, matching the reads: a reset that silently failed would leave the user
+ * looking at a progress bar they just asked to clear.
+ */
+export async function resetBookProgress(client: Client, bookId: string): Promise<void> {
+	const { error } = await client.rpc('reset_book_progress', { p_book_id: bookId });
+	if (error) {
+		throw error;
+	}
+}
