@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { SvelteSet, SvelteURLSearchParams } from 'svelte/reactivity';
+	import { SvelteURLSearchParams } from 'svelte/reactivity';
 	import type { Pathname } from '$app/types';
 	import { beforeNavigate, pushState } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -15,7 +15,7 @@
 		sessionSummary
 	} from '$lib/engine/session';
 	import type { ChunkResult, SessionEvent, SessionState } from '$lib/engine/session';
-	import { restoreChunk } from '$lib/engine/chunk';
+	import { isSettledChunk, restoreChunk } from '$lib/engine/chunk';
 	import type { ChunkEngineState } from '$lib/engine/types';
 	import type { MetricsSnapshot } from '$lib/engine/metrics';
 	import type {
@@ -51,9 +51,11 @@
 	} from '$lib/progress/page-state';
 	import { activeChapter } from '$lib/library/chapter-progress';
 	import { useTypingHeader } from './typing-header.svelte';
+	import PageMeta from './PageMeta.svelte';
 	import PageNavigator from './PageNavigator.svelte';
 	import SessionSummaryView from './SessionSummary.svelte';
 	import TypingSurface from './TypingSurface.svelte';
+	import ZenToggle from './ZenToggle.svelte';
 
 	interface Props {
 		/**
@@ -134,7 +136,10 @@
 			const opened = createSession(
 				loadedChunks(initialWindow.chunks, initialWindow.chunkCount),
 				startIndex,
-				mode
+				mode,
+				// Spec #50 §6: the reducer owns the ever-completed set from here on, so mount is
+				// the one place it is seeded. Every arrival path settles a completed page off it.
+				new Set(completedChunkIds)
 			);
 			// In-page restore (spec #32 §8), mount-time only: a page left half-typed on a
 			// PREVIOUS visit is remembered locally and restored here. It deliberately does
@@ -143,6 +148,15 @@
 			// session is exactly the opening chunk, not every chunk ever visited.
 			const openingChunk = initialWindow.chunks.find((chunk) => chunk.index === startIndex);
 			if (!openingChunk || !opened.activeChunk) {
+				return opened;
+			}
+			// A SETTLED page wins over a saved prefix, and the case is close to unreachable by
+			// construction: page-state is cleared at the completion instant, so a completed page
+			// has no saved prefix to compete with. It is checked anyway because the two stores
+			// have different lifetimes — a hand-edited `localStorage` entry, or a page completed
+			// on another device after this one saved a prefix, would otherwise resurrect a
+			// half-typed page over one the user has finished.
+			if (isSettledChunk(opened.activeChunk)) {
 				return opened;
 			}
 			const saved = readPageState(
@@ -189,26 +203,22 @@
 	);
 
 	/**
-	 * The optimistically-advanced set of chunk ids completed at least once (spec #12 §4).
-	 * Seeded from the load's persisted ids; a completion adds to it immediately, without
-	 * waiting for the insert. Adding an id that is already present is a no-op — that IS the
-	 * "re-completing a passage does not advance the figure" rule. Never rolled back on a
-	 * save failure (spec §6): it self-corrects on the next load.
+	 * The optimistically-advanced set of chunk ids completed at least once (spec #12 §4), read
+	 * off the REDUCER since spec #50 — it used to be a `SvelteSet` held here.
 	 *
-	 * `SvelteSet` is reactive on its own, so no `$state` wrapper. Seeded once via `untrack`
-	 * for the same reason as `session` above: the seed is a starting point, not a binding.
+	 * It moved for the same reason `zen` did: two sources of truth for one fact is one too many.
+	 * The engine has to know which pages are completed anyway, because it settles them on arrival
+	 * (§6), and a second copy in the component would be the copy that drifts. A completion adds to
+	 * it at the completion instant inside the reducer, without waiting for the insert; adding an id
+	 * already present is a no-op, which IS the "re-completing a page does not advance the figure"
+	 * rule. It is never rolled back on a save failure (spec §6) and self-corrects on the next load.
 	 *
-	 * **The consequence, now that a drain can call `invalidateAll()` (spec #15 §4): this set
-	 * is seeded, not live.** A backfill that persists ids while this session is mounted
-	 * re-runs the load, but `untrack` means the fresh `completedChunkIds` is never folded in
-	 * here — only the reactive `chunksCompleted` below updates. `pct` survives that because
-	 * it takes `Math.max(completed.size, chunksCompleted)`, so the NUMBER self-corrects while
-	 * the SET does not. Left as is on purpose: refreshing the set would need it to be
-	 * `$derived`, which would also let a mid-session reload discard ids added optimistically
-	 * since. Nothing else reads the set today — **any future consumer must not assume the set
-	 * and the count agree after a drain.**
+	 * **Still seeded, not live** — the pre-existing caveat, unchanged by the move. A drain that
+	 * persists ids while this session is mounted re-runs the load, but the session was seeded once
+	 * at mount, so only the reactive `chunksCompleted` below updates. `pct` survives that because
+	 * it takes the max of the two.
 	 */
-	const completed = untrack(() => new SvelteSet(completedChunkIds));
+	const completed = $derived(session.completedIds);
 
 	/**
 	 * Count of inserts that came back `{ saved: false }`, for ANY reason — its spec #12
@@ -353,11 +363,15 @@
 	 * The window's completed ids, from the separate private endpoint (spec #18 §4). Called
 	 * only when signed in — a guest issues no progress request at all.
 	 *
-	 * Merged with `add`, **never by replacing the set**: ids this session added optimistically
-	 * at a completion instant are not in the server's answer yet, and replacing would drop
-	 * them. A failure here is cosmetic by design — some completion markers are missing until
-	 * the next load — and must never stall typing, which is why it is not awaited and never
+	 * Merged with `progress-loaded`, **never by replacing the set**: ids this session added
+	 * optimistically at a completion instant are not in the server's answer yet, and replacing
+	 * would drop them. A failure here is cosmetic by design — some completion markers are missing
+	 * until the next load — and must never stall typing, which is why it is not awaited and never
 	 * throws.
+	 *
+	 * Since spec #50 it is no longer only cosmetic: this response is what SETTLES a completed page
+	 * the user jumped to. It lands a round trip after the window it describes, so the reducer
+	 * re-settles the page on screen retroactively — see `applyProgressLoaded`.
 	 */
 	async function mergeWindowProgress(from: number, limit: number) {
 		try {
@@ -368,9 +382,7 @@
 				return;
 			}
 			const body = (await response.json()) as WindowProgressResponse;
-			for (const id of body.completedChunkIds) {
-				completed.add(id);
-			}
+			dispatch({ type: 'progress-loaded', chunkIds: body.completedChunkIds });
 		} catch {
 			// Cosmetic. Nothing to report, nothing to retry — the next load re-seeds the set.
 		}
@@ -651,7 +663,8 @@
 			// than asserted away, because the alternative is a crash on the completion instant.
 			return;
 		}
-		completed.add(chunk.id); // optimistic and unconditional — the Set dedupes
+		// The optimistic `completed.add(chunk.id)` that used to sit here now happens inside the
+		// reducer, at the same instant, for the same reason — see `completed` above.
 
 		// The page-state row for the page that just finished is now stale: the attempt row
 		// supersedes it. Cancel any pending debounced write first, or a write scheduled a
@@ -775,10 +788,8 @@
 			// Gated on the mode as well as the boundary: in Zen nothing is derived at all
 			// (spec #24 §2), so the refresh is simply not taken.
 			//
-			// `liveMetrics` is deliberately NOT nulled on a switch INTO Zen. The last figure is
-			// still the last true reading of this session's measured spans, and the meta line
-			// does not show it in Zen anyway — nulling would only make `—` flash on the return to
-			// Normal, before the next word boundary produces a fresh one.
+			// `liveMetrics` is nulled on a switch INTO Zen — see `toggleZen`, which is where that
+			// now happens. This branch simply never refreshes it while the axis is Zen.
 			if (next.mode === 'normal' && last?.kind === 'char' && last.expected === ' ') {
 				liveMetrics = runningMetrics(next, Date.now()); // word boundary crossed
 			}
@@ -894,19 +905,51 @@
 	});
 
 	/**
-	 * The mode switch (spec #24 §11). Three things, in this order.
+	 * The mode switch (spec #24 §11). Four things, in this order.
 	 *
 	 * 1. **Dispatch.** The reducer opens or closes the unmeasured span at this instant, so
 	 *    measurement stops and resumes exactly where the user asked — mid-word, mid-passage or
 	 *    between passages. It touches nothing else: not the active chunk, not the log, not the
 	 *    status. `session.mode` is then the new value, which is what `zen` reads.
-	 * 2. **Persist**, from `session.mode` rather than from the local expression, so the cookie
+	 * 2. **Drop the live figures** when entering Zen (spec #50 §3).
+	 *
+	 *    This REVERSES the rule that stood here before, and the reversal is the whole point. The
+	 *    old code deliberately kept the last figure so that returning to Normal would not flash
+	 *    `—`. That was the right call when the figures appeared and disappeared instantly. Now
+	 *    they FADE, and a 180ms fade-in draws the eye straight to a number measured before a Zen
+	 *    stretch that contributed nothing to it — the stalest it will ever be, presented with the
+	 *    most ceremony. `—` is the app's existing vocabulary for "not measured yet", and the fade
+	 *    is what makes it read as a fresh start rather than as a glitch. The next word boundary
+	 *    fills it in.
+	 *
+	 *    Only on the way IN. Leaving Zen must not clear a figure the user is about to watch.
+	 * 3. **Persist**, from `session.mode` rather than from the local expression, so the cookie
 	 *    can only ever record what the reducer actually accepted.
-	 * 3. **Focus.** Toggling chrome must not strand a keyboard-only user, exactly as before.
+	 * 4. **Focus.** Toggling chrome must not strand a keyboard-only user, exactly as before.
 	 */
 	function toggleZen() {
 		dispatch({ type: 'set-mode', mode: zen ? 'normal' : 'zen', timestamp: Date.now() });
+		if (session.mode === 'zen') {
+			liveMetrics = null;
+		}
 		document.cookie = modeCookie(session.mode);
+		surface?.focusInput();
+	}
+
+	/**
+	 * `Type again` (spec #50 §7): reopen a settled page for a fresh traversal.
+	 *
+	 * **Non-destructive, and that is deliberate.** `restart-chunk` is pure engine state, so the
+	 * chunk id stays in `completedIds`, `chunk_progress` is untouched, and the check mark keeps
+	 * rendering. The consequence is that reopening is PER-VISIT: reload and the page settles
+	 * again. Nothing in this application un-completes a page — that is the whole of why a
+	 * whole-book reset needs its own spec and its own delete path.
+	 *
+	 * Focus returns to the input, exactly as the Zen toggle does: the user pressed this to start
+	 * typing, so typing must be what happens next.
+	 */
+	function retypePage() {
+		dispatch({ type: 'restart-chunk' });
 		surface?.focusInput();
 	}
 
@@ -927,19 +970,38 @@
 	 */
 	const chapterTitle = $derived(activeChapter(chapters, session.activeIndex)?.title ?? null);
 
+	// ── The settled page (spec #50 §6/§7) ──────────────────────────────────────────────
+	//
+	// Both read off `heldView`, not `session.activeChunk`, for the same reason the sheet does:
+	// `activeChunk` goes null while awaiting, and the marker must not flicker off across a
+	// window boundary the user did not ask for.
+
+	/**
+	 * This page has been completed at least once, ever — which is what the check mark states.
+	 * It stays TRUE while a reopened page is being retyped: the mark reports history, not live
+	 * status, and a page completed yesterday must not read as unfinished while it is retyped.
+	 */
+	const pageCompleted = $derived.by(() => {
+		const index = heldView ? heldView.index : session.activeIndex;
+		const chunk = session.text.chunks.get(index);
+		return chunk ? completed.has(chunk.id) : false;
+	});
+
+	/**
+	 * The page is rendered as typed and ignores keystrokes — the reducer's own predicate, so the
+	 * chrome can never disagree with what typing actually does. False the instant `Type again`
+	 * reopens the page, which is what takes the action away and gives the caret back.
+	 */
+	const pageSettled = $derived(heldView ? isSettledChunk(heldView.chunk) : false);
+
+	/*
+	 * Identity only since spec #50. The figures and the toggle render below, in this component's
+	 * own bottom row, so this effect no longer re-runs on every keystroke to push a percentage
+	 * upward — it fires when the book or the chapter changes, which is once per chapter boundary.
+	 */
 	$effect(() => {
 		if (!headerStore) return;
-		headerStore.view = {
-			title: book.title,
-			author: book.author,
-			chapter: chapterTitle,
-			current: session.activeIndex + 1,
-			total: session.text.chunkCount,
-			pct,
-			live: liveMetrics,
-			zen,
-			onToggleZen: toggleZen
-		};
+		headerStore.view = { title: book.title, chapter: chapterTitle, slug: book.id };
 	});
 
 	/*
@@ -1036,8 +1098,11 @@
 				text={heldView?.chunk.text ?? ''}
 				display={heldView?.chunk.display ?? []}
 				typed={heldView?.chunk.typed ?? []}
-				cursor={session.status === 'active' ? (heldView?.chunk.cursor ?? -1) : -1}
+				cursor={session.status === 'active' && !pageSettled ? (heldView?.chunk.cursor ?? -1) : -1}
 				passageKey={heldView?.index ?? session.activeIndex}
+				completed={pageCompleted}
+				settled={pageSettled}
+				onRetype={retypePage}
 				onChar={(char, timestamp) => dispatch({ type: 'char', char, timestamp })}
 				onBackspace={(timestamp) => dispatch({ type: 'backspace', timestamp })}
 			/>
@@ -1071,11 +1136,33 @@
 				</div>
 			{/if}
 		</div>
-		<PageNavigator
-			current={session.activeIndex + 1}
-			total={session.text.chunkCount}
-			onNavigate={navigateToIndex}
-		/>
+		<!--
+			The bottom row (spec #50 §2). A three-column GRID, not `justify-between`, and the
+			difference is the whole design of it: the figures change width on every word boundary
+			and again on every mode switch, and the navigator is a click target that must not move
+			under the cursor. With `1fr` side columns the centre column is pinned to the card's
+			midpoint no matter what either side is doing, and no magic min-width is needed to hold
+			it there — which matters because the ES strings are longer than the EN ones.
+		-->
+		<div class="bottom-row">
+			<div class="side">
+				<ZenToggle {zen} onToggle={toggleZen} />
+			</div>
+			<PageNavigator
+				current={session.activeIndex + 1}
+				total={session.text.chunkCount}
+				onNavigate={navigateToIndex}
+			/>
+			<div class="side figures">
+				<PageMeta
+					current={session.activeIndex + 1}
+					total={session.text.chunkCount}
+					{pct}
+					live={liveMetrics}
+					{zen}
+				/>
+			</div>
+		</div>
 	{/if}
 </main>
 
@@ -1090,6 +1177,56 @@
 		gap: 10px;
 		padding-top: 14px;
 		padding-bottom: 14px;
+	}
+
+	/*
+	 * The bottom row (spec #50 §2). `1fr auto 1fr` is what pins the navigator to the centre: the
+	 * two side columns are equal whatever they contain, so neither the Zen toggle's label nor the
+	 * figures' changing width can shift it.
+	 */
+	.bottom-row {
+		display: grid;
+		width: 100%;
+		grid-template-columns: 1fr auto 1fr;
+		align-items: center;
+		gap: 8px;
+	}
+
+	.side {
+		display: flex;
+		min-width: 0;
+		align-items: center;
+	}
+
+	/* Right-aligned so the trailing figure — the percentage — is the one anchored to the edge. */
+	.figures {
+		justify-content: flex-end;
+	}
+
+	/*
+	 * Under 640px the tracks swap roles: the two ends size to their content and the NAVIGATOR
+	 * takes the slack, centring itself inside it.
+	 *
+	 * `1fr auto 1fr` is right on a wide screen and wrong on a narrow one, because the two `1fr`
+	 * columns are equal by definition while their contents are not: the Zen toggle collapses to a
+	 * 30px mark here, and the figures still need ~88px. At 375px each column gets 90px and it
+	 * fits; at 320px each gets 62px and the figures overflow their track into the navigator.
+	 *
+	 * Sizing the ends to content gives the figures exactly what they need and hands the rest to
+	 * the navigator, which still reads as centred. The guarantee it trades away is the exact one
+	 * `1fr auto 1fr` exists for — the navigator can now shift by a pixel or two when WPM gains a
+	 * digit — and that is the right trade at a width where the alternative is two controls
+	 * overlapping. Accuracy is already gone here, so the figures change width far less than they
+	 * do on a wide screen.
+	 */
+	@media (max-width: 639px) {
+		.bottom-row {
+			grid-template-columns: auto 1fr auto;
+		}
+
+		.bottom-row :global(nav) {
+			justify-content: center;
+		}
 	}
 
 	/*

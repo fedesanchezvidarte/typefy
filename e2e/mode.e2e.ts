@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { guestTest, type AuthUser } from './fixtures/auth';
 import { isLocalStack } from './support/supabase';
+import { expectPageIs, figures } from './support/typing-screen';
 import { gridCard, openBookFromCard, startTypingByKeyboard } from './support/library';
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
 import { tortoiseAndHare } from '../src/lib/fixtures/tortoise';
@@ -31,7 +32,7 @@ const EN_ID = prideAndPrejudiceExcerpt.id;
 const SHORT_ID = tortoiseAndHare.id;
 const MODE_COOKIE = 'typefy-mode';
 
-/** The single meta line under the sheet: "Page N of M · pct% [· wpm · accuracy]". */
+/** The figures line under the page card: "[wpm · accuracy ·] pct%" (spec #50). */
 function meta(page: Page) {
 	return page.getByTestId('page-meta');
 }
@@ -125,13 +126,14 @@ test.describe('the mode cookie is read server-side', () => {
 
 		// ── first paint: the document the server sent ──────────────────────────────────────
 		const html = await serverHtml(page, `/type/${EN_ID}`);
-		expect(metaFromHtml(html), 'the server-rendered meta line').toBe('Page 1 of 6 · 0%');
+		expect(metaFromHtml(html), 'the server-rendered figures line').toBe('0%');
 		expect(zenToggleTagFromHtml(html)).toContain('aria-pressed="true"');
 
 		// ── hydration: every intermediate state, not just the settled one ──────────────────
 		await recordMetaThroughHydration(page);
 		await openBook(page, EN_ID);
-		await expect(meta(page)).toHaveText('Page 1 of 6 · 0%');
+		await expectPageIs(page, `1`, `6`);
+		await expect(figures(page)).toHaveText(`0%`);
 
 		const texts = await recordedMetaTexts(page);
 		expect(texts.length, 'the observer recorded nothing at all').toBeGreaterThan(0);
@@ -143,7 +145,8 @@ test.describe('the mode cookie is read server-side', () => {
 		// Typing does not resurrect them: in Zen nothing is derived at all, so crossing a
 		// word boundary — the event that flips the figures to numbers in Normal — is quiet.
 		await type(page, 'It is ');
-		await expect(meta(page)).toHaveText('Page 1 of 6 · 0%');
+		await expectPageIs(page, `1`, `6`);
+		await expect(figures(page)).toHaveText(`0%`);
 		expect((await recordedMetaTexts(page)).filter((text) => /wpm|accuracy/.test(text))).toEqual([]);
 	});
 
@@ -192,7 +195,7 @@ test.describe('the choice is durable', () => {
 
 		// A reload arrives already in Zen — the server, not the client, decided that.
 		await page.reload();
-		expect(metaFromHtml(await serverHtml(page, `/type/${EN_ID}`))).toBe('Page 1 of 6 · 0%');
+		expect(metaFromHtml(await serverHtml(page, `/type/${EN_ID}`))).toBe('0%');
 		await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 		await expect(meta(page)).not.toContainText('wpm');
 
@@ -207,7 +210,8 @@ test.describe('the choice is durable', () => {
 		// second book's load re-runs over the fetch and reads the same cookie either way.
 		await openBookFromCard(page, SHORT_ID);
 		await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
-		await expect(meta(page)).toHaveText(`Page 1 of ${tortoiseAndHare.chunkCount} · 0%`);
+		await expectPageIs(page, `1`, `${tortoiseAndHare.chunkCount}`);
+		await expect(figures(page)).toHaveText(`0%`);
 
 		// Leaving Zen is equally durable, and equally server-visible.
 		await zenToggle(page).click();
@@ -313,7 +317,7 @@ test.describe('what a typed passage writes', () => {
 			await openBook(page, SHORT_ID);
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 			await type(page, tortoiseAndHare.chunks[0].content);
-			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
+			await expectPageIs(page, `2`, `${tortoiseAndHare.chunkCount}`);
 
 			const row = await readAttempt(user);
 			expect(row.completed).toBe(true);
@@ -353,7 +357,7 @@ test.describe('what a typed passage writes', () => {
 			await openBook(page, SHORT_ID);
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 			await type(page, tortoiseAndHare.chunks[0].content);
-			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
+			await expectPageIs(page, `2`, `${tortoiseAndHare.chunkCount}`);
 
 			// Wait for the write to actually land — the library card reads the persisted
 			// rollup, not the session's own optimistic state, so this must be a real row.
@@ -375,7 +379,7 @@ test.describe('what a typed passage writes', () => {
 
 			// The next visit: resume is past the Zen-completed passage, not back at passage 1.
 			await page.goto(`/type/${SHORT_ID}`);
-			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
+			await expectPageIs(page, `2`, `${tortoiseAndHare.chunkCount}`);
 			await expect(meta(page)).toContainText(`${percent}%`);
 		}
 	);
@@ -392,7 +396,7 @@ test.describe('what a typed passage writes', () => {
 			await openBook(page, SHORT_ID);
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'false');
 			await type(page, tortoiseAndHare.chunks[0].content);
-			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
+			await expectPageIs(page, `2`, `${tortoiseAndHare.chunkCount}`);
 
 			const row = await readAttempt(user);
 			expect(row.completed).toBe(true);
@@ -423,7 +427,7 @@ test.describe('what a typed passage writes', () => {
 			await zenToggle(page).click();
 			await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');
 			await type(page, passage.slice(200));
-			await expect(meta(page)).toContainText(`Page 2 of ${tortoiseAndHare.chunkCount}`);
+			await expectPageIs(page, `2`, `${tortoiseAndHare.chunkCount}`);
 
 			const row = await readAttempt(user);
 			expect(row.completed).toBe(true);
@@ -489,7 +493,7 @@ test.describe('the session summary', () => {
 	/** Types every passage of the short book, optionally switching mode partway. */
 	async function readShortBook(page: Page, toggleBeforePassage: number | null) {
 		for (const [index, chunk] of tortoiseAndHare.chunks.entries()) {
-			await expect(meta(page)).toContainText(`Page ${index + 1} of ${tortoiseAndHare.chunkCount}`);
+			await expectPageIs(page, `${index + 1}`, `${tortoiseAndHare.chunkCount}`);
 			if (index === toggleBeforePassage) {
 				await zenToggle(page).click();
 				await expect(zenToggle(page)).toHaveAttribute('aria-pressed', 'true');

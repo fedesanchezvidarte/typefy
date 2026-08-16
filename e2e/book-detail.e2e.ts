@@ -9,6 +9,7 @@ import {
 	type AnyClient
 } from './support/supabase';
 import { arrangeProbeBook, retireProbeBook, type ProbeBook } from './support/probe-books';
+import { expectPageIs } from './support/typing-screen';
 import { chapterRow, gridCard, primaryAction, sectionCard, tabToTestId } from './support/library';
 
 /**
@@ -292,7 +293,7 @@ test.describe('book detail screen', () => {
 		// "Page 1 of N" — N is `books.chunk_count`, the same fact the detail screen showed.
 		// Read from the meta line rather than asserted as a literal, so the two screens are
 		// compared to EACH OTHER and a shared drift cannot pass.
-		await expect(page.getByTestId('page-meta')).toContainText(`Page 1 of ${shown!.trim()}`);
+		await expectPageIs(page, `1`, `${shown!.trim()}`);
 		expect(shown!.trim()).toBe(String(full.chunkCount));
 	});
 
@@ -333,7 +334,7 @@ test.describe('book detail screen', () => {
 		}).toPass();
 
 		await expect(page).toHaveURL(new RegExp(`/type/${FULL_SLUG}\\?page=7$`));
-		await expect(page.getByTestId('page-meta')).toContainText(`Page 7 of ${full.chunkCount}`);
+		await expectPageIs(page, `7`, `${full.chunkCount}`);
 		// The passage really is that chapter's opening page, not merely a URL that said so.
 		await expect(page.locator('[data-testid="typing-surface"] .passage')).toContainText(
 			PASSAGES[6]
@@ -435,7 +436,7 @@ authTest.describe('book detail screen, signed in', () => {
 				await primaryAction(page).click();
 				await expect(page.getByTestId('typing-surface')).toBeVisible({ timeout: 2000 });
 			}).toPass();
-			await expect(page.getByTestId('page-meta')).toContainText(`Page 3 of ${full.chunkCount}`);
+			await expectPageIs(page, `3`, `${full.chunkCount}`);
 		}
 	);
 
@@ -467,7 +468,7 @@ authTest.describe('book detail screen, signed in', () => {
 				await primaryAction(page).click();
 				await expect(page.getByTestId('typing-surface')).toBeVisible({ timeout: 2000 });
 			}).toPass();
-			await expect(page.getByTestId('page-meta')).toContainText(`Page 1 of ${full.chunkCount}`);
+			await expectPageIs(page, `1`, `${full.chunkCount}`);
 		}
 	);
 

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import { prideAndPrejudiceExcerpt } from '../src/lib/fixtures/en';
 import { donQuijoteExcerpt } from '../src/lib/fixtures/es';
 import { SUPABASE_URL } from './support/supabase';
+import { expectPageIs } from './support/typing-screen';
 
 /**
  * What a guest does NOT do (spec #12): every book opens at passage 1, every progress bar
@@ -56,11 +57,11 @@ test.describe('a guest', () => {
 		});
 
 		await page.goto(`/type/${BOOK_SLUG}`);
-		await expect(page.getByTestId('page-meta')).toContainText('Page 1 of 6');
+		await expectPageIs(page, `1`, `6`);
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 
 		await page.keyboard.type(CHUNK_0, { delay: 0 });
-		await expect(page.getByTestId('page-meta')).toContainText('Page 2 of 6');
+		await expectPageIs(page, `2`, `6`);
 
 		// Keep typing past the boundary and let the network settle, so a write dispatched
 		// late at the completion instant would still have been observed by the assertion
@@ -77,7 +78,7 @@ test.describe('a guest', () => {
 		// And the guest's progress is still session-relative and unsaved: a reload starts
 		// over at passage 1.
 		await page.reload();
-		await expect(page.getByTestId('page-meta')).toContainText('Page 1 of 6');
+		await expectPageIs(page, `1`, `6`);
 	});
 
 	/**
@@ -126,12 +127,12 @@ test.describe('a guest', () => {
 		await context.addCookies([{ name: 'typefy-mode', value: 'zen', url: baseURL! }]);
 		await page.goto(`/type/${BOOK_SLUG}`);
 		await expect(page.getByTestId('zen-toggle')).toHaveAttribute('aria-pressed', 'true');
-		await expect(page.getByTestId('page-meta')).toContainText('Page 1 of 6');
+		await expectPageIs(page, `1`, `6`);
 		await expect(page.getByTestId('page-meta')).not.toContainText('wpm');
 		await expect(page.getByTestId('typing-input')).toBeFocused();
 
 		await page.keyboard.type(CHUNK_0, { delay: 0 });
-		await expect(page.getByTestId('page-meta')).toContainText('Page 2 of 6');
+		await expectPageIs(page, `2`, `6`);
 
 		// Type past the boundary and let the network settle, so a write dispatched late at
 		// the completion instant would still be observed rather than raced past.

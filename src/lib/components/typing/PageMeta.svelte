@@ -3,7 +3,7 @@
 	import type { MetricsSnapshot } from '$lib/engine/metrics';
 
 	interface Props {
-		/** 1-based active page number. */
+		/** 1-based active page number. Announced only — the navigator renders it visibly. */
 		current: number;
 		total: number;
 		/**
@@ -25,28 +25,54 @@
 	const wpm = $derived(live ? String(Math.round(live.grossWpm)) : '—');
 	// Floored, not rounded: a session with an error must never display as 100%.
 	const acc = $derived(live ? String(Math.floor(live.accuracyRaw * 100)) : '—');
+
+	/**
+	 * The 180ms opacity fade the figures enter and leave on when the mode axis flips
+	 * (spec #50 §3). Opacity only — nothing translates, nothing resizes.
+	 *
+	 * A hand-rolled transition rather than `svelte/transition`'s `fade` for one reason: the
+	 * duration has to collapse to 0 under `prefers-reduced-motion: reduce`, and a JS-driven
+	 * transition writes inline styles that a CSS `transition: none` rule cannot reach. The
+	 * media query is read per call, matching `RibbonPanel`'s `unfold`.
+	 */
+	function figureFade(_node: Element, { duration = 180 }: { duration?: number } = {}) {
+		const reduced =
+			typeof window !== 'undefined' &&
+			window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+		return {
+			duration: reduced ? 0 : duration,
+			css: (t: number) => `opacity: ${t};`
+		};
+	}
 </script>
 
 <!--
-	One quiet line of chrome, in the header's center slot since spec #45. The visible line
-	updates every keystroke (pct), so it is NOT a live region; the hidden region below
-	announces only page changes.
+	The figures, in the bottom row's right column since spec #50. The visible line updates every
+	keystroke (pct), so it is NOT a live region; the hidden region below announces only page changes.
 
-	**Composed from separate spans rather than one message** (spec #45). The rendered text is
-	byte-for-byte what the single `page_meta` string produced, but accuracy is now its own node,
-	which is what lets the narrow-viewport rule drop it without a second message, a second test
-	id, or a client-side breakpoint check that would flash on hydration.
+	**Percent is LAST, and that is structural rather than a preference.** The column is right-aligned,
+	so the trailing node is the one anchored to the card's edge — and percent is the one figure that
+	survives a switch into Zen. Ordering it last means WPM and accuracy fade out to its left and the
+	space closes behind them, leaving the anchored figure exactly where it was. Ordered first (as it
+	read before), it would jump ~185px sideways the instant the fade ended.
+
+	Page position is deliberately absent: the page navigator, two columns to the left, renders it.
 -->
 <p class="meta text-sm tracking-[0.01em] text-muted tabular-nums" data-testid="page-meta">
-	<span>{m.page_meta_position({ current, total })}</span>
-	<span aria-hidden="true"> · </span>
-	<span>{m.page_meta_percent({ pct })}</span>
 	{#if !zen}
-		<span aria-hidden="true"> · </span>
-		<span>{m.page_meta_wpm({ wpm })}</span>
-		<span class="accuracy" aria-hidden="true"> · </span>
-		<span class="accuracy">{m.page_meta_accuracy({ acc })}</span>
+		<!--
+			Svelte transitions do not run on initial render, which is what keeps spec #24 §10's
+			"no metrics, not even for one frame" true for a session opened in Zen from the cookie.
+			**Do not add `intro`** — it would paint the figures for the length of one fade on a
+			screen that is meant to have none.
+		-->
+		<span transition:figureFade>{m.page_meta_wpm({ wpm })}</span>
+		<span class="accuracy" transition:figureFade>
+			<span aria-hidden="true"> · </span>{m.page_meta_accuracy({ acc })}
+		</span>
+		<span aria-hidden="true" transition:figureFade> · </span>
 	{/if}
+	<span>{m.page_meta_percent({ pct })}</span>
 </p>
 <p class="sr-only" aria-live="polite" data-testid="page-announcer">
 	{m.page_meta_zen({ current, total, pct: Math.round((100 * (current - 1)) / total) })}
@@ -58,9 +84,9 @@
 	}
 
 	/*
-	 * Under 640px the slot keeps page, percent and WPM, and drops accuracy — the header has
-	 * room for four figures on a phone only by lying about one of them (spec #45). Accuracy
-	 * goes rather than WPM because WPM is the number a typist watches while typing.
+	 * Under 640px the row keeps WPM and percent, and drops accuracy — the bottom row has space
+	 * for the toggle, the navigator and two figures on a phone, not three (spec #50 §5).
+	 * Accuracy goes rather than WPM because WPM is the number a typist watches while typing.
 	 */
 	@media (max-width: 639px) {
 		.accuracy {

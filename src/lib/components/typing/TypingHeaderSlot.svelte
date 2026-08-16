@@ -1,47 +1,36 @@
 <script lang="ts">
+	import type { Pathname } from '$app/types';
+	import { resolve } from '$app/paths';
 	import { m } from '$lib/paraglide/messages';
+	import { localizeHref } from '$lib/paraglide/runtime';
 	import type { TypingHeaderView } from './typing-header.svelte';
-	import PageMeta from './PageMeta.svelte';
 
 	interface Props {
 		view: TypingHeaderView;
 	}
 
 	let { view }: Props = $props();
+
+	const href = $derived(resolve(localizeHref(`/books/${view.slug}`) as Pathname));
 </script>
 
 <!--
-	The typing screen's chrome, in the header's center slot (spec #45). It is here rather than
-	under the sheet for one concrete reason: the ~130px it used to occupy below the card is the
-	height the pinned page card now has, which is the difference between showing 10 lines of a
-	page and showing most of one.
+	The typing screen's header slot (spec #45, narrowed by spec #50).
 
-	Order matters — title, then chapter, then the figures, then Zen. Zen sits at the RIGHT END,
-	immediately beside the WPM and accuracy it removes, so cause and effect are adjacent.
+	It used to carry six things — title, chapter, page N of M, percent, WPM, accuracy and the Zen
+	toggle — which cost the title all but 22 characters and hid the whole block on a phone. The
+	figures and the toggle live under the page card now. What is left is **identity**: which book,
+	which chapter.
+
+	The title is a **link back to the book detail screen**. `beforeNavigate` in `TypingSession`
+	already flushes in-page restore, so leaving mid-page loses nothing.
 -->
 <div class="slot" data-testid="typing-header-slot">
-	<span class="book" data-testid="header-book">{view.title}</span>
+	<a class="book" data-testid="header-book" {href} title={m.header_book_details()}>{view.title}</a>
 	{#if view.chapter}
 		<span class="sep" aria-hidden="true">·</span>
 		<span class="chapter" data-testid="header-chapter">{view.chapter}</span>
 	{/if}
-	<span class="sep" aria-hidden="true">·</span>
-	<PageMeta
-		current={view.current}
-		total={view.total}
-		pct={view.pct}
-		live={view.live}
-		zen={view.zen}
-	/>
-	<button
-		type="button"
-		data-testid="zen-toggle"
-		class="zen"
-		aria-pressed={view.zen}
-		onclick={() => view.onToggleZen?.()}
-	>
-		{view.zen ? m.zen_exit() : m.zen_enter()}
-	</button>
 </div>
 
 <style>
@@ -51,66 +40,61 @@
 		align-items: center;
 		gap: 8px;
 		color: var(--muted);
+		font-size: 14px;
 	}
 
-	.book,
-	.chapter {
+	/*
+	 * The title renders WHOLE (spec #50 §1). No character cap: it takes the space the row has and
+	 * ellipsis is an overflow backstop, not a design. The catalog's longest title is 43 characters
+	 * and must read in full at ≥640px, and a `44ch` cap would be a magic number that the next book
+	 * breaks silently.
+	 *
+	 * `flex-shrink: 0` up to its content, with the CHAPTER yielding first — see below. `min-width`
+	 * is what lets the ellipsis engage at all when the row genuinely runs out of room.
+	 */
+	.book {
 		overflow: hidden;
-		font-size: 14px;
+		min-width: 0;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		border-radius: 3px;
+		transition: color 0.15s ease;
+	}
+
+	.book:hover {
+		color: var(--fg);
+	}
+
+	.book:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 3px;
+	}
+
+	/*
+	 * The chapter takes the squeeze first, and takes it all the way: `flex-shrink` an order of
+	 * magnitude above the title's default means the row consumes this element's slack before it
+	 * touches a single character of the book's name.
+	 */
+	.chapter {
+		flex-shrink: 100;
+		overflow: hidden;
+		min-width: 3ch;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 
-	/* The book takes the squeeze first: it is also the document title and the page's own h1. */
-	.book {
-		max-width: 22ch;
-	}
-
-	.chapter {
-		max-width: 18ch;
-	}
-
 	.sep {
+		flex-shrink: 0;
 		color: var(--dim);
 	}
 
-	.zen {
-		border: 1px solid transparent;
-		border-radius: 8px;
-		padding: 4px 9px;
-		font-size: 13px;
-		color: var(--muted);
-		white-space: nowrap;
-		cursor: pointer;
-		transition:
-			color 0.15s ease,
-			border-color 0.15s ease;
-	}
-
-	.zen:hover {
-		border-color: var(--accent);
-		color: var(--fg);
-	}
-
-	.zen[aria-pressed='true'] {
-		border-color: var(--border);
-		color: var(--fg);
-	}
-
-	.zen:focus-visible {
-		outline: 2px solid var(--accent);
-		outline-offset: 2px;
-	}
-
 	/*
-	 * Under 640px the slot trims to the figures and the toggle (spec #45): the title and the
-	 * chapter would otherwise squeeze the numbers off a 375px screen. The title is still
-	 * reachable — it is the page's visually-hidden h1 and the document title.
+	 * Under 640px the slot is empty: at 375px there is no room for a title beside the wordmark and
+	 * the account controls. The book is still reachable — it is the page's visually-hidden h1 and
+	 * the document title.
 	 */
 	@media (max-width: 639px) {
-		.book,
-		.chapter,
-		.sep {
+		.slot {
 			display: none;
 		}
 	}

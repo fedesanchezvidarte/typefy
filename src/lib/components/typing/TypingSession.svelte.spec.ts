@@ -205,6 +205,28 @@ function metaText(): string {
 	return page.getByTestId('page-meta').element().textContent ?? '';
 }
 
+/** Reopens a settled page (spec #50 §7) and waits for the caret to come back. */
+async function retypePage() {
+	await page.getByTestId('page-retype').click();
+	await tick();
+}
+
+/**
+ * Where the page number is asserted since spec #50: the **page navigator**, not the figures line.
+ *
+ * The header used to say "Page 3 of 11" and the navigator said it again two lines below, so the
+ * duplicate went and the navigator kept it. Every position assertion routes through here so there
+ * is one place to change if it ever moves again.
+ *
+ * `total` is optional because a handful of cases only ever cared which page was showing.
+ */
+async function expectPage(current: number, total?: number) {
+	await expect.element(page.getByTestId('page-nav-jump')).toHaveValue(String(current));
+	if (total !== undefined) {
+		await expect.element(page.getByTestId('page-nav-total')).toHaveTextContent(`of ${total}`);
+	}
+}
+
 /**
  * Lets every already-issued save settle, so an assertion about `failedSaves` is not racing
  * it. Deterministic, not a sleep: it awaits the very promises the mock handed the component,
@@ -254,7 +276,9 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 7 of 11 · 55%');
+		await expectPage(7, 11);
+
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('55%');
 	});
 
 	it('advances the displayed figure when a not-previously-completed passage is completed, with no reload', async () => {
@@ -266,11 +290,15 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 4 · 25%');
+		await expectPage(2, 4);
+
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('25%');
 
 		await typeText('c d'); // completes chunk-1, which had no prior completion
 
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 3 of 4 · 50%');
+		await expectPage(3, 4);
+
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('50%');
 	});
 
 	it('does not advance the displayed figure when an already-completed passage is re-completed, and never exceeds 100%', async () => {
@@ -284,13 +312,22 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 3 · 100%');
+		await expectPage(1, 3);
 
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('100%');
+
+		// Every page of this book is completed, so every page arrives SETTLED (spec #50 §6) and
+		// re-typing one begins with `Type again`. That is the real flow for a re-read, and it is
+		// why this test reopens each page before typing it.
+		await retypePage();
 		await typeText('a b');
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 100%');
+		await expectPage(2, 3);
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('100%');
 
+		await retypePage();
 		await typeText('c d');
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 3 of 3 · 100%');
+		await expectPage(3, 3);
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('100%');
 	});
 
 	it('clamps the figure at 100% when the persisted count exceeds the book chunk count', async () => {
@@ -304,11 +341,16 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: 'user-1'
 		});
 
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 3 · 100%');
+		await expectPage(1, 3);
 
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('100%');
+
+		await retypePage(); // the page is completed, so it arrives settled (spec #50 §6)
 		await typeText('a b');
 
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 100%');
+		await expectPage(2, 3);
+
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('100%');
 	});
 
 	it('degrades a guest to the session-relative figure and attempts no write at all', async () => {
@@ -320,12 +362,15 @@ describe('TypingSession.svelte — book-lifetime progress display (spec #12 §4)
 			userId: null
 		});
 
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 4 · 0%');
+		await expectPage(1, 4);
+
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('0%');
 
 		await typeText('a b');
 
 		// Session-relative: one passage behind the cursor out of four.
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 4 · 25%');
+		await expectPage(2, 4);
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('25%');
 
 		await settleSaves();
 		expect(recordChunkAttempt).not.toHaveBeenCalled();
@@ -351,7 +396,7 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		});
 
 		await typeText('a b');
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 2');
+		await expectPage(2, 2);
 
 		// The first insert has resolved as a failure by now — and still nothing is shown
 		// while typing: no notice, no summary, no interruption of the passage.
@@ -410,10 +455,12 @@ describe('TypingSession.svelte — save failures (spec #12 §6)', () => {
 		await typeText('a b');
 
 		// Optimistically advanced to 1/3 — and NOT rewound once the failure lands.
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 33%');
+		await expectPage(2, 3);
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('33%');
 		await expect.poll(() => recordChunkAttempt.mock.calls.length).toBe(1);
 		await settleSaves();
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3 · 33%');
+		await expectPage(2, 3);
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('33%');
 
 		await typeText('c d');
 		await typeText('e f');
@@ -817,14 +864,16 @@ describe('TypingSession.svelte — cumulative running metrics (spec #12 §5)', (
 		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('— wpm');
 
 		await typeText('a '); // first word boundary of the session
-		await expect.poll(metaText).toMatch(/· \d+ wpm ·/);
+		// WPM leads the figures line since spec #50 — percent moved to the end, where it anchors
+		// to the card's right edge and does not move when the other two fade out.
+		await expect.poll(metaText).toMatch(/\d+ wpm ·/);
 
 		await typeText('b'); // completes passage 1; metrics must NOT reset to '—'
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 3');
-		expect(metaText()).toMatch(/· \d+ wpm ·/);
+		await expectPage(2, 3);
+		expect(metaText()).toMatch(/\d+ wpm ·/);
 
 		await typeText('c '); // first word boundary of the SECOND passage
-		expect(metaText()).toMatch(/· \d+ wpm ·/);
+		expect(metaText()).toMatch(/\d+ wpm ·/);
 	});
 });
 
@@ -865,7 +914,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		// A freshly landed window loaded and none typed: this is the refire check `window.ts`
 		// documents — the gap must stay ABOVE the threshold, or nothing here would ever be
 		// testable as "not before".
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of 8');
+		await expectPage(1, 8);
 		expect(chunkRequests()).toEqual([]);
 
 		for (let i = 0; i < typedBeforeFire - 1; i += 1) {
@@ -899,9 +948,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 
 		// The last loaded passage is still live and accepting keystrokes against a request
 		// that has not come back.
-		await expect
-			.element(page.getByTestId('page-meta'))
-			.toHaveTextContent(`Page ${loadedCount} of 8`);
+		await expectPage(loadedCount, 8);
 		await expect
 			.element(page.getByTestId('typing-surface'))
 			.toHaveTextContent(all[loadedCount - 1]);
@@ -965,9 +1012,8 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 		// session alone has already done — which is the reading this test exists to fail on.
 		const completed = typedBeforeFire + 2;
 		const percent = Math.round((100 * completed) / 8);
-		await expect
-			.element(page.getByTestId('page-meta'))
-			.toHaveTextContent(`Page ${typedBeforeFire + 1} of 8 · ${percent}%`);
+		await expectPage(typedBeforeFire + 1, 8);
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent(`${percent}%`);
 		expect(progressRequests()).toEqual([
 			`/api/books/test-book/progress?from=${loadedCount}&limit=${loadedCount}`
 		]);
@@ -1014,9 +1060,7 @@ describe('TypingSession.svelte — the window prefetch (spec #18 §6)', () => {
 			await typeText(all[i]);
 		}
 		// Past the window boundary, into chunks only the endpoint could have supplied.
-		await expect
-			.element(page.getByTestId('page-meta'))
-			.toHaveTextContent(`Page ${loadedCount + 1} of 8`);
+		await expectPage(loadedCount + 1, 8);
 
 		expect(invalidateAll).not.toHaveBeenCalled();
 	});
@@ -1165,7 +1209,7 @@ describe('TypingSession.svelte — awaiting and the end of the window (spec #18 
 		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent('c d');
 		expect(awaitingPanel().query()).toBeNull();
 		expect(statusText()).toBe('');
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 2 of 8');
+		await expectPage(2, 8);
 	});
 
 	it('retries on the next completion after a failure, and keeps every completed passage buffered', async () => {
@@ -1227,12 +1271,10 @@ describe('TypingSession.svelte — the page navigator, A′ seek (spec #32 §10 
 			userId: null
 		});
 
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of');
+		await expectPage(1);
 		await userEvent.click(nextButton());
 
-		await expect
-			.element(page.getByTestId('page-meta'))
-			.toHaveTextContent(`Page 2 of ${WINDOW_SIZE}`);
+		await expectPage(2, WINDOW_SIZE);
 		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent(all[1]);
 		// The whole point of A′ over a remount: a jump the window already covers costs no
 		// request at all — `seekWindow` is never even asked to compute bounds.
@@ -1242,9 +1284,7 @@ describe('TypingSession.svelte — the page navigator, A′ seek (spec #32 §10 
 		// fresh one seeded at index 1 — a remount would also show "Page 2 of N", so this is the
 		// assertion that actually distinguishes the two.
 		await typeText(all[1]);
-		await expect
-			.element(page.getByTestId('page-meta'))
-			.toHaveTextContent(`Page 3 of ${WINDOW_SIZE}`);
+		await expectPage(3, WINDOW_SIZE);
 	});
 
 	it('a jump outside the loaded window fetches a fresh window anchored at the target, then renders it', async () => {
@@ -1269,7 +1309,7 @@ describe('TypingSession.svelte — the page navigator, A′ seek (spec #32 §10 
 			completedChunkIds: [],
 			userId: null
 		});
-		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('Page 1 of');
+		await expectPage(1);
 
 		await userEvent.fill(jumpBox(), String(targetIndex + 1));
 		await userEvent.keyboard('{Enter}');
@@ -1287,9 +1327,7 @@ describe('TypingSession.svelte — the page navigator, A′ seek (spec #32 §10 
 				)
 			)
 			.toBe(true);
-		await expect
-			.element(page.getByTestId('page-meta'))
-			.toHaveTextContent(`Page ${targetIndex + 1} of ${chunkCount}`);
+		await expectPage(targetIndex + 1, chunkCount);
 		await expect.element(page.getByTestId('typing-surface')).toHaveTextContent(all[targetIndex]);
 		expect(lastPushedPage()).toBe(String(targetIndex + 1));
 	});
@@ -1404,5 +1442,143 @@ describe('TypingSession.svelte — in-page restore (spec #32 §8)', () => {
 		const raw = localStorage.getItem(PAGE_STATE_KEY);
 		const saved = raw === null ? [] : (JSON.parse(raw) as PageState[]);
 		expect(saved.find((entry) => entry.index === 0)).toBeUndefined();
+	});
+});
+
+/**
+ * Settled pages, from the component's side (spec #50 §6/§7).
+ *
+ * The engine tests in `session.spec.ts` prove the reducer settles on every arrival path. These
+ * prove the surface says so, the action reopens it, and the marker reports history rather than
+ * live status.
+ */
+describe('TypingSession.svelte — settled pages (spec #50 §6/§7)', () => {
+	const surfaceText = () => page.getByTestId('typing-surface').element().textContent ?? '';
+
+	function renderCompleted(startIndex = 0) {
+		render(TypingSessionHarness, {
+			...loaded(passages(3)),
+			startIndex,
+			chunksCompleted: 3,
+			completedChunkIds: ['chunk-0', 'chunk-1', 'chunk-2'],
+			userId: 'user-1'
+		});
+	}
+
+	it('renders a completed page as typed, with no caret', async () => {
+		renderCompleted();
+
+		await expect.element(page.getByTestId('page-completed')).toBeInTheDocument();
+		// Every character reads `correct`, and nothing reads `pending`.
+		const chars = page.getByTestId('typing-surface').element().querySelectorAll('.char');
+		const states = [...chars].map((el) => el.getAttribute('data-state')).filter(Boolean);
+		expect(states.every((state) => state === 'correct')).toBe(true);
+		expect(page.getByTestId('typing-surface').element().querySelectorAll('.caret')).toHaveLength(0);
+	});
+
+	it('leaves an uncompleted page fresh and unmarked', async () => {
+		render(TypingSessionHarness, {
+			...loaded(passages(3)),
+			startIndex: 0,
+			chunksCompleted: 0,
+			completedChunkIds: [],
+			userId: 'user-1'
+		});
+
+		await expect.element(page.getByTestId('page-meta')).toBeInTheDocument();
+		expect(page.getByTestId('page-completed').elements()).toHaveLength(0);
+	});
+
+	it('ignores keystrokes on a settled page — including backspace', async () => {
+		renderCompleted();
+		const before = surfaceText();
+
+		await typeText('zzz');
+		(page.getByTestId('typing-input').element() as HTMLInputElement).focus();
+		await userEvent.keyboard('{Backspace}{Backspace}');
+		await tick();
+
+		expect(surfaceText()).toBe(before);
+		await expectPage(1, 3); // nothing completed, so nothing advanced
+	});
+
+	it('Type again clears the page and gives the caret back', async () => {
+		renderCompleted();
+
+		await retypePage();
+
+		const chars = page.getByTestId('typing-surface').element().querySelectorAll('.char');
+		const states = [...chars].map((el) => el.getAttribute('data-state')).filter(Boolean);
+		expect(states.every((state) => state === 'pending')).toBe(true);
+		expect(
+			page.getByTestId('typing-surface').element().querySelectorAll('.caret').length
+		).toBeGreaterThan(0);
+	});
+
+	it('keeps the completed mark while a reopened page is being retyped', async () => {
+		renderCompleted();
+		await retypePage();
+
+		// The mark states a historical fact — "you have typed this page" — which retyping does
+		// not make untrue. Only the ACTION goes, because the page is no longer settled.
+		await expect.element(page.getByTestId('page-completed')).toBeInTheDocument();
+		expect(page.getByTestId('page-retype').elements()).toHaveLength(0);
+
+		await typeText('a');
+		await expect.element(page.getByTestId('page-completed')).toBeInTheDocument();
+	});
+
+	it('settles a completed page reached by a navigator jump', async () => {
+		render(TypingSessionHarness, {
+			...loaded(passages(3)),
+			startIndex: 0,
+			chunksCompleted: 1,
+			completedChunkIds: ['chunk-2'],
+			userId: 'user-1'
+		});
+
+		expect(page.getByTestId('page-completed').elements()).toHaveLength(0);
+
+		await userEvent.fill(page.getByTestId('page-nav-jump'), '3');
+		await page.getByTestId('page-nav-jump').element().closest('form')!.requestSubmit();
+		await tick();
+
+		await expectPage(3, 3);
+		await expect.element(page.getByTestId('page-completed')).toBeInTheDocument();
+	});
+
+	it('settles a completed page reached by auto-advance', async () => {
+		render(TypingSessionHarness, {
+			...loaded(passages(3)),
+			startIndex: 0,
+			chunksCompleted: 1,
+			completedChunkIds: ['chunk-1'],
+			userId: 'user-1'
+		});
+
+		await typeText('a b'); // completes page 1, auto-advancing into the completed page 2
+
+		await expectPage(2, 3);
+		await expect.element(page.getByTestId('page-completed')).toBeInTheDocument();
+	});
+
+	it('a settled page fabricates no WPM — the figures stay at the em dash', async () => {
+		renderCompleted();
+
+		// `restoreChunk` leaves the log empty and `startedAt` null, so a page that LOOKS fully
+		// typed contributes nothing at all to the session's measured spans.
+		await expect.element(page.getByTestId('page-meta')).toHaveTextContent('— wpm');
+	});
+
+	it('completing a reopened page writes a fresh attempt', async () => {
+		recordChunkAttempt.mockResolvedValue({ saved: true });
+		renderCompleted();
+
+		await retypePage();
+		await typeText('a b');
+		await settleSaves();
+
+		expect(recordChunkAttempt).toHaveBeenCalledTimes(1);
+		expect(recordChunkAttempt.mock.calls[0][1]).toMatchObject({ chunkId: 'chunk-0' });
 	});
 });

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Check } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages';
 	import type { CharacterState } from '$lib/engine/types';
 	import { CHARS_PER_LINE } from '$lib/chunking/measure';
@@ -42,6 +43,20 @@
 		 * any font size the future size setting picks.
 		 */
 		visibleLines?: number;
+		/**
+		 * This page has been completed at least once, ever (spec #50 §6/§7). Presentation only —
+		 * the engine decides whether the page is settled, and this only says whether to draw the
+		 * marker. It stays `true` while a reopened page is being retyped: it states a historical
+		 * fact ("you have typed this page"), not a live status, so it must never flicker.
+		 */
+		completed?: boolean;
+		/**
+		 * Reopens a settled page for a fresh traversal. Absent (or on a page that is not settled)
+		 * the marker renders alone, with no action beside it.
+		 */
+		onRetype?: () => void;
+		/** The page is rendered as typed and ignores keystrokes until `onRetype` is taken. */
+		settled?: boolean;
 	}
 
 	let {
@@ -53,7 +68,10 @@
 		onChar,
 		onBackspace,
 		variant = 'page',
-		visibleLines = 5
+		visibleLines = 5,
+		completed = false,
+		onRetype,
+		settled = false
 	}: Props = $props();
 
 	/* Code-point-safe split, mirroring the engine (á, ñ, ¿ occupy one position each). */
@@ -257,6 +275,32 @@
 	data-testid="typing-surface"
 	for="typing-input"
 >
+	{#if completed}
+		<!--
+			The completed-page cluster (spec #50 §7). It sits on `.surface`, NOT inside `.viewport` —
+			the teleprompter's `translateY` would scroll it out of the card.
+
+			An OVERLAY on a `--sheet` backdrop, the treatment the awaiting panel already uses at the
+			bottom edge. At 375px the 66ch measure does not fit, so the text fills the card's width
+			and this would otherwise land on the first line; the backdrop stops the text reading
+			through. An overlay rather than a reserved row because a reserved row would have to exist
+			on EVERY page — including the ones that never show this — or the card would change height
+			on auto-advance and jump the text under the typist.
+
+			The check is `aria-hidden` with `sr-only` words beside it. It is deliberately NOT in the
+			`page-announcer` live region: that region announces page changes, and conditional text
+			there would announce twice on a navigation into a completed page.
+		-->
+		<div class="completed-mark" data-testid="page-completed">
+			<Check size={16} strokeWidth={1.75} aria-hidden="true" />
+			<span class="sr-only">{m.page_completed()}</span>
+			{#if settled && onRetype}
+				<button type="button" data-testid="page-retype" class="retype" onclick={onRetype}>
+					{m.page_retype()}
+				</button>
+			{/if}
+		</div>
+	{/if}
 	<div
 		class="viewport"
 		bind:this={viewportEl}
@@ -536,6 +580,47 @@
 			   interpolation is disabled, so the jump between positions is instant. */
 			transition: none;
 		}
+	}
+
+	/*
+	 * The completed-page cluster (spec #50 §7), pinned to the card's top-right corner inside its
+	 * own bounds. `--sheet` rather than `transparent` so the first line of text cannot read
+	 * through it on a narrow viewport, where the measure fills the card's full width.
+	 *
+	 * The accent on the check is not a violation of "incorrect is the only chromatic event on the
+	 * page": that rule governs CHARACTER STATES in the text. This is chrome in the card's margin,
+	 * where the accent is already the app's vocabulary for a live control.
+	 */
+	.completed-mark {
+		position: absolute;
+		top: 0;
+		right: 0;
+		z-index: 1;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		border-radius: 0 12px 0 8px;
+		padding: 10px 14px 8px;
+		font-size: 13px;
+		line-height: 1;
+		color: var(--accent);
+		background: var(--sheet);
+	}
+
+	.retype {
+		color: var(--muted);
+		cursor: pointer;
+		transition: color 0.15s ease;
+	}
+
+	.retype:hover {
+		color: var(--accent);
+	}
+
+	.retype:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 3px;
 	}
 
 	/* Visually hidden but focusable — never display:none. */
