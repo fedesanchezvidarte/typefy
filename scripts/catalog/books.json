@@ -373,7 +373,10 @@
 					"ÍNDICE GENERAL"
 				],
 				"firstHeadingImplicit": true
-			}
+			},
+			"cover": "scripts/catalog/covers/la-odisea.jpg",
+			"coverLicense": "Public domain in the United States (binding of the 1910 Montaner y Simón edition, published before 1929; distributed with Project Gutenberg ebook 58221)",
+			"coverSource": "https://www.gutenberg.org/cache/epub/58221/images/cover.jpg"
 		}
 	]
 }

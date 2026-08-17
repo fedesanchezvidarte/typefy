@@ -4,6 +4,9 @@
 
 - **Slug**: `la-odisea`
 - **Source**: https://www.gutenberg.org/cache/epub/58221/pg58221.txt
+- **Cover**: jpeg 507x760, 158 KB
+- **Cover licence**: Public domain in the United States (binding of the 1910 Montaner y Simón edition, published before 1929; distributed with Project Gutenberg ebook 58221)
+- **Cover source**: https://www.gutenberg.org/cache/epub/58221/images/cover.jpg
 
 ## Chunks
 
