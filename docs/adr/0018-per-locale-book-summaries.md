@@ -99,13 +99,20 @@ would assert a language nobody verified, and would additionally make an English 
 invisible under the ES locale for no reason. `default` states exactly the truth: *this is the
 fallback, its language is unverified, and any locale key overrides it.*
 
-### Adding a locale is a manifest edit
+### Adding a locale is a manifest edit — and, since spec #55, a content task
 
 A third UI locale needs no migration, no `database.types.ts` regeneration and no ingest change —
 only a new key in `scripts/catalog/books.json` and the Paraglide locale itself. The manifest's
 validation (`src/lib/ingest/manifest.ts`) rejects an unknown locale key rather than dropping it, so
 a typo'd `"sp"` is a manifest problem at parse time instead of a book whose Spanish summary
 mysteriously never appears.
+
+Spec #55 made the blurbs **required** rather than optional, which changes what that edit costs.
+Adding `fr` to `LOCALES` makes `parseManifest` refuse **every book in the manifest** until every one
+of them declares a French blurb, and the ingest refuses before it reads a credential. That is the
+intended behaviour, not an oversight: the alternative is silently serving English prose to a reader
+who chose French, which is precisely the state the live catalog was in before #55. It does mean
+"add a locale" is a writing job the size of the catalog, and must be planned as one.
 
 ### The screen omits, it does not placeholder
 
@@ -130,11 +137,30 @@ line. A book without a blurb is a normal state.
 - **Storing Open Library's description under `"en"`.** Rejected — see "`default` says only what is
   true" above.
 
-## Follow-up
+## What shipped since (spec #55)
 
-No catalog book currently declares a `summary` override (`scripts/catalog/books.json`, Phase 7 run:
-every report reads `Summary overrides | None`), and the fixture books carry none either. The
-override path is exercised by `src/lib/library/summary.spec.ts` and by the manifest validation
-tests, **not by any shipped data**. The first hand-written Spanish blurb is a manifest edit and an
-ingest run with no code change — which is the point of the design, but it does mean the live catalog
-currently only exercises the `default` branch.
+The follow-up this ADR recorded — that no catalog book declared a `summary` override, so the live
+catalog exercised only the `default` branch — is closed, and closed structurally rather than by a
+one-off content pass.
+
+- **The blurbs are required, not overrides.** `parseManifest` now demands a non-empty
+  `summary[locale]` for every locale in `LOCALES`, reported as a manifest problem and refused before
+  any credential is read. A book added next year cannot reach the catalog without them. The word
+  "override" is retained here only where it describes the resolution rule; the manifest keys are no
+  longer optional additions to Open Library's text.
+- **`resolveSummary` is untouched.** The rule is still `summary[locale] ?? summary.default ?? null`,
+  and everything above about the `Json` boundary, the trimming and the omitted panel still holds.
+  What changed is that the first branch now always hits for a catalog book, so `default` became the
+  fallback for a state the validator refuses to allow.
+- **`default` is still fetched and still stored.** Dropping it would remove the only thing standing
+  between a partially-written locale and a blank panel, and Open Library's description remains a
+  useful thing to see beside a hand-written blurb in a report.
+- **The editorial rules live outside the validator.** Length (400–900 characters) and "no markdown
+  or citation characters" are held by `scripts/catalog/books.spec.ts`, which reads the shipped
+  manifest and nothing else. They are house style for this catalog, not truths about the manifest
+  format — and keeping them out of `parseManifest` is what lets the test fixtures go on exercising
+  `resolveSummary`'s absent branch.
+- **The report presents the blurbs, not their locale keys.** `## Metadata` gives each locale a row
+  carrying the blurb's length and quotes its opening in a fenced block, placed before Open Library's
+  `default` description. A list of declared locales was reviewable while blurbs were optional; now
+  that every book declares every locale, it would be the same two words on every report.
