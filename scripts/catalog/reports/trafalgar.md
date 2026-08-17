@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | None declared |
 | First publication year | 1873 (manifest) |
+| Summary (`en`) | 593 characters (manifest) |
+| Summary (`es`) | 574 characters (manifest) |
 | Description | None |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+A boy from Cádiz, raised half-wild on the docks, takes a servant's place with a retired naval officer and watches from the deck as the sea battle that ended Spanish naval power unfolds around him. Gal…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Un muchacho de Cádiz, criado a salto de mata en el muelle, se embarca como criado de un oficial retirado y presencia desde cubierta la batalla naval que hundió el poder marítimo español. Con esta nove…
+```
 
 ## Chapters
 

@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | `/works/OL144961W` |
 | First publication year | 1626 (Open Library) |
+| Summary (`en`) | 589 characters (manifest) |
+| Summary (`es`) | 591 characters (manifest) |
 | Description | 1340 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+Pablos, son of a thieving barber and a mother reputed to be a witch, narrates his own career of failed social climbing: servant, student, beggar, cardsharp, forever one step from rising and forever th…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Pablos, hijo de un barbero ladrón y de una madre con fama de bruja, cuenta en primera persona su carrera de ascenso social fracasado: criado, estudiante, mendigo, tahúr, siempre a punto de subir un es…
+```
 
 Opening of the description, as it would be stored under `default`:
 

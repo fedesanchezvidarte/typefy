@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | None declared |
 | First publication year | 1914 (manifest) |
+| Summary (`en`) | 600 characters (manifest) |
+| Summary (`es`) | 579 characters (manifest) |
 | Description | None |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+Augusto Pérez falls in love almost by accident, following a woman he has never met through the streets, and from there begins to wonder whether his life is being decided by him or by somebody else. Un…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Augusto Pérez se enamora por casualidad, siguiendo por la calle a una mujer a la que no conoce, y a partir de ahí empieza a preguntarse si su vida la decide él o alguien más. Unamuno llamó nivola a lo…
+```
 
 ## Chapters
 

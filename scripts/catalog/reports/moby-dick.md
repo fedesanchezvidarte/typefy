@@ -31,8 +31,21 @@
 |---|---|
 | Open Library work | `/works/OL102749W` |
 | First publication year | 1851 (Open Library) |
+| Summary (`en`) | 625 characters (manifest) |
+| Summary (`es`) | 631 characters (manifest) |
 | Description | 599 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+A young man with no money and a bad mood signs onto a whaling ship out of Nantucket and discovers that its captain is not hunting whales in general but one whale in particular. Around that pursuit Mel…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Un joven sin dinero y de pésimo humor se enrola en un ballenero de Nantucket y descubre que su capitán no persigue ballenas en general, sino una en concreto. Alrededor de esa persecución metió Melvill…
+```
 
 Opening of the description, as it would be stored under `default`:
 

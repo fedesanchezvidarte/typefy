@@ -259,17 +259,54 @@ describe('buildReport — ## Metadata', () => {
 		expect(report).not.toContain('A short blurb.…');
 	});
 
-	it('lists the manifest summary override locales', () => {
+	/*
+	 * A row per locale, carrying the LENGTH (spec #55). A list of locale keys was reviewable
+	 * while blurbs were optional; now that every book declares every locale it is the same two
+	 * words on every report, and the length is what makes a truncated or swapped blurb visible
+	 * in a diff.
+	 */
+	it('gives each declared locale its own row, with the blurb length', () => {
 		const report = buildReport({
 			...base,
 			metadata: {
 				work: '/works/OL144961W',
 				year: 1626,
 				description: 'A blurb.',
-				overrides: ['es']
+				summaries: { en: 'An English blurb.', es: 'Un resumen en español.' }
 			}
 		});
-		expect(report).toMatch(/`es`.*manifest/);
+		expect(report).toContain('| Summary (`en`) | 17 characters (manifest) |');
+		expect(report).toContain('| Summary (`es`) | 22 characters (manifest) |');
+	});
+
+	it('quotes the opening of each blurb, before the Open Library description', () => {
+		const report = buildReport({
+			...base,
+			metadata: {
+				work: '/works/OL144961W',
+				year: 1626,
+				description: 'Open Library says this.',
+				summaries: { en: 'An English blurb.', es: 'Un resumen en español.' }
+			}
+		});
+		expect(report).toContain('Opening of the `en` summary, as declared in the manifest:');
+		expect(report).toContain('An English blurb.');
+		expect(report).toContain('Un resumen en español.');
+		// The hand-written prose is what ships; `default` is the fallback for a state the
+		// validator refuses to allow, and must not be the first blurb a reviewer meets.
+		expect(report.indexOf('An English blurb.')).toBeLessThan(
+			report.indexOf('Opening of the description')
+		);
+	});
+
+	it('truncates a long blurb to the same preview length as the description', () => {
+		const long = `${'a'.repeat(250)}`;
+		const report = buildReport({
+			...base,
+			metadata: { year: 1626, description: null, summaries: { en: long } }
+		});
+		expect(report).toContain(`${'a'.repeat(200)}…`);
+		expect(report).not.toContain('a'.repeat(201));
 	});
 
 	/*
@@ -308,13 +345,13 @@ describe('buildReport — ## Metadata', () => {
 	 * the "None declared" branch — that would report a book as having no summary while shipping
 	 * one.
 	 */
-	it('reports manifest overrides even when no work is declared', () => {
+	it('reports the manifest blurbs even when no work is declared', () => {
 		const report = buildReport({
 			...base,
-			metadata: { year: null, description: null, overrides: ['es'] }
+			metadata: { year: null, description: null, summaries: { es: 'Un resumen.' } }
 		});
 		expect(report).not.toContain('None declared — this book ships without a year or a summary.');
-		expect(report).toContain('`es`');
+		expect(report).toContain('| Summary (`es`) |');
 	});
 
 	it('leaves every other section unchanged', () => {
@@ -353,7 +390,12 @@ describe('buildReport — ## Metadata year provenance', () => {
 	it('attributes a declared year to the manifest', () => {
 		const report = buildReport({
 			...base,
-			metadata: { year: 1914, manifestYear: 1914, description: null, overrides: ['es'] }
+			metadata: {
+				year: 1914,
+				manifestYear: 1914,
+				description: null,
+				summaries: { es: 'Un resumen.' }
+			}
 		});
 		expect(report).toContain('1914 (manifest)');
 	});
@@ -404,10 +446,14 @@ describe('buildReport — ## Metadata year provenance', () => {
 	it('does not claim an override when there was no lookup to override', () => {
 		const report = buildReport({
 			...base,
-			metadata: { year: 1873, manifestYear: 1873, description: null, overrides: ['es'] }
+			metadata: {
+				year: 1873,
+				manifestYear: 1873,
+				description: null,
+				summaries: { es: 'Un resumen.' }
+			}
 		});
 		expect(report).toContain('1873 (manifest)');
-		// Not `not.toContain('override')` — the `Summary overrides` row legitimately says it.
 		expect(report).not.toContain('manifest override');
 	});
 

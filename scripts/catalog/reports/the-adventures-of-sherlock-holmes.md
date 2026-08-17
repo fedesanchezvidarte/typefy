@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | `/works/OL262421W` |
 | First publication year | 1892 (Open Library) |
+| Summary (`en`) | 612 characters (manifest) |
+| Summary (`es`) | 583 characters (manifest) |
 | Description | 2676 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+Twelve cases, each self-contained, each narrated by the doctor who shares rooms with the only consulting detective in the world. A client arrives with something odd rather than something criminal: a j…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Doce casos independientes, narrados todos por el médico que comparte piso con el único detective consultor del mundo. Un cliente llega con algo raro más que con algo delictivo: un empleo que paga dema…
+```
 
 Opening of the description, as it would be stored under `default`:
 

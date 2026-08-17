@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | `/works/OL52267W` |
 | First publication year | 1895 (Open Library) |
+| Summary (`en`) | 561 characters (manifest) |
+| Summary (`es`) | 585 characters (manifest) |
 | Description | 502 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+An inventor tells a room of sceptical dinner guests that he has travelled forward in time, and then describes what he found there: a gentle, incurious people living among the ruins of something enormo…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Un inventor anuncia a un grupo de invitados escépticos que ha viajado al futuro, y a continuación cuenta lo que vio allí: un pueblo apacible y sin curiosidad instalado entre las ruinas de algo inmenso…
+```
 
 Opening of the description, as it would be stored under `default`:
 

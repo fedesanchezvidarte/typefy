@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | `/works/OL7985084W` |
 | First publication year | 1554 (Open Library) |
+| Summary (`en`) | 622 characters (manifest) |
+| Summary (`es`) | 579 characters (manifest) |
 | Description | 852 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+Lázaro, born beside the river Tormes, is writing to a gentleman who has asked him to account for himself, and takes the opportunity to tell the whole story: the masters he served, what each one taught…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Lázaro, nacido junto al río Tormes, escribe a un señor que le ha pedido explicaciones sobre su vida y aprovecha para contarla entera desde el principio: los amos que tuvo, lo que aprendió con cada uno…
+```
 
 Opening of the description, as it would be stored under `default`:
 

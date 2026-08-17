@@ -31,13 +31,26 @@
 |---|---|
 | Open Library work | `/works/OL503666W` |
 | First publication year | 1605 (manifest override; Open Library says 1600) |
+| Summary (`en`) | 618 characters (manifest) |
+| Summary (`es`) | 626 characters (manifest) |
 | Description | 1524 characters, from Open Library |
-| Summary overrides | None |
 
 > The sources disagree: the manifest declares 1605, Open Library reports 1600.
 > The manifest wins, so 1605 is what gets written. Open Library reports the
 > earliest edition it has CATALOGUED, which is not the same fact as first publication —
 > confirm the declared year is still the better one before publishing.
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+A country gentleman reads so many chivalric romances that he sets out on the roads to be a knight himself, in inherited armour, on a thin horse, with a farming neighbour talked into serving as his squ…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Un hidalgo manchego lee tantos libros de caballerías que decide salir a los caminos a ejercer de caballero andante, con una armadura heredada, un caballo flaco y un vecino labrador al que convence de …
+```
 
 Opening of the description, as it would be stored under `default`:
 

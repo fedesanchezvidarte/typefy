@@ -27,13 +27,26 @@
 |---|---|
 | Open Library work | `/works/OL61982W` |
 | First publication year | -700 (manifest override; Open Library says 1488) |
+| Summary (`en`) | 617 characters (manifest) |
+| Summary (`es`) | 588 characters (manifest) |
 | Description | 473 characters, from Open Library |
-| Summary overrides | None |
 
 > The sources disagree: the manifest declares -700, Open Library reports 1488.
 > The manifest wins, so -700 is what gets written. Open Library reports the
 > earliest edition it has CATALOGUED, which is not the same fact as first publication —
 > confirm the declared year is still the better one before publishing.
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+Every commander has come home from Troy except one. In Ithaca the suitors have settled in to eat through his estate, his son is old enough to go looking for him, and he has spent years held far away f…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Acabada la guerra de Troya, todos los caudillos han vuelto a su casa menos uno. En Ítaca los pretendientes se han instalado a consumir su hacienda, su hijo ya tiene edad de ir a buscarlo y él lleva añ…
+```
 
 Opening of the description, as it would be stored under `default`:
 

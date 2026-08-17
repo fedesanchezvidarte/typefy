@@ -27,13 +27,26 @@
 |---|---|
 | Open Library work | `/works/OL815453W` |
 | First publication year | 1878 (manifest override; Open Library says 1883) |
+| Summary (`en`) | 577 characters (manifest) |
+| Summary (`es`) | 565 characters (manifest) |
 | Description | 854 characters, from Open Library |
-| Summary overrides | None |
 
 > The sources disagree: the manifest declares 1878, Open Library reports 1883.
 > The manifest wins, so 1878 is what gets written. Open Library reports the
 > earliest edition it has CATALOGUED, which is not the same fact as first publication —
 > confirm the declared year is still the better one before publishing.
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+Nela is an orphan girl, poor and quite certain of her own ugliness, who works as guide to a blind young man from a comfortable family in a mining district. He listens to her, loves her, and has never …
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Nela es una muchacha huérfana, pobre y convencida de su propia fealdad, que hace de lazarillo a un joven ciego de familia acomodada en una comarca minera. Él la escucha, la quiere y no la ha visto nun…
+```
 
 Opening of the description, as it would be stored under `default`:
 
