@@ -77,11 +77,17 @@ export interface BookManifestEntry {
 	 */
 	year?: number;
 	/**
-	 * Hand-written per-locale summary overrides. A locale key wins over Open Library's
-	 * description, which is stored under `default` with its language unverified.
+	 * Hand-written per-locale summaries. A locale key wins over Open Library's description,
+	 * which is stored under `default` with its language unverified.
 	 *
 	 * Keyed on the **UI locale**, not the book's content language: the same Spanish book shows
 	 * the English blurb at `/books/el-buscon` and this one at `/es/books/el-buscon`.
+	 *
+	 * **Required for every locale in `LOCALES` (spec #55)**, which is why it is no longer
+	 * described as an override — `default` is now the fallback for a locale whose blurbs have
+	 * not been written yet, a state `parseManifest` refuses to let an ingested book be in.
+	 * Optional on the type, not in the manifest: a validated entry always carries both keys, and
+	 * the test fixtures that exercise `resolveSummary`'s absent branch are not validated entries.
 	 */
 	summary?: Partial<Record<Locale, string>>;
 }
@@ -283,28 +289,40 @@ export function parseManifest(raw: string): ManifestResult {
 			}
 		}
 
-		// An unknown locale key is REPORTED rather than dropped: a typo'd "sp" would otherwise
-		// produce a book whose Spanish summary mysteriously never appears, with nothing to say why.
-		if (entry.summary !== undefined) {
-			if (!isRecord(entry.summary)) {
-				problems.push(`${label}: \`summary\`, when present, must be an object keyed by locale.`);
-			} else {
-				const keys = Object.keys(entry.summary);
-				if (keys.length === 0) {
+		// A blurb per UI locale is REQUIRED, not an override (spec #55). Open Library's description
+		// is stored under `default` with its language unverified, so a book without a locale key
+		// serves whatever Open Library happened to return that day to a reader who chose Spanish.
+		// The rule is here rather than at the content pass so a book added next year cannot reach
+		// the catalog without its blurbs.
+		//
+		// Only presence and non-emptiness live here. Length and "no markdown characters" are
+		// editorial house style for THIS catalog, not truths about the manifest format, and are
+		// held by a test over `scripts/catalog/books.json` — which is also what keeps the test
+		// fixtures, whose absent summaries are deliberate `resolveSummary` coverage, out of reach
+		// of the editorial rules while still meeting the structural one.
+		if (entry.summary !== undefined && !isRecord(entry.summary)) {
+			problems.push(`${label}: \`summary\`, when present, must be an object keyed by locale.`);
+		} else {
+			const declared = isRecord(entry.summary) ? (entry.summary as Record<string, unknown>) : {};
+
+			// An unknown locale key is REPORTED rather than dropped: a typo'd "sp" would otherwise
+			// produce a book whose Spanish summary mysteriously never appears, with nothing to say
+			// why — and, now that every locale is required, would be reported only as the `es` key
+			// missing, which points at the wrong repair.
+			for (const key of Object.keys(declared)) {
+				if (!LOCALES.includes(key)) {
 					problems.push(
-						`${label}: \`summary\` is empty — omit it entirely rather than declaring nothing.`
+						`${label}: \`summary\` has unknown locale key "${key}" (expected ${LOCALES.join(' or ')}).`
 					);
 				}
-				for (const key of keys) {
-					if (!LOCALES.includes(key)) {
-						problems.push(
-							`${label}: \`summary\` has unknown locale key "${key}" (expected ${LOCALES.join(' or ')}).`
-						);
-					}
-					const value = (entry.summary as Record<string, unknown>)[key];
-					if (typeof value !== 'string' || value.trim() === '') {
-						problems.push(`${label}: \`summary.${key}\` must be a non-empty string.`);
-					}
+			}
+
+			for (const locale of LOCALES) {
+				const value = declared[locale];
+				if (typeof value !== 'string' || value.trim() === '') {
+					problems.push(
+						`${label}: \`summary.${locale}\` is required — every book needs a hand-written blurb per UI locale.`
+					);
 				}
 			}
 		}

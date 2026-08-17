@@ -1,14 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import { parseManifest } from './manifest.js';
 
+/*
+ * `summary` is part of the MINIMAL valid entry, not an addition to it (spec #55): a blurb per
+ * UI locale is required, so an entry without one is not minimal, it is incomplete.
+ */
 const valid = {
 	slug: 'pride-and-prejudice',
 	title: 'Pride and Prejudice',
 	author: 'Jane Austen',
 	language: 'en',
 	sourceUrl: 'https://www.gutenberg.org/cache/epub/1342/pg1342.txt',
-	license: 'Public domain in the USA'
+	license: 'Public domain in the USA',
+	summary: { en: 'A summary.', es: 'Un resumen.' }
 };
+
+/** `valid` with one locale's blurb replaced, so a test can state the one key it is about. */
+function withSummary(summary: Record<string, unknown>): Record<string, unknown> {
+	return { ...valid, summary };
+}
 
 /** Serialises a manifest the way the committed file holds it. */
 function manifest(...books: unknown[]): string {
@@ -304,51 +314,82 @@ describe('parseManifest — Open Library work id (spec #34)', () => {
 	});
 });
 
-describe('parseManifest — summary overrides (spec #34)', () => {
-	it('accepts a summary keyed by a known locale and carries it through', () => {
-		const result = parseManifest(manifest({ ...valid, summary: { es: 'Un resumen.' } }));
-		if (!result.ok) throw new Error('expected acceptance');
-		expect(result.books[0].summary).toEqual({ es: 'Un resumen.' });
-	});
-
-	it('accepts several locales at once', () => {
-		const result = parseManifest(
-			manifest({ ...valid, summary: { en: 'A summary.', es: 'Un resumen.' } })
-		);
+describe('parseManifest — per-locale summaries (spec #34, required by spec #55)', () => {
+	it('accepts a book declaring every UI locale and carries the blurbs through', () => {
+		const result = parseManifest(manifest(valid));
 		if (!result.ok) throw new Error('expected acceptance');
 		expect(result.books[0].summary).toEqual({ en: 'A summary.', es: 'Un resumen.' });
 	});
 
 	/*
 	 * The two fields are independent: a hand-written summary for a book with no Open Library
-	 * work is legitimate, and a work id with no override is the common case.
+	 * work is legitimate, and a work id is the common case on top of one.
 	 */
 	it('accepts a summary with no openLibraryWork', () => {
-		expect(parseManifest(manifest({ ...valid, summary: { es: 'Un resumen.' } })).ok).toBe(true);
+		expect(parseManifest(manifest(valid)).ok).toBe(true);
 	});
 
-	it('accepts an openLibraryWork with no summary', () => {
+	it('accepts an openLibraryWork alongside the required summaries', () => {
 		expect(parseManifest(manifest({ ...valid, openLibraryWork: '/works/OL144961W' })).ok).toBe(
 			true
 		);
 	});
 
 	/*
-	 * A typo'd locale key is REPORTED, never dropped. Silently ignoring `"sp"` produces a book
-	 * whose Spanish summary mysteriously never appears, with nothing anywhere saying why.
+	 * One test per locale rather than one over both: a rule written as a loop can pass while
+	 * silently checking the same locale twice, and these two are what the whole spec rests on.
 	 */
-	it('rejects an unknown locale key rather than ignoring it', () => {
-		const problems = problemsOf(manifest({ ...valid, summary: { sp: 'Un resumen.' } })).join(' ');
-		expect(problems).toMatch(/summary/);
-		expect(problems).toMatch(/sp/);
+	it('rejects a book missing summary.en', () => {
+		const problems = problemsOf(manifest(withSummary({ es: 'Un resumen.' }))).join(' ');
+		expect(problems).toMatch(/`summary\.en` is required/);
+		expect(problems).not.toMatch(/`summary\.es` is required/);
 	});
 
-	it('rejects an empty-string summary — an absent summary is expressed by omission', () => {
-		expect(problemsOf(manifest({ ...valid, summary: { es: '' } })).join(' ')).toMatch(/summary/);
+	it('rejects a book missing summary.es', () => {
+		const problems = problemsOf(manifest(withSummary({ en: 'A summary.' }))).join(' ');
+		expect(problems).toMatch(/`summary\.es` is required/);
+		expect(problems).not.toMatch(/`summary\.en` is required/);
+	});
+
+	it('rejects a book declaring no summary at all', () => {
+		const withoutSummary: Record<string, unknown> = { ...valid };
+		delete withoutSummary.summary;
+		const problems = problemsOf(manifest(withoutSummary)).join(' ');
+		expect(problems).toMatch(/`summary\.en` is required/);
+		expect(problems).toMatch(/`summary\.es` is required/);
+	});
+
+	/*
+	 * A typo'd locale key is REPORTED, never dropped. Silently ignoring `"sp"` would now surface
+	 * only as "`summary.es` is required", which points the maintainer at writing a blurb that is
+	 * already written rather than at the one character that is wrong.
+	 */
+	it('rejects an unknown locale key rather than ignoring it', () => {
+		const problems = problemsOf(manifest(withSummary({ ...valid.summary, sp: 'Un resumen.' })));
+		expect(problems.join(' ')).toMatch(/unknown locale key "sp"/);
+	});
+
+	/*
+	 * Whitespace is the failure mode a `!== undefined` check waves through: the key is present,
+	 * the JSON is well-formed, and the panel renders empty. `resolveSummary` trims too, so a
+	 * blank blurb would fall through to Open Library's `default` — the exact outcome this spec
+	 * exists to end, arriving silently.
+	 */
+	it('rejects a whitespace-only blurb rather than accepting it as present', () => {
+		const problems = problemsOf(manifest(withSummary({ ...valid.summary, es: '   \n\t ' })));
+		expect(problems.join(' ')).toMatch(/`summary\.es` is required/);
+	});
+
+	it('rejects an empty-string blurb', () => {
+		expect(problemsOf(manifest(withSummary({ ...valid.summary, es: '' }))).join(' ')).toMatch(
+			/`summary\.es` is required/
+		);
 	});
 
 	it('rejects a non-string summary value', () => {
-		expect(problemsOf(manifest({ ...valid, summary: { es: 42 } })).join(' ')).toMatch(/summary/);
+		expect(problemsOf(manifest(withSummary({ ...valid.summary, es: 42 }))).join(' ')).toMatch(
+			/`summary\.es` is required/
+		);
 	});
 
 	it('rejects a summary that is not an object', () => {
@@ -359,7 +400,7 @@ describe('parseManifest — summary overrides (spec #34)', () => {
 	});
 
 	it('rejects an empty summary object — it declares nothing and is always a mistake', () => {
-		expect(problemsOf(manifest({ ...valid, summary: {} })).join(' ')).toMatch(/summary/);
+		expect(problemsOf(manifest(withSummary({}))).join(' ')).toMatch(/summary/);
 	});
 });
 

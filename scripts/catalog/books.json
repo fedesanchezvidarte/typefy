@@ -1,7 +1,7 @@
 {
 	"$comment": "The catalog's source of truth (spec #17 §2). Ingestion reads this and never invents metadata. Each entry's sourceUrl and license are verified by hand against the source; a cover, when present, requires coverLicense and coverSource because Gutenberg's text is public domain but its scanned cover art often is not. Add a book: add an entry, run `npm run ingest -- --slug <slug> --target local --dry-run`, read the committed report, then ingest and publish.",
 	"$coverComment": "Covers (spec #19 §2) are supplied, never generated or transformed BY INGESTION — preparing them offline is the maintainer's job and always was. Each one was located on Wikimedia Commons, its licence read from that file's own description page, and the file fetched from Commons: directly for a plain image, or as a Commons-rendered page of a scanned volume for the-adventures-of-sherlock-holmes (page 1 of the 1892 djvu, its front board), marianela (page 1 of the IA pdf, its front board) and el-buscon (page 9 of the djvu, the 1911 Clásicos Castellanos title page — page 1 is a blank library board). Covers added before 2026-08-15 were used exactly as fetched; the ten added on that date were cropped to 2:3 and re-encoded as JPEG at 800px wide (marianela 431px, romeo-and-juliet 668px — the sources are smaller and upscaling is not done) so they clear the aspect band, the byte limit and the minimum width. The crop keeps the whole title block: it trims the empty foot of a tall title page, and for marianela the left edge carrying a library sticker. coverSource points at the Commons file page, which is the licence claim being made; it is NOT a claim that the committed bytes are byte-identical to it. A book whose art could not be verified as freely licensed simply has no `cover` entry and renders GeneratedCover.",
-	"$metadataComment": "openLibraryWork (spec #34) is an Open Library WORK id, looked up by that declared id and never by a title search — searching \"El Buscón\" surfaces works dated 1927, 1961 and 1979 beside the real 1626. Each id here was opened and checked against the right title and author. Two books deliberately have none: niebla, whose Open Library description is a physical-extent note (\"ix, 178 pages ; 20 cm\") rather than a blurb, and trafalgar, whose description is a series note (\"Episodios Nacionales / Serie 1 - Volume 1\") and whose first_publish_year (1884) is an edition date, not the 1873 first publication. A summary that is not a summary is worse than no summary, and there is no way to take the year without the description. `year` (spec #34) is an optional hand-declared first publication year that WINS over Open Library's first_publish_year, on the same doctrine as `summary`: the manifest is the source of truth and a third party is a convenience. It is needed because first_publish_year is the earliest edition Open Library has CATALOGUED, not first publication — it disagrees with the accepted date for don-quijote (reports 1600; part one was published in 1605), marianela (reports 1883; published 1878) and dr-jekyll-and-mr-hyde (reports 1875; published 1886). Each disagreement is printed during the run and flagged in the committed report, so an override that has become redundant is visible and can be deleted. niebla (1914) and trafalgar (1873) get their years this way too, since they have no openLibraryWork to fetch one from. `summary` holds hand-written per-locale overrides only — never a machine translation, never an invented blurb — and a locale key wins over Open Library's description.",
+	"$metadataComment": "openLibraryWork (spec #34) is an Open Library WORK id, looked up by that declared id and never by a title search — searching \"El Buscón\" surfaces works dated 1927, 1961 and 1979 beside the real 1626. Each id here was opened and checked against the right title and author. Two books deliberately have none: niebla, whose Open Library description is a physical-extent note (\"ix, 178 pages ; 20 cm\") rather than a blurb, and trafalgar, whose description is a series note (\"Episodios Nacionales / Serie 1 - Volume 1\") and whose first_publish_year (1884) is an edition date, not the 1873 first publication. A summary that is not a summary is worse than no summary, and there is no way to take the year without the description. `year` (spec #34) is an optional hand-declared first publication year that WINS over Open Library's first_publish_year, on the same doctrine as `summary`: the manifest is the source of truth and a third party is a convenience. It is needed because first_publish_year is the earliest edition Open Library has CATALOGUED, not first publication — it disagrees with the accepted date for don-quijote (reports 1600; part one was published in 1605), marianela (reports 1883; published 1878) and dr-jekyll-and-mr-hyde (reports 1875; published 1886). Each disagreement is printed during the run and flagged in the committed report, so an override that has become redundant is visible and can be deleted. niebla (1914) and trafalgar (1873) get their years this way too, since they have no openLibraryWork to fetch one from. `summary` (spec #55) is REQUIRED for every UI locale — `en` and `es` today — and holds hand-written blurbs only: never a machine translation of the other locale, never Open Library's text copied across. A locale key always wins over Open Library's description, so `default` is now a fallback for a state parseManifest refuses to let an ingested book be in. The blurbs are plain prose because BookFacts renders them in a plain paragraph, run 400-900 characters because the panel is a small card, open on the work rather than on a bibliographic clause, and close on one clause about how the prose feels to type — with no year and no page count in it, since the panel already shows both directly above. Adding a third UI locale therefore refuses every book in this file until its blurbs are written; that is the intended cost of never serving a reader a language they did not choose.",
 	"books": [
 		{
 			"slug": "pride-and-prejudice",
@@ -19,7 +19,11 @@
 			"chapters": { "firstHeadingImplicit": true },
 			"cover": "scripts/catalog/covers/pride-and-prejudice.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:PrideAndPrejudiceTitlePage.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:PrideAndPrejudiceTitlePage.jpg",
+			"summary": {
+				"en": "Mrs Bennet has five unmarried daughters and a neighbourhood newly supplied with wealthy young men, which she regards as a solvable problem. Her second daughter Elizabeth is quicker, prouder and less biddable than the arrangement requires, and the man she takes an instant dislike to turns out to be the richest of them all. Austen's comedy of manners is really a comedy of judgement: almost everyone in it is confidently wrong about somebody, and the pleasure lies in watching two of them find out. The sentences are balanced and precise, steered by commas rather than by clauses that run away, and the dialogue is clean enough that long stretches type almost like speech.",
+				"es": "En la Inglaterra rural de la pequeña aristocracia, casar bien a una hija no es un capricho: es la única manera de asegurarle un techo. Sobre esa urgencia tan concreta levanta Austen una comedia del juicio equivocado, donde casi todos están convencidos de haber entendido a alguien a quien no han entendido en absoluto. Elizabeth Bennet, la segunda de cinco hermanas, es la que más confía en su criterio y la que más tendrá que revisarlo. Para quien escribe en inglés sin tenerlo como lengua propia resulta un texto amable: frases equilibradas, vocabulario cotidiano y diálogos que avanzan a golpe de coma en lugar de acumular subordinadas."
+			}
 		},
 		{
 			"slug": "frankenstein",
@@ -35,7 +39,11 @@
 			},
 			"cover": "scripts/catalog/covers/frankenstein.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Christie%27s_auction_scan_of_Frankenstein_1818.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Christie%27s_auction_scan_of_Frankenstein_1818.jpg",
+			"summary": {
+				"en": "A student of natural philosophy works out how to give life to dead matter, succeeds, and is so appalled by what stands up in his laboratory that he runs from the room. Everything that follows comes from that flight rather than from the experiment. Shelley wrote less about the making of a creature than about abandoning one, and she hands the creature its own voice partway through, so the reader is made to weigh both sides. The book is built as letters inside letters and confessions inside confessions, in the long formal sentences of its period, with paragraphs that gather for a while before they release.",
+				"es": "Un estudiante de filosofía natural descubre cómo dar vida a la materia muerta, lo consigue y sale huyendo de su propio laboratorio, horrorizado por lo que acaba de incorporarse. Todo lo que viene después nace de esa huida y no del experimento. La novela de Shelley habla menos de fabricar una criatura que de abandonarla, y a mitad de camino le cede la palabra para que el lector tenga que escuchar también su versión. Está escrita en un inglés de época, con una arquitectura de cartas dentro de cartas y frases largas y formales que se sostienen durante líneas enteras antes de cerrar."
+			}
 		},
 		{
 			"slug": "the-time-machine",
@@ -51,7 +59,11 @@
 			},
 			"cover": "scripts/catalog/covers/the-time-machine.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:The_Time_Machine_(Heinemann_text)_-_front_cover.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:The_Time_Machine_(Heinemann_text)_-_front_cover.jpg",
+			"summary": {
+				"en": "An inventor tells a room of sceptical dinner guests that he has travelled forward in time, and then describes what he found there: a gentle, incurious people living among the ruins of something enormous, and an explanation for why they are like that which he would rather not have found. Wells wrote the story that gave an entire genre its vocabulary, and it is shorter and colder than its reputation suggests. The narration is brisk and conversational, mostly one man talking aloud to a fireside audience, with short paragraphs and very few names to trip over.",
+				"es": "Un inventor anuncia a un grupo de invitados escépticos que ha viajado al futuro, y a continuación cuenta lo que vio allí: un pueblo apacible y sin curiosidad instalado entre las ruinas de algo inmenso, y una explicación de por qué son así que habría preferido no encontrar. Wells escribió aquí el relato que dio vocabulario a todo un género, y resulta más breve y más frío de lo que su fama promete. Para quien se enfrenta al inglés es de los textos más llevaderos del catálogo: un hombre hablando en voz alta junto a la chimenea, párrafos cortos y apenas un puñado de nombres propios."
+			}
 		},
 		{
 			"slug": "a-christmas-carol",
@@ -67,7 +79,11 @@
 			},
 			"cover": "scripts/catalog/covers/a-christmas-carol.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Charles_Dickens-A_Christmas_Carol-Cloth-First_Edition_1843.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Charles_Dickens-A_Christmas_Carol-Cloth-First_Edition_1843.jpg",
+			"summary": {
+				"en": "A miser is visited on Christmas Eve by his dead business partner and then by three spirits, who show him his own life from the outside: what made him, what he is missing, and where he is heading. Dickens wrote it fast and meant it to be read aloud in a single evening, and that intention shows everywhere. It moves quickly, it is funny before it is frightening, and it earns its ending rather than announcing it. It is also the shortest complete work in this catalog, which makes it a reasonable choice for finishing a whole book for the first time. The prose exclaims and enumerates, steered by dashes and semicolons more than by full stops.",
+				"es": "En Nochebuena, un avaro recibe la visita de su socio muerto y después la de tres espíritus que le enseñan su propia vida desde fuera: lo que lo hizo así, lo que se está perdiendo y adónde va a parar. Dickens lo escribió deprisa, pensado para leerse en voz alta en una sola velada, y esa intención se nota en todo: avanza rápido, hace reír antes de dar miedo y se gana el final en lugar de anunciarlo. Es además la obra completa más corta del catálogo, así que sirve para terminar un libro entero por primera vez. La prosa exclama y enumera sin descanso, guiada más por guiones y puntos y coma que por puntos."
+			}
 		},
 		{
 			"slug": "dr-jekyll-and-mr-hyde",
@@ -84,7 +100,11 @@
 			},
 			"cover": "scripts/catalog/covers/dr-jekyll-and-mr-hyde.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Jekyll_and_Hyde_Title.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Jekyll_and_Hyde_Title.jpg",
+			"summary": {
+				"en": "A respectable London lawyer notices that his old friend, a doctor of impeccable standing, has made a will in favour of a stranger nobody can describe without shuddering. The story is built as an investigation, and it withholds until the last pages the thing most readers already believe they know, which is worth respecting while typing it. Stevenson was interested less in the transformation than in the respectability around it: the locked doors, the wills, the friends who decide not to ask. The prose is close and lawyerly, thick with clauses that qualify one another, and it rewards going slowly.",
+				"es": "Un abogado londinense de intachable reputación descubre que su viejo amigo, un médico igual de respetable, ha dejado testamento a favor de un desconocido al que nadie logra describir sin estremecerse. El relato está construido como una investigación y reserva hasta las últimas páginas aquello que casi todo el mundo cree saber de antemano, algo que conviene respetar mientras se escribe. A Stevenson no le interesa tanto la transformación como la respetabilidad que la rodea: las puertas cerradas, los testamentos, los amigos que deciden no preguntar. El inglés es cerrado y jurídico, de frases que se matizan a sí mismas cláusula tras cláusula."
+			}
 		},
 		{
 			"slug": "alice-in-wonderland",
@@ -100,7 +120,11 @@
 			},
 			"cover": "scripts/catalog/covers/alice-in-wonderland.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Alice%27s_Adventures_in_Wonderland_cover_(1865).jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Alice%27s_Adventures_in_Wonderland_cover_(1865).jpg",
+			"summary": {
+				"en": "A bored child follows a talking rabbit down a hole and spends the rest of the book being contradicted by everything she meets: a caterpillar with firm opinions, a cat that vanishes in pieces, a queen who solves every problem the same way. Carroll invented it for one particular girl on one particular afternoon, and it never quite loses the improvised quality of a story told to somebody rather than written for everybody. There is no moral, only logic pushed until it snaps. The prose is short-sentenced and heavily spoken, with paragraphs that break off mid-thought and verse dropped in whenever the plot pauses.",
+				"es": "Una niña aburrida sigue a un conejo parlante hasta el fondo de una madriguera y pasa el resto del libro siendo contradicha por todo lo que encuentra: una oruga con opiniones firmes, un gato que desaparece a trozos, una reina que resuelve cualquier problema del mismo modo. Carroll lo inventó para una niña concreta en una tarde concreta, y nunca pierde del todo ese aire de historia improvisada para alguien. No hay moraleja: solo lógica llevada hasta que se rompe. El inglés es sencillo y muy dialogado, de frases cortas y párrafos que se interrumpen, con poemas intercalados cada vez que la trama se detiene."
+			}
 		},
 		{
 			"slug": "moby-dick",
@@ -125,7 +149,11 @@
 			},
 			"cover": "scripts/catalog/covers/moby-dick.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Moby-Dick_FE_title_page.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Moby-Dick_FE_title_page.jpg",
+			"summary": {
+				"en": "A young man with no money and a bad mood signs onto a whaling ship out of Nantucket and discovers that its captain is not hunting whales in general but one whale in particular. Around that pursuit Melville packed everything else he wanted to write: the trades and tools of whaling, the men of a dozen nations crammed into one hull, and long stretches of direct argument with the reader. It is the largest undertaking in this catalog and, while you are inside it, the least like a novel. The sentences run clause upon clause without letting go, and the technical vocabulary of the fishery is unfamiliar even to native readers.",
+				"es": "Un joven sin dinero y de pésimo humor se enrola en un ballenero de Nantucket y descubre que su capitán no persigue ballenas en general, sino una en concreto. Alrededor de esa persecución metió Melville todo lo demás que quería escribir: los oficios y los aparejos de la caza, una tripulación de doce nacionalidades apretada en un mismo casco y largos tramos de discusión directa con el lector. Es el texto más extenso del catálogo y, mientras se está dentro, el que menos se parece a una novela. Las frases se encadenan sin soltar el aliento y el vocabulario marino desconcierta incluso a quien tiene el inglés como lengua materna."
+			}
 		},
 		{
 			"slug": "the-odyssey",
@@ -154,7 +182,11 @@
 			},
 			"cover": "scripts/catalog/covers/the-odyssey.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Odyssey_(Butler)_title_page.png"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Odyssey_(Butler)_title_page.png",
+			"summary": {
+				"en": "The war at Troy is over and one commander still has not come home. His wife is besieged by suitors steadily eating through his estate, his son is old enough to go looking for him, and he himself is stranded a long way from either of them. Homer tells a story of return rather than conquest, and hands much of the telling to the man himself, boasting and lying to strangers as he goes. This is the English prose rendering, so it reads as narrative rather than as verse. The style repeats on purpose: fixed epithets and set phrases come back word for word, and the fingers start to anticipate them.",
+				"es": "Terminada la guerra de Troya, un solo caudillo sigue sin regresar. En su casa los pretendientes devoran su hacienda, su hijo ya tiene edad de salir a buscarlo y él está varado muy lejos de ambos. El poema de Homero trata del regreso y no de la conquista, y deja que buena parte del relato lo haga el propio protagonista, fanfarroneando y mintiendo ante desconocidos. Esta es la versión inglesa en prosa, que se lee como narración y no como verso. Conviene saber que el estilo repite a propósito: los epítetos fijos y las fórmulas vuelven idénticos una y otra vez, de modo que los dedos acaban anticipándolos."
+			}
 		},
 		{
 			"slug": "romeo-and-juliet",
@@ -174,7 +206,11 @@
 			},
 			"cover": "scripts/catalog/covers/romeo-and-juliet.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Romeo_and_Juliet_Q1_Title_Page.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Romeo_and_Juliet_Q1_Title_Page.jpg",
+			"summary": {
+				"en": "Two families in Verona have been feuding for so long that nobody remembers the cause, and a son of one meets a daughter of the other at a party he was never invited to. The play announces in its opening lines exactly how it ends, then spends five acts making that speed feel inevitable instead of absurd. Typing a play is a different exercise from typing a novel: speaker names head every turn, the exchanges are short and quick, and the verse lines break where the breath does rather than where the sentence would.",
+				"es": "Dos familias de Verona llevan enemistadas tanto tiempo que nadie recuerda por qué, y el hijo de una conoce a la hija de la otra en una fiesta a la que no estaba invitado. La obra anuncia el final en sus primeros versos y después dedica cinco actos a que esa velocidad parezca inevitable en lugar de absurda. Es, de todo el catálogo, el texto que menos se parece a los demás. Escribir teatro no se parece a escribir novela: hay nombres de personaje encabezando cada intervención, réplicas muy breves y versos que cortan donde respira la voz y no donde acabaría la frase."
+			}
 		},
 		{
 			"slug": "the-adventures-of-sherlock-holmes",
@@ -195,7 +231,11 @@
 			},
 			"cover": "scripts/catalog/covers/the-adventures-of-sherlock-holmes.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Doyle_-_Adventures_of_Sherlock_Holmes,_1892.djvu"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Doyle_-_Adventures_of_Sherlock_Holmes,_1892.djvu",
+			"summary": {
+				"en": "Twelve cases, each self-contained, each narrated by the doctor who shares rooms with the only consulting detective in the world. A client arrives with something odd rather than something criminal: a job that pays far too well, a compromising photograph, a stepfather who is never in the room at the same time as anyone else. The interest is in the reasoning, not the danger. Because the stories stand alone, this is the easiest book here to pick up and put down mid-session. The English is clean and late-Victorian and heavily spoken, with Holmes explaining in long paragraphs and Watson answering in short ones.",
+				"es": "Doce casos independientes, narrados todos por el médico que comparte piso con el único detective consultor del mundo. Un cliente llega con algo raro más que con algo delictivo: un empleo que paga demasiado bien, una fotografía comprometida, un padrastro que nunca coincide en la habitación con nadie. Lo que importa es el razonamiento y no el peligro. Como cada relato se sostiene solo, es el libro más fácil del catálogo para empezar y dejar a media sesión. El inglés victoriano tardío es limpio y muy dialogado: Holmes explica en párrafos largos y Watson contesta en frases cortas."
+			}
 		},
 		{
 			"slug": "don-quijote",
@@ -229,6 +269,10 @@
 					"DEDICATORIA, AL CONDE DE LEMOS"
 				],
 				"firstHeadingImplicit": true
+			},
+			"summary": {
+				"en": "A country gentleman reads so many chivalric romances that he sets out on the roads to be a knight himself, in inherited armour, on a thin horse, with a farming neighbour talked into serving as his squire. Cervantes set out to mock a fashionable genre and ended up inventing the modern novel: the two argue, correct each other and change each other over the length of the journey. It is the longest Spanish text in this catalog and among the most demanding to type, written in Golden Age prose whose sentences run for line after line, with period spelling and a vocabulary of arms and trades that has since disappeared.",
+				"es": "Un hidalgo manchego lee tantos libros de caballerías que decide salir a los caminos a ejercer de caballero andante, con una armadura heredada, un caballo flaco y un vecino labrador al que convence de acompañarlo como escudero. Cervantes empezó escribiendo la burla de un género de moda y terminó inventando la novela moderna: los dos protagonistas discuten, se corrigen y se transforman mutuamente a lo largo del camino. Es el texto más largo del catálogo en español. La prosa del Siglo de Oro exige atención al teclear: frases larguísimas, ortografía de época y un léxico de armas y oficios que ya no se usa en ninguna parte."
 			}
 		},
 		{
@@ -252,6 +296,10 @@
 				"selector": "h2.nobreak",
 				"excludeTitles": ["PRÓLOGO", "POST-PRÓLOGO", "ÍNDICE"],
 				"firstHeadingImplicit": true
+			},
+			"summary": {
+				"en": "Augusto Pérez falls in love almost by accident, following a woman he has never met through the streets, and from there begins to wonder whether his life is being decided by him or by somebody else. Unamuno refused to call the result a novel and coined his own word for it: the characters discuss their own condition as characters, and eventually one of them goes to demand an explanation from his author. It is philosophy staged as comedy, and never solemn for a page. The Spanish is modern and unornamented, heavily conversational, built out of short exchanges rather than long descriptive passages.",
+				"es": "Augusto Pérez se enamora por casualidad, siguiendo por la calle a una mujer a la que no conoce, y a partir de ahí empieza a preguntarse si su vida la decide él o alguien más. Unamuno llamó nivola a lo que escribió porque no le servían las reglas de la novela: aquí los personajes conversan sobre su propia condición de personajes y llega un momento en que uno de ellos va a pedirle explicaciones a su autor. Es filosofía puesta en escena, con mucho humor y sin una sola página solemne. El castellano es moderno y limpio, muy dialogado, de frases cortas que se contestan entre sí."
 			}
 		},
 		{
@@ -269,7 +317,11 @@
 			},
 			"cover": "scripts/catalog/covers/trafalgar.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Portada_Trafalgar_(1873).jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Portada_Trafalgar_(1873).jpg",
+			"summary": {
+				"en": "A boy from Cádiz, raised half-wild on the docks, takes a servant's place with a retired naval officer and watches from the deck as the sea battle that ended Spanish naval power unfolds around him. Galdós opened his Episodios Nacionales with this book, a series built on the idea that a century is best told through small people who happened to be present. An old man narrates what a child saw, and that distance carries the whole thing. For a reader typing Spanish it is a friendly place to begin: flowing, spoken prose in medium sentences, with period naval vocabulary the only real obstacle.",
+				"es": "Un muchacho de Cádiz, criado a salto de mata en el muelle, se embarca como criado de un oficial retirado y presencia desde cubierta la batalla naval que hundió el poder marítimo español. Con esta novela abre Galdós sus Episodios Nacionales, la serie con la que se propuso contar el siglo a través de gente pequeña que estuvo allí por casualidad. El narrador cuenta de viejo lo que vivió de niño, y esa distancia es lo que sostiene el libro entero. La prosa es ágil y oral, de frases medianas y párrafos generosos, con un léxico marinero de época que conviene leer sin prisa."
+			}
 		},
 		{
 			"slug": "marianela",
@@ -286,7 +338,11 @@
 			},
 			"cover": "scripts/catalog/covers/marianela.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Marianela_(IA_marianela00pereiala).pdf"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Marianela_(IA_marianela00pereiala).pdf",
+			"summary": {
+				"en": "Nela is an orphan girl, poor and quite certain of her own ugliness, who works as guide to a blind young man from a comfortable family in a mining district. He listens to her, loves her, and has never seen her; when an operation becomes possible, that asymmetry stops being a detail. Galdós wrote a short novel about who deserves to be looked at, and about what a society does with the people it has decided against. It is one of the quickest Spanish reads in this catalog. The prose is plain and strongly visual, alternating paragraphs of landscape with short spoken exchanges.",
+				"es": "Nela es una muchacha huérfana, pobre y convencida de su propia fealdad, que hace de lazarillo a un joven ciego de familia acomodada en una comarca minera. Él la escucha, la quiere y no la ha visto nunca; cuando aparece la posibilidad de una operación, esa asimetría deja de ser un detalle. Galdós escribió aquí una novela breve sobre quién merece ser mirado y sobre qué hace la sociedad con quien ha decidido que no. Es de las lecturas más rápidas del catálogo en español. La prosa es sencilla y muy visual, con párrafos de paisaje que alternan con diálogos cortos."
+			}
 		},
 		{
 			"slug": "el-buscon",
@@ -330,7 +386,11 @@
 			},
 			"cover": "scripts/catalog/covers/el-buscon.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Vida_del_Busc%C3%B3n.djvu"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Vida_del_Busc%C3%B3n.djvu",
+			"summary": {
+				"en": "Pablos, son of a thieving barber and a mother reputed to be a witch, narrates his own career of failed social climbing: servant, student, beggar, cardsharp, forever one step from rising and forever thrown back down. Quevedo wrote the cruellest and most brilliant of the picaresque novels, without the sympathy of Lazarillo and with a command of Spanish nobody has matched since. If you are about to type Spanish for the first time, do not begin here: the syntax is knotted on purpose, nearly every line turns on a pun, and the period spelling makes it impossible to type ahead by guessing.",
+				"es": "Pablos, hijo de un barbero ladrón y de una madre con fama de bruja, cuenta en primera persona su carrera de ascenso social fracasado: criado, estudiante, mendigo, tahúr, siempre a punto de subir un escalón y siempre expulsado de él. Quevedo escribe la picaresca en su versión más cruel y más brillante, sin la compasión del Lazarillo y con un dominio del idioma que no ha vuelto a repetirse. Es el texto más exigente del catálogo en español: sintaxis retorcida a propósito, juegos de palabras en casi cada línea y una ortografía de época que obliga a mirar la pantalla en lugar de anticipar."
+			}
 		},
 		{
 			"slug": "lazarillo-de-tormes",
@@ -346,7 +406,11 @@
 			},
 			"cover": "scripts/catalog/covers/lazarillo-de-tormes.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
-			"coverSource": "https://commons.wikimedia.org/wiki/File:Lazarillo2.jpg"
+			"coverSource": "https://commons.wikimedia.org/wiki/File:Lazarillo2.jpg",
+			"summary": {
+				"en": "Lázaro, born beside the river Tormes, is writing to a gentleman who has asked him to account for himself, and takes the opportunity to tell the whole story: the masters he served, what each one taught him, and the hunger that taught him most. This is the book the picaresque begins with, told in the first person with an irony that leaves the blind beggar, the priest and the squire fully exposed without a word of direct comment. It reads in one long sitting. The old Spanish is plainer than its reputation, though the period spelling and the archaic forms of address keep your eyes on the screen rather than ahead of it.",
+				"es": "Lázaro, nacido junto al río Tormes, escribe a un señor que le ha pedido explicaciones sobre su vida y aprovecha para contarla entera desde el principio: los amos que tuvo, lo que aprendió con cada uno y el hambre que fue su verdadera maestra. Es el libro que funda la picaresca, narrado en primera persona con una ironía que deja retratados al ciego, al clérigo y al escudero sin decir nunca una palabra de más. Se lee en una sesión larga. El castellano antiguo es más llano de lo que se teme, aunque la ortografía de época y los tratamientos en desuso obligan a teclear mirando."
+			}
 		},
 		{
 			"slug": "la-odisea",
@@ -376,7 +440,11 @@
 			},
 			"cover": "scripts/catalog/covers/la-odisea.jpg",
 			"coverLicense": "Public domain in the United States (binding of the 1910 Montaner y Simón edition, published before 1929; distributed with Project Gutenberg ebook 58221)",
-			"coverSource": "https://www.gutenberg.org/cache/epub/58221/images/cover.jpg"
+			"coverSource": "https://www.gutenberg.org/cache/epub/58221/images/cover.jpg",
+			"summary": {
+				"en": "Every commander has come home from Troy except one. In Ithaca the suitors have settled in to eat through his estate, his son is old enough to go looking for him, and he has spent years held far away from both. Homer tells a story of return rather than of conquest, and hands much of the telling to the man himself, lying cheerfully to strangers as he goes. This is the Spanish prose translation, so an English-speaking reader meets Ulises and Telémaco under their Spanish names. The style repeats on purpose: fixed epithets and set formulas come back word for word until the fingers recognise them before the eyes do.",
+				"es": "Acabada la guerra de Troya, todos los caudillos han vuelto a su casa menos uno. En Ítaca los pretendientes se han instalado a consumir su hacienda, su hijo ya tiene edad de ir a buscarlo y él lleva años detenido lejos de los dos. Homero cuenta un regreso y no una conquista, y deja que buena parte del relato lo haga el propio protagonista ante desconocidos a los que miente sin ningún reparo. Esta es la traducción castellana en prosa. El estilo repite a conciencia: los epítetos fijos y las fórmulas reaparecen palabra por palabra, y los dedos terminan reconociéndolas antes de leerlas."
+			}
 		}
 	]
 }
