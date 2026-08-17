@@ -347,6 +347,33 @@
 			"cover": "scripts/catalog/covers/lazarillo-de-tormes.jpg",
 			"coverLicense": "Public domain (the Wikimedia Commons file page states: Public domain)",
 			"coverSource": "https://commons.wikimedia.org/wiki/File:Lazarillo2.jpg"
+		},
+		{
+			"slug": "la-odisea",
+			"title": "La Odisea",
+			"author": "Homero",
+			"language": "es",
+			"sourceUrl": "https://www.gutenberg.org/cache/epub/58221/pg58221.txt",
+			"license": "Public domain in the United States; Project Gutenberg License applies to this edition",
+			"openLibraryWork": "/works/OL61982W",
+			"year": -700,
+			"featured": false,
+			"cleaning": {
+				"startAtMarker": "Háblame, Musa, de aquel varón de multiforme ingenio",
+				"endMarker": "ÍNDICE DE NOMBRES PROPIOS",
+				"stripLeadingParagraphNumbers": true,
+				"stripFootnoteBlocks": true
+			},
+			"chaptersHtmlUrl": "https://www.gutenberg.org/cache/epub/58221/pg58221-images.html",
+			"chapters": {
+				"excludeTitles": [
+					"AL LECTOR",
+					"ÍNDICE DE NOMBRES PROPIOS",
+					"ÍNDICE DE GRABADOS",
+					"ÍNDICE GENERAL"
+				],
+				"firstHeadingImplicit": true
+			}
 		}
 	]
 }

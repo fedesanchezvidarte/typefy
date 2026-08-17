@@ -29,6 +29,17 @@ export interface CleaningOverrides {
 	startAtMarker?: string;
 	/** Everything from the first line containing this onward is dropped. */
 	endMarker?: string;
+	/**
+	 * Drops a marginal verse number that the transcription moved to the head of a paragraph
+	 * (spec #48). Off by default, and opt-in per book for the same reason `[Illustration…]`
+	 * removal is narrow: a paragraph may legitimately open with a number.
+	 */
+	stripLeadingParagraphNumbers?: boolean;
+	/**
+	 * Drops a paragraph that opens with a bracketed footnote number, e.g. `[1] …` (spec #48).
+	 * Off by default: bracketed asides occur in real prose and are the author's.
+	 */
+	stripFootnoteBlocks?: boolean;
 }
 
 /**
@@ -109,8 +120,35 @@ function stripBoilerplate(lines: readonly string[], overrides: CleaningOverrides
  *
  * Only `[Illustration...]` is removed, never brackets in general: bracketed asides occur in
  * real prose and are the author's.
+ *
+ * The Spanish spelling is matched too, because Gutenberg's Spanish transcriptions use it and
+ * the marker is the same artefact under a different word (spec #48 found 66 of them in La
+ * Odisea, whose captions also span a blank line and would otherwise have become chunks of
+ * their own). Unconditional rather than opt-in, unlike the two options below: this is a
+ * transcription marker with no prose reading, exactly as the English spelling is. It is also
+ * output-neutral for the existing catalog — the string occurs in one other cached source
+ * (`niebla`) and only outside that book's cleaned bounds.
  */
-const ILLUSTRATION = /\[Illustration[^\]]*\]/gi;
+const ILLUSTRATION = /\[(?:Illustration|Ilustración)[^\]]*\]/gi;
+
+/**
+ * A marginal verse number the transcription moved inline, e.g. `1 Háblame, Musa, …`
+ * (`stripLeadingParagraphNumbers`, spec #48).
+ *
+ * The shape is deliberately narrow: digits, whitespace, then **the start of a sentence** — an
+ * upper-case letter, an opening inverted mark, or the quote that dialogue begins on. That is
+ * what separates a number the printer put in the margin from a number the author wrote, since
+ * prose that genuinely opens with a figure continues in lower case (`1605 marcó el comienzo…`).
+ * All 1,244 affected paragraphs in La Odisea match it and none of its 24 cantos contains a
+ * counter-example.
+ *
+ * The quote is `"` and not `«`, because this runs after `normalizeCharacters` has already folded
+ * the guillemets the Spanish source actually uses.
+ */
+const LEADING_PARAGRAPH_NUMBER = /^\d+\s+(?=[\p{Lu}"¡¿])/u;
+
+/** A translator's footnote block, e.g. `[1] Ὀδυσσάμενος …` (`stripFootnoteBlocks`, spec #48). */
+const FOOTNOTE_BLOCK = /^\[\d+\]/;
 
 function stripGutenbergMarkup(text: string): string {
 	return text.replace(ILLUSTRATION, '').replaceAll('_', '');
@@ -142,8 +180,25 @@ export function cleanSource(raw: string, overrides: CleaningOverrides = {}): str
 	}
 	flush();
 
-	return paragraphs
-		.map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
-		.filter((paragraph) => paragraph !== '')
-		.join('\n\n');
+	// Both per-book rules act on the ASSEMBLED paragraph, after its hard-wrapped lines are
+	// rejoined and its whitespace collapsed: "at the start of a paragraph" is only a well-defined
+	// position once the paragraph exists, and a rule applied line-by-line would strip a number
+	// from every wrapped line rather than from the one the printer put in the margin.
+	//
+	// Footnote blocks go first. They are dropped whole, so testing them before the number rule
+	// keeps the number rule from having to reason about text that is on its way out.
+	return (
+		paragraphs
+			.map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
+			.filter((paragraph) => !(overrides.stripFootnoteBlocks && FOOTNOTE_BLOCK.test(paragraph)))
+			.map((paragraph) =>
+				overrides.stripLeadingParagraphNumbers
+					? paragraph.replace(LEADING_PARAGRAPH_NUMBER, '')
+					: paragraph
+			)
+			// Filtered LAST as well as implied above: a paragraph that was nothing but its marginal
+			// number is now empty, and an empty paragraph must never reach the chunker.
+			.filter((paragraph) => paragraph !== '')
+			.join('\n\n')
+	);
 }
