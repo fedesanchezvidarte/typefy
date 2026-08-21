@@ -56,8 +56,15 @@ export interface MetadataReportEntry {
 	manifestYear?: number;
 	/** Open Library's description — what would be stored under the `default` summary key. */
 	description: string | null;
-	/** Locale keys the manifest overrides, e.g. `['es']`. */
-	overrides?: readonly string[];
+	/**
+	 * The manifest's hand-written blurbs, keyed by UI locale (spec #55).
+	 *
+	 * The TEXT, not just the locale keys the earlier report listed: since every book is now
+	 * required to declare every locale, a list of keys is the same two words on all 17 reports
+	 * and says nothing. What a reviewer needs is the length and the opening of each blurb — the
+	 * same pair the `description` row and block already give Open Library's.
+	 */
+	summaries?: Readonly<Record<string, string>>;
 	/** The reason the lookup produced nothing usable. Never fatal; always reported. */
 	failure?: string;
 }
@@ -137,8 +144,18 @@ function coverLines(cover: CoverReportEntry | undefined): string[] {
 	];
 }
 
-/** How much of the description the report quotes. See `metadataLines`. */
+/**
+ * How much of a summary the report quotes — Open Library's `default` and the manifest's
+ * hand-written blurbs alike. One constant deliberately: the two sit in the same section and a
+ * reviewer comparing them should not be comparing extracts of different lengths.
+ */
 const DESCRIPTION_PREVIEW = 200;
+
+/** The opening of `text`, marked with `…` when there is more of it. */
+function preview(text: string): string {
+	const opening = text.slice(0, DESCRIPTION_PREVIEW);
+	return text.length > DESCRIPTION_PREVIEW ? `${opening}…` : opening;
+}
 
 /**
  * The year, with **where it came from** (spec #34).
@@ -182,14 +199,16 @@ function yearCell(metadata: MetadataReportEntry): string {
  * visible in a diff; the opening is what makes it recognisable.
  */
 function metadataLines(metadata: MetadataReportEntry | undefined): string[] {
-	const overrides = metadata?.overrides ?? [];
+	const summaries = metadata?.summaries ?? {};
+	const locales = Object.keys(summaries).sort();
 
-	// "Nothing declared" is not a failure and must not read as one — most of the catalog will
-	// sit here. A hand-written override with no work id is still something declared, so it
-	// takes the table branch rather than this one.
+	// "Nothing declared" is not a failure and must not read as one. Since spec #55 no CATALOG
+	// book can reach this branch — a manifest entry without both blurbs is refused before the
+	// ingest runs — but it still describes a manifest the validator was not run against, and
+	// deleting it would trade a correct sentence for nothing.
 	if (
 		!metadata ||
-		(metadata.work === undefined && overrides.length === 0 && metadata.manifestYear === undefined)
+		(metadata.work === undefined && locales.length === 0 && metadata.manifestYear === undefined)
 	) {
 		return ['## Metadata', '', 'None declared — this book ships without a year or a summary.', ''];
 	}
@@ -202,13 +221,17 @@ function metadataLines(metadata: MetadataReportEntry | undefined): string[] {
 		'|---|---|',
 		`| Open Library work | ${metadata.work ? `\`${metadata.work}\`` : 'None declared'} |`,
 		`| First publication year | ${yearCell(metadata)} |`,
+		// One row per locale, length only — the opening goes in its own block below, the way the
+		// description's already does. Two 600-character blurbs inside table cells is a table
+		// nobody reads.
+		...(locales.length > 0
+			? locales.map(
+					(locale) =>
+						`| Summary (\`${locale}\`) | ${summaries[locale].length} characters (manifest) |`
+				)
+			: ['| Summary | None declared |']),
 		`| Description | ${
 			description ? `${description.length} characters, from Open Library` : 'None'
-		} |`,
-		`| Summary overrides | ${
-			overrides.length > 0
-				? overrides.map((locale) => `\`${locale}\` (manifest)`).join(', ')
-				: 'None'
 		} |`,
 		''
 	];
@@ -244,13 +267,21 @@ function metadataLines(metadata: MetadataReportEntry | undefined): string[] {
 		);
 	}
 
+	// The hand-written blurbs come FIRST, before Open Library's description, because they are
+	// what every reader actually sees: a locale key always wins, and since spec #55 every locale
+	// has one. `default` is now a fallback for a state the validator refuses to allow, and a
+	// report that led with it would rank the sources the wrong way round.
+	for (const locale of locales) {
+		out.push(`Opening of the \`${locale}\` summary, as declared in the manifest:`, '', '```');
+		out.push(preview(summaries[locale]), '```', '');
+	}
+
 	if (description) {
-		const preview = description.slice(0, DESCRIPTION_PREVIEW);
 		out.push(
 			'Opening of the description, as it would be stored under `default`:',
 			'',
 			'```',
-			description.length > DESCRIPTION_PREVIEW ? `${preview}…` : preview,
+			preview(description),
 			'```',
 			''
 		);

@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | `/works/OL450063W` |
 | First publication year | 1818 (Open Library) |
+| Summary (`en`) | 610 characters (manifest) |
+| Summary (`es`) | 586 characters (manifest) |
 | Description | 470 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+A student of natural philosophy works out how to give life to dead matter, succeeds, and is so appalled by what stands up in his laboratory that he runs from the room. Everything that follows comes fr…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Un estudiante de filosofía natural descubre cómo dar vida a la materia muerta, lo consigue y sale huyendo de su propio laboratorio, horrorizado por lo que acaba de incorporarse. Todo lo que viene desp…
+```
 
 Opening of the description, as it would be stored under `default`:
 

@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | `/works/OL362427W` |
 | First publication year | 1597 (Open Library) |
+| Summary (`en`) | 515 characters (manifest) |
+| Summary (`es`) | 569 characters (manifest) |
 | Description | 388 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+Two families in Verona have been feuding for so long that nobody remembers the cause, and a son of one meets a daughter of the other at a party he was never invited to. The play announces in its openi…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Dos familias de Verona llevan enemistadas tanto tiempo que nadie recuerda por qué, y el hijo de una conoce a la hija de la otra en una fiesta a la que no estaba invitado. La obra anuncia el final en s…
+```
 
 Opening of the description, as it would be stored under `default`:
 

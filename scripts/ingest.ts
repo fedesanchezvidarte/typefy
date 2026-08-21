@@ -582,9 +582,7 @@ function writeReport(prepared: PreparedBook): string {
 					? { openLibraryYear: prepared.metadata.openLibraryYear }
 					: {}),
 				description: prepared.metadata.description,
-				...(prepared.entry.summary
-					? { overrides: Object.keys(prepared.entry.summary).sort() }
-					: {}),
+				...(prepared.entry.summary ? { summaries: prepared.entry.summary } : {}),
 				...(prepared.metadata.failure ? { failure: prepared.metadata.failure } : {})
 			}
 		}),

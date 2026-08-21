@@ -27,13 +27,26 @@
 |---|---|
 | Open Library work | `/works/OL61982W` |
 | First publication year | -700 (manifest override; Open Library says 1488) |
+| Summary (`en`) | 596 characters (manifest) |
+| Summary (`es`) | 608 characters (manifest) |
 | Description | 473 characters, from Open Library |
-| Summary overrides | None |
 
 > The sources disagree: the manifest declares -700, Open Library reports 1488.
 > The manifest wins, so -700 is what gets written. Open Library reports the
 > earliest edition it has CATALOGUED, which is not the same fact as first publication —
 > confirm the declared year is still the better one before publishing.
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+The war at Troy is over and one commander still has not come home. His wife is besieged by suitors steadily eating through his estate, his son is old enough to go looking for him, and he himself is st…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Terminada la guerra de Troya, un solo caudillo sigue sin regresar. En su casa los pretendientes devoran su hacienda, su hijo ya tiene edad de salir a buscarlo y él está varado muy lejos de ambos. El p…
+```
 
 Opening of the description, as it would be stored under `default`:
 

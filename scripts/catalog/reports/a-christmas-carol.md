@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | `/works/OL32466W` |
 | First publication year | 1843 (Open Library) |
+| Summary (`en`) | 642 characters (manifest) |
+| Summary (`es`) | 608 characters (manifest) |
 | Description | 74 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+A miser is visited on Christmas Eve by his dead business partner and then by three spirits, who show him his own life from the outside: what made him, what he is missing, and where he is heading. Dick…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+En Nochebuena, un avaro recibe la visita de su socio muerto y después la de tres espíritus que le enseñan su propia vida desde fuera: lo que lo hizo así, lo que se está perdiendo y adónde va a parar. …
+```
 
 Opening of the description, as it would be stored under `default`:
 

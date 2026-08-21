@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | `/works/OL138052W` |
 | First publication year | 1865 (Open Library) |
+| Summary (`en`) | 614 characters (manifest) |
+| Summary (`es`) | 610 characters (manifest) |
 | Description | 473 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+A bored child follows a talking rabbit down a hole and spends the rest of the book being contradicted by everything she meets: a caterpillar with firm opinions, a cat that vanishes in pieces, a queen …
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Una niña aburrida sigue a un conejo parlante hasta el fondo de una madriguera y pasa el resto del libro siendo contradicha por todo lo que encuentra: una oruga con opiniones firmes, un gato que desapa…
+```
 
 Opening of the description, as it would be stored under `default`:
 

@@ -27,8 +27,21 @@
 |---|---|
 | Open Library work | `/works/OL66554W` |
 | First publication year | 1813 (Open Library) |
+| Summary (`en`) | 672 characters (manifest) |
+| Summary (`es`) | 639 characters (manifest) |
 | Description | 687 characters, from Open Library |
-| Summary overrides | None |
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+Mrs Bennet has five unmarried daughters and a neighbourhood newly supplied with wealthy young men, which she regards as a solvable problem. Her second daughter Elizabeth is quicker, prouder and less b…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+En la Inglaterra rural de la pequeña aristocracia, casar bien a una hija no es un capricho: es la única manera de asegurarle un techo. Sobre esa urgencia tan concreta levanta Austen una comedia del ju…
+```
 
 Opening of the description, as it would be stored under `default`:
 

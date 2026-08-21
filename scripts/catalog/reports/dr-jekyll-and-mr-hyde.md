@@ -27,13 +27,26 @@
 |---|---|
 | Open Library work | `/works/OL24156W` |
 | First publication year | 1886 (manifest override; Open Library says 1875) |
+| Summary (`en`) | 601 characters (manifest) |
+| Summary (`es`) | 646 characters (manifest) |
 | Description | 677 characters, from Open Library |
-| Summary overrides | None |
 
 > The sources disagree: the manifest declares 1886, Open Library reports 1875.
 > The manifest wins, so 1886 is what gets written. Open Library reports the
 > earliest edition it has CATALOGUED, which is not the same fact as first publication —
 > confirm the declared year is still the better one before publishing.
+
+Opening of the `en` summary, as declared in the manifest:
+
+```
+A respectable London lawyer notices that his old friend, a doctor of impeccable standing, has made a will in favour of a stranger nobody can describe without shuddering. The story is built as an inves…
+```
+
+Opening of the `es` summary, as declared in the manifest:
+
+```
+Un abogado londinense de intachable reputación descubre que su viejo amigo, un médico igual de respetable, ha dejado testamento a favor de un desconocido al que nadie logra describir sin estremecerse.…
+```
 
 Opening of the description, as it would be stored under `default`:
 
