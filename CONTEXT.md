@@ -49,17 +49,16 @@ trigger level, **G4** a long `awaiting` stall no longer decays cumulative WPM, a
 `cover_url` that fails to load falls back to the generated cover — plus a CI **coverage-manifest**
 gate that keeps every glossary promise honestly cited against a real E2E test going forward.
 
-Phase 5 is in progress. **5a** (spec #30 — header, landing and library polish) narrows the font
+Phase 5 is complete: every sub-phase below has shipped and its spec issue is closed. **5a** (spec #30 — header, landing and library polish) narrows the font
 axis to **reading font**, scoped to book text only (the typing screen's passage and the landing
 hero's passage) rather than the whole app, and swaps its three faces from IBM Plex to
 Roboto/Roboto Serif/Roboto Mono, dropping the optical-matching/no-reflow guarantee that swap can
 no longer make (ADR-0011's Phase 5a amendment); the header gains an icon-based pencil panel
 (reading font / palette / interface language) and an account menu, the landing headline and
-library sub-copy are trimmed, and a `/profile` stub route lands. Implementation and this glossary
-update are done; **QA sign-off for spec #30 had not yet landed in the issue as of this writing** —
-treat this Phase 5a entry as pending confirmation until that lands.
+library sub-copy are trimmed, and a `/profile` stub route lands. QA sign-off for spec #30 landed
+in the issue and it is closed.
 
-**5e** (spec #45) is in progress and is **rendering only** — no re-chunk, no migration, no progress
+**5e** (spec #45) is complete and was **rendering only** — no re-chunk, no migration, no progress
 touched. It turns the typing screen into a book page: the **sheet** becomes a **page card** pinned to
 the viewport, paragraphs render as blocks separated by a real blank line (position indices staying
 global across the split), the **teleprompter** band widens to a three-line bottom margin so the page
@@ -68,6 +67,10 @@ where the card's height comes from. The typing load starts reading a light **cha
 header can name the chapter the active page falls in. Restarting a page, picking another book and
 the **summary**'s two actions are removed outright; resetting a book's progress is deferred to the
 **book detail screen**, behind a confirmation.
+
+A follow-up to 5d, spec #55, is also complete: the book manifest now requires a hand-written summary
+per UI locale, and ingestion reports each locale's blurb
+([ADR-0018](docs/adr/0018-per-locale-book-summaries.md)).
 
 **5b** (spec #32) is now complete and replaces the **passage** with the **page** — a screenful
 sized by a dual character/line budget, carrying the source's paragraph breaks as newlines the user
@@ -109,7 +112,7 @@ Phased roadmap:
   glossary closing five gaps, plus a CI coverage-manifest floor). The order is load-bearing the same
   way Phase 3's was: 4b polishes and 4c covers a typing screen whose measurement axis 4a defines, so
   both would have to be redone against it otherwise.
-- **Phase 5** — 🚧 Polish, then the page model and the book's structure. **5a** (✅ spec #30 — narrows
+- **Phase 5** — ✅ Polish, then the page model and the book's structure. **5a** (✅ spec #30 — narrows
   **Font family** to **Reading font**, scoped to book text only, with an IBM Plex → Roboto family swap
   and the optical-matching/no-reflow guarantee dropped for that axis; header pencil panel and account
   menu; landing headline and library copy trimmed; `/profile` stub route), **5b** (✅ spec #32 — the
@@ -128,7 +131,7 @@ Phased roadmap:
   ([ADR-0018](docs/adr/0018-per-locale-book-summaries.md),
   [ADR-0019](docs/adr/0019-ingest-time-open-library-metadata.md),
   [ADR-0020](docs/adr/0020-chapter-progress-pure-module.md)) — the layer that actually surfaces
-  5c's structure to a reader), and **5e** (🚧 spec #45 — **the book page**: the sheet becomes a
+  5c's structure to a reader), and **5e** (✅ spec #45 — **the book page**: the sheet becomes a
   **page card** pinned to the viewport, paragraphs render as blocks separated by a real blank line,
   the **teleprompter** band widens so the page sits still until the caret nears the bottom, and the
   chrome moves into the app header's route-fed center slot, which is what frees the height the card
