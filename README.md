@@ -107,4 +107,9 @@ migrations and troubleshooting: [`docs/development.md`](docs/development.md).
 
 ## License
 
-TBD.
+The code is released under the [MIT License](LICENSE).
+
+The MIT License covers the code only. Book texts come from Project Gutenberg and cover images from
+Wikimedia Commons. Each keeps its own terms, recorded per book in
+[`scripts/catalog/books.json`](scripts/catalog/books.json) (`license`, `coverLicense` and
+`coverSource`).
